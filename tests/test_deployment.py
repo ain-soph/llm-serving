@@ -56,6 +56,12 @@ class DeploymentTests(unittest.TestCase):
             asr = yaml.safe_load((output / "conf.d/asr.yaml").read_text())
             args = shlex.split(asr["models"]["qwen3-asr-1.7b"]["cmd"])
             self.assertEqual(args[args.index("--aligner") + 1], str(models / "qwen3-forcedaligner-0.6b"))
+            rerank = yaml.safe_load((output / "conf.d/rerank.yaml").read_text())
+            command = shlex.split(rerank["macros"]["rerank-cmd"])
+            self.assertEqual(command[:2], [str(root / ".venv/bin/python"), str(root / "rerank/server.py")])
+            for size, variant in [("0.6b", "bf16"), ("4b", "bf16"), ("8b", "q8_0")]:
+                args = shlex.split(rerank["models"]["qwen3-reranker-" + size]["cmd"])
+                self.assertEqual(args[args.index("--model") + 1], str(models / "qwen3-reranker" / f"mlx-{size}-{variant}"))
             env = environment(config)
             self.assertEqual(env["H3_VIDEO_FETCH_HOSTS"], "")
             self.assertEqual(env["H3_VIDEO_LSW_URL"], "http://127.0.0.1:8081")

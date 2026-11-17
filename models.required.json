@@ -10,15 +10,32 @@
     "minimax-h3-image",
     "whisper-large-v3-mlx",
     "qwen3-asr-1.7b",
-    "qwen3-forcedaligner-0.6b"
+    "qwen3-forcedaligner-0.6b",
+    "qwen3-reranker/mlx-0.6b-bf16",
+    "qwen3-reranker/mlx-4b-bf16",
+    "qwen3-reranker/mlx-8b-q8_0"
   ],
   "files": [
     "strata-mtp/mtp-q2_0.gguf",
     "embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf",
     "embeddinggemma-2/ggml-org/mmproj-embeddinggemma-2-BF16.gguf",
-    "qwen3-reranker/qwen3-reranker-0.6b-q8_0.gguf",
-    "qwen3-reranker/qwen3-reranker-4b-q8_0.gguf",
-    "qwen3-reranker/qwen3-reranker-8b-q8_0.gguf",
-    "nemotron-3.5-transcribe-30b-a4b-gguf/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-AD-IQ4_NL.gguf"
+    "nemotron-3.5-transcribe-30b-a4b-gguf/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-AD-IQ4_NL.gguf",
+    "qwen3-reranker/mlx-0.6b-bf16/config.json",
+    "qwen3-reranker/mlx-0.6b-bf16/model.safetensors",
+    "qwen3-reranker/mlx-0.6b-bf16/model.safetensors.index.json",
+    "qwen3-reranker/mlx-0.6b-bf16/tokenizer.json",
+    "qwen3-reranker/mlx-0.6b-bf16/tokenizer_config.json",
+    "qwen3-reranker/mlx-4b-bf16/config.json",
+    "qwen3-reranker/mlx-4b-bf16/model-00001-of-00002.safetensors",
+    "qwen3-reranker/mlx-4b-bf16/model-00002-of-00002.safetensors",
+    "qwen3-reranker/mlx-4b-bf16/model.safetensors.index.json",
+    "qwen3-reranker/mlx-4b-bf16/tokenizer.json",
+    "qwen3-reranker/mlx-4b-bf16/tokenizer_config.json",
+    "qwen3-reranker/mlx-8b-q8_0/config.json",
+    "qwen3-reranker/mlx-8b-q8_0/model-00001-of-00002.safetensors",
+    "qwen3-reranker/mlx-8b-q8_0/model-00002-of-00002.safetensors",
+    "qwen3-reranker/mlx-8b-q8_0/model.safetensors.index.json",
+    "qwen3-reranker/mlx-8b-q8_0/tokenizer.json",
+    "qwen3-reranker/mlx-8b-q8_0/tokenizer_config.json"
   ]
 }

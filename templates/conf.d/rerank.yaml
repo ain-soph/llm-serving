@@ -1,41 +1,43 @@
+# Python 3.15 validation: peak wired deltas 2772 / 8694 / 9869 MiB, including load.
+# Capacities include a margin; see docs/rerank-validation.json.
 macros:
   "rerank-cmd": >
-    @LLAMA_SERVER@ --reranking --host 127.0.0.1 --port ${PORT}
-    -c 8192 -b 8192 -ub 8192 -np 1
+    @PYTHON@ @ROOT@/rerank/server.py --host 127.0.0.1 --port ${PORT}
+    --max-batch-tokens 8192 --cache-mb 256
 
 models:
   "qwen3-reranker-0.6b":
     name: "Qwen3 Reranker 0.6B"
-    description: "Fast reranker (20 docs ~0.4 s)"
-    cmd: ${rerank-cmd} -m @MODELS@/qwen3-reranker/qwen3-reranker-0.6b-q8_0.gguf
+    description: "Fast reranker (20 docs ~0.13 s)"
+    cmd: ${rerank-cmd} --model-id qwen3-reranker-0.6b --model @MODELS@/qwen3-reranker/mlx-0.6b-bf16
     capabilities:
       reranker: true
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 3000
+      gpu: 3500
     evict_cost: 0
 
   "qwen3-reranker-4b":
     name: "Qwen3 Reranker 4B"
-    description: "Default reranker (20 docs ~1.6 s)"
-    cmd: ${rerank-cmd} -m @MODELS@/qwen3-reranker/qwen3-reranker-4b-q8_0.gguf
+    description: "Default reranker (20 docs ~0.84 s)"
+    cmd: ${rerank-cmd} --model-id qwen3-reranker-4b --model @MODELS@/qwen3-reranker/mlx-4b-bf16
     capabilities:
       reranker: true
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 7000
+      gpu: 10000
     evict_cost: 0
 
   "qwen3-reranker-8b":
     name: "Qwen3 Reranker 8B"
-    description: "Most accurate reranker (20 docs ~2.6 s)"
-    cmd: ${rerank-cmd} -m @MODELS@/qwen3-reranker/qwen3-reranker-8b-q8_0.gguf
+    description: "Most accurate reranker (20 docs ~1.80 s)"
+    cmd: ${rerank-cmd} --model-id qwen3-reranker-8b --model @MODELS@/qwen3-reranker/mlx-8b-q8_0
     capabilities:
       reranker: true
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 10500
+      gpu: 11000
     evict_cost: 0

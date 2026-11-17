@@ -18,7 +18,7 @@ def main():
     a = p.parse_args()
     c = json.loads(a.config.read_text())
     errors = []
-    for name in ("mlx.core", "h3_image_mlx.api", "mlx_whisper", "mlx_qwen3_asr", "numpy", "soundfile",
+    for name in ("mlx.core", "mlx_lm", "h3_image_mlx.api", "mlx_whisper", "mlx_qwen3_asr", "numpy", "soundfile",
                  "jinja2", "regex", "yaml", "requests", "psutil"):
         try:
             importlib.import_module(name)

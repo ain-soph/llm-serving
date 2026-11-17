@@ -6,6 +6,8 @@ requires-python = ">=3.15,<3.16"
 dependencies = [
   "h3-image-mlx",
   "mlx==0.32.4",
+  "mlx-lm==0.32.2",
+  "transformers==5.23.0",
   "mlx-whisper==0.4.3",
   "mlx-qwen3-asr[aligner]==0.4.4",
   "numpy==2.5.3",

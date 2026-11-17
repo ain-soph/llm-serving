@@ -55,30 +55,30 @@
     },
     "qwen3-reranker-0.6b": {
       "relative_paths": [
-        "qwen3-reranker/qwen3-reranker-0.6b-q8_0.gguf"
+        "qwen3-reranker/mlx-0.6b-bf16"
       ],
-      "files": 1,
-      "bytes": 639153184,
-      "GB": 0.639153,
-      "allocated_bytes": 639156224
+      "files": 8,
+      "bytes": 1203035501,
+      "GB": 1.203036,
+      "allocated_bytes": 1203060736
     },
     "qwen3-reranker-4b": {
       "relative_paths": [
-        "qwen3-reranker/qwen3-reranker-4b-q8_0.gguf"
+        "qwen3-reranker/mlx-4b-bf16"
       ],
-      "files": 1,
-      "bytes": 4279675616,
-      "GB": 4.279676,
-      "allocated_bytes": 4285358080
+      "files": 9,
+      "bytes": 8055074510,
+      "GB": 8.055075,
+      "allocated_bytes": 8055103488
     },
     "qwen3-reranker-8b": {
       "relative_paths": [
-        "qwen3-reranker/qwen3-reranker-8b-q8_0.gguf"
+        "qwen3-reranker/mlx-8b-q8_0"
       ],
-      "files": 1,
-      "bytes": 8047131008,
-      "GB": 8.047131,
-      "allocated_bytes": 8052858880
+      "files": 10,
+      "bytes": 9228450092,
+      "GB": 9.22845,
+      "allocated_bytes": 9234763776
     },
     "nemotron-3.5-transcribe": {
       "relative_paths": [
@@ -171,10 +171,10 @@
       "allocated_bytes": 1540333568
     },
     "qwen3-reranker": {
-      "files": 138,
-      "bytes": 116349144084,
-      "GB": 116.349144,
-      "allocated_bytes": 116428382208
+      "files": 29,
+      "bytes": 18486562252,
+      "GB": 18.486562,
+      "allocated_bytes": 18492936192
     },
     "nemotron-3.5-transcribe-30b-a4b-gguf": {
       "files": 4,

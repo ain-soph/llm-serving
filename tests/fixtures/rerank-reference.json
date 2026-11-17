@@ -1,0 +1,90 @@
+{
+  "reference": "Official Transformers BF16 recipe, MPS; saved 2026-11-16. Numerical agreement on these 11 pairs is not a general accuracy guarantee.",
+  "cases": [
+    {
+      "query": "What is the capital of France?",
+      "documents": [
+        "Paris is the capital and most populous city of France.",
+        "Berlin is the capital of Germany.",
+        "The Eiffel Tower was completed in 1889 for the World's Fair.",
+        "Bananas are rich in potassium."
+      ]
+    },
+    {
+      "query": "如何在 macOS 上查看 GPU 显存占用？",
+      "documents": [
+        "在 macOS 上可以用 vm_stat 查看 Pages wired down，或在活动监视器的内存标签页里查看 GPU 相关内存。",
+        "Windows 的任务管理器可以显示 GPU 专用显存的使用量。",
+        "红烧肉的做法：先焯水，再炒糖色，最后小火慢炖一小时。",
+        "Apple Silicon 采用统一内存，CPU 和 GPU 共享同一块内存。"
+      ]
+    },
+    {
+      "query": "how does speculative decoding speed up LLM inference",
+      "documents": [
+        "Speculative decoding uses a small draft model to propose several tokens that the large model verifies in one forward pass, accepting the longest matching prefix.",
+        "Quantization reduces model weights to fewer bits to save memory.",
+        "The Great Wall of China is visible from low Earth orbit only under very specific conditions."
+      ]
+    }
+  ],
+  "official_bf16_scores": {
+    "0.6b": [
+      [
+        0.994445075296309,
+        0.0007554056327295276,
+        5.5622062736470347e-05,
+        1.2931138652463682e-05
+      ],
+      [
+        0.9999741325689185,
+        0.9970189672701452,
+        7.36859298114082e-05,
+        0.334589441253186
+      ],
+      [
+        0.9998204720306533,
+        0.0026316739748845795,
+        3.4808121961114686e-05
+      ]
+    ],
+    "4b": [
+      [
+        0.8354835371034369,
+        6.814872211615988e-05,
+        0.0028009269671209736,
+        2.7535691114583473e-05
+      ],
+      [
+        0.9996430293649623,
+        0.9937100978631075,
+        6.643433442159853e-06,
+        0.8354835371034369
+      ],
+      [
+        0.9978172835546547,
+        0.20181322226037884,
+        1.0552637679571197e-06
+      ]
+    ],
+    "8b": [
+      [
+        0.9525741268224334,
+        0.00011501735545699999,
+        0.0002653023768982879,
+        5.955139348629957e-06
+      ],
+      [
+        0.9996646498695336,
+        0.9669140216112958,
+        9.368717268777097e-06,
+        0.46879062662624377
+      ],
+      [
+        0.9896718474806949,
+        0.18242552380635635,
+        1.7880645357111512e-06
+      ]
+    ]
+  }
+}

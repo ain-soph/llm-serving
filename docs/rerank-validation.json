@@ -1,0 +1,103 @@
+{
+  "date": "2026-11-16",
+  "python": "3.15.2",
+  "mlx": "0.32.4",
+  "mlx_lm": "0.32.2",
+  "transformers": "5.23.0",
+  "gpu": "exclusive; portable_rerank",
+  "hardware": "Apple M5 Ultra / 96 GiB / macOS 27",
+  "memory_method": "Sampled process RSS and system wired delta every 0.3 s from before server start through all checks, warm-up and timed requests. Delta includes system noise, not allocated GPU bytes.",
+  "results": [
+    {
+      "model": "qwen3-reranker-0.6b",
+      "reference_pairs": 11,
+      "same_rankings": true,
+      "max_absolute_score_error": 0.00122342268312714,
+      "api_checks": "passed",
+      "benchmark": {
+        "documents": 20,
+        "concurrency": 1,
+        "warmup_requests": 1,
+        "latency_samples_seconds": [
+          0.13404387500486337,
+          0.1380081249808427,
+          0.13986483300686814
+        ],
+        "mean_seconds": 0.13730561099752472,
+        "median_seconds": 0.1380081249808427,
+        "prompt_tokens": 9950,
+        "input_tokens_per_second": 72466.08443539408,
+        "measurement": "HTTP end-to-end input tokens/s, not isolated kernel prefill"
+      },
+      "peak_rss_bytes": 1657405440,
+      "peak_wired_delta_bytes": 2906636288
+    },
+    {
+      "model": "qwen3-reranker-4b",
+      "reference_pairs": 11,
+      "same_rankings": true,
+      "max_absolute_score_error": 0.010255582096726473,
+      "api_checks": "passed",
+      "benchmark": {
+        "documents": 20,
+        "concurrency": 1,
+        "warmup_requests": 1,
+        "latency_samples_seconds": [
+          0.8462157500034664,
+          0.8467281250050291,
+          0.8467952499922831
+        ],
+        "mean_seconds": 0.8465797083335929,
+        "median_seconds": 0.8467281250050291,
+        "prompt_tokens": 9950,
+        "input_tokens_per_second": 11753.175633733976,
+        "measurement": "HTTP end-to-end input tokens/s, not isolated kernel prefill"
+      },
+      "peak_rss_bytes": 8452784128,
+      "peak_wired_delta_bytes": 9115975680
+    },
+    {
+      "model": "qwen3-reranker-8b",
+      "reference_pairs": 11,
+      "same_rankings": true,
+      "max_absolute_score_error": 0.0044195934722133234,
+      "api_checks": "passed",
+      "benchmark": {
+        "documents": 20,
+        "concurrency": 1,
+        "warmup_requests": 1,
+        "latency_samples_seconds": [
+          1.7941517910221592,
+          1.793818874983117,
+          1.7919727920088917
+        ],
+        "mean_seconds": 1.7933144860047225,
+        "median_seconds": 1.793818874983117,
+        "prompt_tokens": 9950,
+        "input_tokens_per_second": 5548.385449206591,
+        "measurement": "HTTP end-to-end input tokens/s, not isolated kernel prefill"
+      },
+      "peak_rss_bytes": 9679814656,
+      "peak_wired_delta_bytes": 10348855296
+    }
+  ],
+  "configuration": {
+    "max_batch_tokens": 8192,
+    "cache_mb": 256,
+    "workers": 1,
+    "weight_precision": [
+      "BF16",
+      "BF16",
+      "Q8_0 equivalent MLX 8-bit group32; FP16 scales/biases"
+    ],
+    "activation_precision": [
+      "BF16",
+      "BF16",
+      "FP16"
+    ],
+    "kv_cache": "No generation KV cache reuse; full forward per request",
+    "decode_tokens_per_second": null,
+    "isolated_kernel_prefill_tokens_per_second": null
+  },
+  "scope": "Direct HTTP test of portable wrappers and unified Python environment, not a clean-system restore or through-gateway inference. Historical llama.cpp baseline was not rerun."
+}
