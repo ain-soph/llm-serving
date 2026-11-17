@@ -143,6 +143,29 @@
       "bytes": 23914052190,
       "GB": 23.914052,
       "allocated_bytes": 23914123264
+    },
+    "qwen-image-2.1": {
+      "relative_paths": [
+        "qwen-image-2.1/base/model_index.json",
+        "qwen-image-2.1/base/processor",
+        "qwen-image-2.1/base/scheduler",
+        "qwen-image-2.1/base/transformer/config.json",
+        "qwen-image-2.1/base/text_encoder",
+        "qwen-image-2.1/base/vae",
+        "qwen-image-2.1/turbo/model_index.json",
+        "qwen-image-2.1/turbo/processor",
+        "qwen-image-2.1/turbo/scheduler",
+        "qwen-image-2.1/turbo/transformer/config.json",
+        "qwen-image-2.1/w8a8/base/model.safetensors",
+        "qwen-image-2.1/w8a8/turbo/model.safetensors",
+        "qwen-image-2.1/w8a8/te/model.safetensors"
+      ],
+      "measured_on": "2026-11-17",
+      "files": 27,
+      "bytes": 42777043653,
+      "GB": 42.777044,
+      "allocated_bytes": 42824605696,
+      "note": "All four entries: W8A8 DiTs (base, turbo), BF16 and INT8 text encoders, FP32 VAE. The BF16 DiT files are not read when MFLUX_QWEN21_W8A8 is set; only transformer/config.json is."
     }
   },
   "current_directory_inventory_including_comparison_models": {

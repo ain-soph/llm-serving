@@ -13,7 +13,15 @@
     "qwen3-forcedaligner-0.6b",
     "qwen3-reranker/mlx-0.6b-bf16",
     "qwen3-reranker/mlx-4b-bf16",
-    "qwen3-reranker/mlx-8b-q8_0"
+    "qwen3-reranker/mlx-8b-q8_0",
+    "qwen-image-2.1/base/processor",
+    "qwen-image-2.1/base/scheduler",
+    "qwen-image-2.1/base/text_encoder",
+    "qwen-image-2.1/base/vae",
+    "qwen-image-2.1/turbo/processor",
+    "qwen-image-2.1/turbo/scheduler",
+    "qwen-image-2.1/turbo/text_encoder",
+    "qwen-image-2.1/turbo/vae"
   ],
   "files": [
     "strata-mtp/mtp-q2_0.gguf",
@@ -36,6 +44,13 @@
     "qwen3-reranker/mlx-8b-q8_0/model-00002-of-00002.safetensors",
     "qwen3-reranker/mlx-8b-q8_0/model.safetensors.index.json",
     "qwen3-reranker/mlx-8b-q8_0/tokenizer.json",
-    "qwen3-reranker/mlx-8b-q8_0/tokenizer_config.json"
+    "qwen3-reranker/mlx-8b-q8_0/tokenizer_config.json",
+    "qwen-image-2.1/base/model_index.json",
+    "qwen-image-2.1/base/transformer/config.json",
+    "qwen-image-2.1/turbo/model_index.json",
+    "qwen-image-2.1/turbo/transformer/config.json",
+    "qwen-image-2.1/w8a8/base/model.safetensors",
+    "qwen-image-2.1/w8a8/turbo/model.safetensors",
+    "qwen-image-2.1/w8a8/te/model.safetensors"
   ]
 }

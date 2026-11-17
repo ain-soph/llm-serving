@@ -5,6 +5,7 @@ description = "Local model APIs and reproducible deployment for Apple Silicon"
 requires-python = ">=3.15,<3.16"
 dependencies = [
   "h3-image-mlx",
+  "mflux",
   "mlx==0.32.4",
   "mlx-lm==0.32.2",
   "transformers==5.23.0",
@@ -27,4 +28,5 @@ environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
 
 [tool.uv.sources]
 h3-image-mlx = { git = "https://github.com/ain-soph/h3-image-mlx", rev = "ce8d4a35afefdab11a7f54abe5cfa034ea247c94" }
+mflux = { git = "https://github.com/ain-soph/mflux", rev = "e27c18d7aa425f0849f5ac1d6e03cc4bc2adb451" }
 mlx-whisper = { git = "https://github.com/ain-soph/mlx-examples", rev = "43308d480b4c647b3c542b8478054706ce1a3795", subdirectory = "whisper" }

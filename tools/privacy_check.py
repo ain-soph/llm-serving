@@ -65,6 +65,8 @@ def main():
         logs = subprocess.check_output(["git", "log", "--all", "--format=%an%n%ae%n%cn%n%ce%n%B"], cwd=ROOT)
         # GitHub's account-associated noreply identity is intentionally public.
         logs = re.sub(rb"\d+\+[A-Za-z0-9-]+@users\.noreply\.github\.com", b"github-noreply", logs)
+        # So is the generic co-author address of commits written with Claude Code.
+        logs = logs.replace(b"<noreply" + b"@anthropic.com>", b"<anthropic-noreply>")
         problems = inspect_file(Path("history.txt"), logs, literals)
         if problems:
             failures += 1

@@ -62,6 +62,16 @@ class DeploymentTests(unittest.TestCase):
             for size, variant in [("0.6b", "bf16"), ("4b", "bf16"), ("8b", "q8_0")]:
                 args = shlex.split(rerank["models"]["qwen3-reranker-" + size]["cmd"])
                 self.assertEqual(args[args.index("--model") + 1], str(models / "qwen3-reranker" / f"mlx-{size}-{variant}"))
+            qwen = yaml.safe_load((output / "conf.d/qwen-image.yaml").read_text())
+            command = shlex.split(qwen["macros"]["qwen-image-cmd"])
+            self.assertEqual(command[:2], [str(root / ".venv/bin/python"), str(root / "qwen-image/server.py")])
+            for model_id, variant in [("qwen-image-2.1-turbo", "turbo"), ("qwen-image-2.1-int8", "base")]:
+                entry = qwen["models"][model_id]
+                args = shlex.split(entry["cmd"])
+                self.assertEqual(args[args.index("--model") + 1], str(models / "qwen-image-2.1" / variant))
+                self.assertIn(f"MFLUX_QWEN21_W8A8={models / 'qwen-image-2.1/w8a8' / variant}", entry["env"])
+            self.assertIn(f"MFLUX_QWEN21_TE_W8A8={models / 'qwen-image-2.1/w8a8/te'}",
+                          qwen["models"]["qwen-image-2.1-int8"]["env"])
             env = environment(config)
             self.assertEqual(env["H3_VIDEO_FETCH_HOSTS"], "")
             self.assertEqual(env["H3_VIDEO_LSW_URL"], "http://127.0.0.1:8081")

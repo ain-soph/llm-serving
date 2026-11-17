@@ -66,7 +66,7 @@ Transformers 5.23.0，具体依赖由 `uv.lock` 固定。
 
 已保存的官方分数及公开输入在 [`rerank-reference.json`](../tests/fixtures/rerank-reference.json)。
 小样本数值和排序一致不代表所有查询准确率相同。历史结果见
-[实测说明](benchmarks.md)；新环境检查结果见 [验证记录](rerank-validation.json)。
+[性能与资源报告](performance.md)；新环境检查结果见 [验证记录](rerank-validation.json)。
 
 ## Python 3.15.2 独占复测
 
