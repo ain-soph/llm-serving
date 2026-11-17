@@ -14,6 +14,7 @@ Qwen-Image-2.1，提供 OpenAI 兼容的 `/v1/images/generations` 和 `/v1/image
 | `qwen-image-2.1-turbo-int8` | 8 | W8A8 | INT8（页缓存少 8.8 GB，误差略大） |
 | `qwen-image-2.1` | 40 | W8A8 | BF16（支持 `negative_prompt` + `guidance`） |
 | `qwen-image-2.1-int8` | 40 | W8A8 | INT8 |
+| `qwen-image-2.1-turbo-pe` | 8 | W8A8 | BF16；不传 `prompt_enhance` 时默认 `llm`（`QWEN_IMAGE_DEFAULT_ENHANCE=llm`，需要下面的系统提示词） |
 
 请求扩展字段：`seed`、`steps`、`negative_prompt` + `guidance`（仅 40 步版）、`reference_resolution`（编辑时每张参考图的边长；
 默认 1–3 张 1024，更多张时按总面积约 3 MP 缩小，最小 512）。`background=transparent` 返回 RGBA PNG／WebP；
@@ -47,7 +48,7 @@ Qwen-Image-2.1，提供 OpenAI 兼容的 `/v1/images/generations` 和 `/v1/image
 ```
 
 运行时设置了 `MFLUX_QWEN21_W8A8`，不会读取官方 BF16 DiT（`transformer/*.safetensors`，每份约 14.2 GB），只读它的
-`config.json`。四个入口合计约 42.8 GB。
+`config.json`。五个入口合计约 42.8 GB。
 
 ## 准备步骤
 

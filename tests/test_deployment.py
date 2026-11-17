@@ -73,6 +73,13 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(args[1], str(root / "decisions/decider/server.py"))
             self.assertEqual(args[args.index("--model") + 1], str(models / "pplx-decider-flash-v1.3"))
             self.assertIn("--w8a8", args)
+            baselabs = yaml.safe_load((output / "conf.d/decisions-baselabs.yaml").read_text())
+            args = shlex.split(baselabs["models"]["elephant-1-int8"]["cmd"])
+            self.assertEqual(args[1], str(root / "decisions/jev/server.py"))
+            self.assertEqual(args[args.index("--model") + 1], str(models / "elephant-1"))
+            self.assertEqual(args[args.index("--quant") + 1], "w8a8")
+            qwen_pe = yaml.safe_load((output / "conf.d/qwen-image.yaml").read_text())["models"]["qwen-image-2.1-turbo-pe"]
+            self.assertIn("QWEN_IMAGE_DEFAULT_ENHANCE=llm", qwen_pe["env"])
             tts = yaml.safe_load((output / "conf.d/tts.yaml").read_text())
             self.assertEqual(shlex.split(tts["macros"]["tts-cmd"])[1], str(root / "tts/server.py"))
             args = shlex.split(tts["models"]["qwen3-tts-clone"]["cmd"])

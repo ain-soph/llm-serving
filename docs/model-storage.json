@@ -284,6 +284,17 @@
       "GB": 29.770404,
       "allocated_bytes": 29770428416,
       "note": "Plus the shared Qwen3-ForcedAligner-0.6B (counted under qwen3-asr-1.7b)."
+    },
+    "elephant-1": {
+      "relative_paths": [
+        "elephant-1"
+      ],
+      "measured_on": "2026-11-17",
+      "files": 15,
+      "bytes": 18841850853,
+      "GB": 18.841851,
+      "allocated_bytes": 18841886720,
+      "note": "Both entries (8-bit, W8A8) quantize the official BF16 file at load."
     }
   },
   "current_directory_inventory_including_comparison_models": {

@@ -4,6 +4,7 @@
 # Zero-copy page-aligned weights streamed layer by layer; MLX cache 6 GB for the denoiser (2 GB with references),
 # 2 GB for the VAE, which decodes in two-pass row strips. Measured wired peak of a whole generation: 6.7-9.0 GB
 # (text to image up to 2400x1792), 5.6-8.4 GB with 3-10 references -> capacity 11000 fits next to the chat model.
+# -pe: requests without prompt_enhance are rewritten by the chat model (prompt_enhance=llm).
 # Weight preparation: docs/qwen-image.md. Numbers: docs/performance.md.
 macros:
   "qwen-image-cmd": >
@@ -46,6 +47,29 @@ models:
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
       - "QWEN_IMAGE_CACHE_MB=6144"
       - "QWEN_IMAGE_REF_CACHE_MB=2048"
+    capabilities:
+      in: [text, image]
+      out: [image]
+    checkEndpoint: /health
+    ttl: 600
+    capacities:
+      gpu: 11000
+    evict_cost: 0
+
+  "qwen-image-2.1-turbo-pe":
+    name: "Qwen Image 2.1 Turbo + prompt enhance"
+    description: "As qwen-image-2.1-turbo, but short prompts are first rewritten by the chat model with the official Qwen system prompts (+~30 s; see revised_prompt)"
+    cmd: ${qwen-image-cmd} --turbo --model @MODELS@/qwen-image-2.1/turbo --model-id qwen-image-2.1-turbo-pe
+    env:
+      - "MFLUX_ZERO_COPY=1"
+      - "MFLUX_ZERO_COPY_STREAM=1"
+      - "MFLUX_QWEN21_W8A8=@MODELS@/qwen-image-2.1/w8a8/turbo"
+      - "MFLUX_QWEN21_VAE_STRIP_FROM=2"
+      - "MFLUX_QWEN21_VAE_STRIP_BUDGET=16384"
+      - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
+      - "QWEN_IMAGE_CACHE_MB=6144"
+      - "QWEN_IMAGE_REF_CACHE_MB=2048"
+      - "QWEN_IMAGE_DEFAULT_ENHANCE=llm"   # needs the system prompts, see docs/qwen-image.md
     capabilities:
       in: [text, image]
       out: [image]

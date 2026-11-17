@@ -1,0 +1,32 @@
+{"id": "text1", "cat": "text", "prompt": "A coffee shop chalkboard menu that says 'Espresso 3' and 'Latte 4.5'"}
+{"id": "text2", "cat": "text", "prompt": "Movie poster titled 'THE LAST ORBIT' with a lone astronaut"}
+{"id": "text3", "cat": "text", "prompt": "一张写着“春节快乐”的红色贺卡"}
+{"id": "text4", "cat": "text", "prompt": "A neon sign reading 'OPEN 24 HOURS' in a rainy alley"}
+{"id": "text5", "cat": "text", "prompt": "A book cover: 'Gardens of Kyoto' by Emi Sato, minimalist"}
+{"id": "text6", "cat": "text", "prompt": "A road sign that says 'SLOW - DEER CROSSING'"}
+{"id": "count1", "cat": "count", "prompt": "Three red apples and two green pears on a wooden table"}
+{"id": "count2", "cat": "count", "prompt": "Five birds sitting on a power line"}
+{"id": "count3", "cat": "count", "prompt": "Four children holding seven balloons"}
+{"id": "count4", "cat": "count", "prompt": "A plate with exactly six sushi pieces"}
+{"id": "count5", "cat": "count", "prompt": "Two cats and one dog sleeping on a sofa"}
+{"id": "space1", "cat": "spatial", "prompt": "A blue cube on top of a red sphere, a yellow cone to the left"}
+{"id": "space2", "cat": "spatial", "prompt": "A cat under a table, a lamp behind the table"}
+{"id": "space3", "cat": "spatial", "prompt": "A bicycle to the right of a mailbox, a tree in the background"}
+{"id": "space4", "cat": "spatial", "prompt": "A small boat in front of a large lighthouse at sunset"}
+{"id": "space5", "cat": "spatial", "prompt": "A clock above a fireplace, two armchairs facing each other below it"}
+{"id": "short1", "cat": "short", "prompt": "cozy cabin"}
+{"id": "short2", "cat": "short", "prompt": "cyberpunk street"}
+{"id": "short3", "cat": "short", "prompt": "一只在雨中弹吉他的柯基"}
+{"id": "short4", "cat": "short", "prompt": "astronaut eating ramen"}
+{"id": "short5", "cat": "short", "prompt": "autumn forest"}
+{"id": "short6", "cat": "short", "prompt": "product shot of a perfume bottle"}
+{"id": "style1", "cat": "style", "prompt": "Portrait of an elderly fisherman, dramatic side lighting"}
+{"id": "style2", "cat": "style", "prompt": "Watercolor of a harbor town in the morning"}
+{"id": "style3", "cat": "style", "prompt": "Isometric illustration of a tiny bakery"}
+{"id": "style4", "cat": "style", "prompt": "Infographic showing the water cycle with labels"}
+{"id": "edit1", "cat": "edit", "prompt": "Make it a snowy winter scene", "images": ["src/cafe.png"]}
+{"id": "edit2", "cat": "edit", "prompt": "Change the cat into a small brown dog", "images": ["src/cafe.png"]}
+{"id": "edit3", "cat": "edit", "prompt": "Turn this into a watercolor painting", "images": ["src/bicycle.png"]}
+{"id": "edit4", "cat": "edit", "prompt": "Replace the sign text with 'CLOSED'", "images": ["src/bicycle.png"]}
+{"id": "edit5", "cat": "edit", "prompt": "Put the person from image 2 next to the bicycle in image 1", "images": ["src/bicycle.png", "src/figure.png"]}
+{"id": "edit6", "cat": "edit", "prompt": "Make it night time with the lamps lit", "images": ["src/cafe.png"]}

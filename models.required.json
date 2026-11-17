@@ -35,7 +35,8 @@
     "qwen3-tts/1.7B-CustomVoice",
     "qwen3-tts/1.7B-Base",
     "qwen3-tts/1.7B-VoiceDesign",
-    "sov-transcribe-1/mlx-q8"
+    "sov-transcribe-1/mlx-q8",
+    "elephant-1"
   ],
   "files": [
     "strata-mtp/mtp-q2_0.gguf",
@@ -73,6 +74,9 @@
     "voyage-4-nano/zc-bf16/w8a8.json",
     "qwen3-tts/1.7B-CustomVoice/model.safetensors",
     "qwen3-tts/1.7B-Base/model.safetensors",
-    "qwen3-tts/1.7B-VoiceDesign/model.safetensors"
+    "qwen3-tts/1.7B-VoiceDesign/model.safetensors",
+    "elephant-1/model.safetensors",
+    "elephant-1/serve.patch",
+    "elephant-1/readout.json"
   ]
 }

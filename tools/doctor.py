@@ -49,6 +49,11 @@ def main():
                 print(f"OK {name}")
         except (OSError, subprocess.TimeoutExpired) as e:
             errors.append(f"{name}: {type(e).__name__}")
+    # elephant-1 imports the official OneJev engine from a checkout next to its server (docs/decisions.md)
+    if (ROOT / "decisions/OneJev/qev/engine.py").is_file():
+        print("OK OneJev checkout")
+    else:
+        errors.append("Missing decisions/OneJev checkout (elephant-1); see docs/decisions.md")
     if not a.skip_models:
         required = json.loads((ROOT / "models.required.json").read_text())
         for name in required["directories"]:
