@@ -49,6 +49,11 @@ def main():
                 print(f"OK {name}")
         except (OSError, subprocess.TimeoutExpired) as e:
             errors.append(f"{name}: {type(e).__name__}")
+    cosy = ROOT / "tts/cosyvoice/.venv/bin/python"
+    if cosy.is_file() and all((ROOT / "tts/cosyvoice/voices" / f).is_file() for f in ("zh.wav", "en.wav")):
+        print("OK CosyVoice3 environment and voices")
+    else:
+        errors.append("Missing tts/cosyvoice/.venv or its prompt voices; see docs/tts.md (tools/cosyvoice_env.sh)")
     # elephant-1 imports the official OneJev engine from a checkout next to its server (docs/decisions.md)
     if (ROOT / "decisions/OneJev/qev/engine.py").is_file():
         print("OK OneJev checkout")

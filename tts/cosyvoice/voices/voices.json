@@ -1,0 +1,6 @@
+{
+ "zh": {"wav": "zh.wav", "text": "希望你以后能够做的比我还好呦。",
+        "source": "FunAudioLLM/CosyVoice asset/zero_shot_prompt.wav (Apache-2.0)"},
+ "en": {"wav": "en.wav", "text": "We asked over twenty different people, and they all said it was his.",
+        "source": "Seed-TTS eval set, Common Voice en 10119832 (CC0)"}
+}

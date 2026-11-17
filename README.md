@@ -26,11 +26,12 @@
 | 语音转写 | `nemotron-3.5-transcribe` | NeMo-Speech.cpp | 英文、说话人分离 |
 | 语音转写 | `sov-transcribe-1` | [mlx-audio fork](https://github.com/ain-soph/mlx-audio/tree/serving) | 仅英文和 6 种欧洲语言；不能与聊天模型共存 |
 | 语音合成 | `qwen3-tts`、`-clone`、`-design` | mlx-audio fork | `/v1/audio/speech`：预设音色、声音克隆、声音设计；边生成边输出 |
+| 语音合成 | `cosyvoice3` | mlx-audio-plus（单独环境） | 中文方言、情感指令、零样本／跨语言克隆 |
 | 图片生成／编辑 | `minimax-h3-image` | [h3-image-mlx fork](https://github.com/ain-soph/h3-image-mlx/tree/serving) | W8A8，零拷贝，融合内核；各尺寸与聊天模型共存 |
 | 图片生成／编辑 | `qwen-image-2.1-turbo`、`qwen-image-2.1`（各有 `-int8` 文本编码器版）、`qwen-image-2.1-turbo-pe` | [mflux fork](https://github.com/ain-soph/mflux/tree/serving) | 8／40 步；最多 10 张参考图、遮罩、透明 PNG、提示词增强；非商用许可 |
 | 视频＋音频 | `minimax-h3-video` | [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving) | `best`／`standard`／`fast` 三档，最长 15 s；INT8 DiT 零拷贝 |
 
-完整 commit 固定在 `native.lock.json`（原生引擎）和 `uv.lock`（Python 包）；[原生构建脚本](tools/native.py)、[模型路由模板](templates/conf.d/)、[Strata 配置](templates/strata/) 和自写接口都在本仓库。权重准备与服务说明：[Strata](docs/strata.md)、[重排](docs/rerank.md)、[零拷贝与 W8A8 副本](docs/w8a8.md)、[决策模型](docs/decisions.md)、[SOV 语音转写](docs/sov.md)、[TTS](docs/tts.md)、[H3 图片](docs/h3-image.md)、[Qwen-Image](docs/qwen-image.md)、[H3 视频](docs/h3-video.md)。
+完整 commit 固定在 `native.lock.json`（原生引擎）和 `uv.lock`（Python 包）；[原生构建脚本](tools/native.py)、[模型路由模板](templates/conf.d/)、[Strata 配置](templates/strata/) 和自写接口都在本仓库。权重准备与服务说明：[Strata](docs/strata.md)、[重排](docs/rerank.md)、[零拷贝与 W8A8 副本](docs/w8a8.md)、[决策模型](docs/decisions.md)、[SOV 语音转写](docs/sov.md)、[语音合成](docs/tts.md)、[H3 图片](docs/h3-image.md)、[Qwen-Image](docs/qwen-image.md)、[H3 视频](docs/h3-video.md)。
 
 ## 安装与迁移
 
@@ -41,6 +42,7 @@ git clone https://github.com/ain-soph/llm-serving.git
 cd llm-serving
 ./tools/bootstrap.sh
 .venv/bin/python tools/native.py all
+tools/cosyvoice_env.sh        # CosyVoice3 的单独环境（见 docs/tts.md）
 ```
 
 `Brewfile` 统一安装 **Homebrew Python 3.15**、uv、Caddy、llama-swap、llama.cpp、FFmpeg、CMake、Ninja。uv 使用 Homebrew 的 Python 3.15 创建项目唯一的 `.venv`；所有 Python 服务使用同一个解释器。`uv.lock` 固定 Python 依赖，包括图片引擎 fork 的完整 commit。
@@ -77,7 +79,7 @@ cd llm-serving
 
 ## 验证范围
 
-已在开发机器使用 Python **3.15.2** 完成统一依赖安装与导入，以及 Numba JIT、PyTorch/SciPy CPU 和日语对齐 tokenizer 基础调用检查；同时完成配置生成、llama-swap/Caddy 配置校验、FFmpeg 编码器检查，以及安装路径和隐私扫描测试。重排的 Python 3.15 真实模型/API 检查见[专项说明](docs/rerank.md)。Qwen-Image、TTS、SOV、Qwen3 嵌入、Decider、elephant-1 在统一 3.15 环境只做了导入与参数解析检查（生产各用独立环境运行，见[性能报告](docs/performance.md)）。当前生产服务仍使用原来的目录和环境。
+已在开发机器使用 Python **3.15.2** 完成统一依赖安装与导入，以及 Numba JIT、PyTorch/SciPy CPU 和日语对齐 tokenizer 基础调用检查；同时完成配置生成、llama-swap/Caddy 配置校验、FFmpeg 编码器检查，以及安装路径和隐私扫描测试。重排的 Python 3.15 真实模型/API 检查见[专项说明](docs/rerank.md)。Qwen-Image、TTS、SOV、Qwen3 嵌入、Decider、elephant-1 在统一 3.15 环境（CosyVoice3 在它自己的 3.12 环境）只做了导入与参数解析检查（生产各用独立环境运行，见[性能报告](docs/performance.md)）。当前生产服务仍使用原来的目录和环境。
 
 尚未在干净系统完成全套原生重编译和端到端推理恢复演练。本仓库提供可审查的迁移工具和当前配置，首次切换前仍需运行真实 API 冒烟检查。`doctor.py` 不加载模型，不替代正确性/性能验证。
 

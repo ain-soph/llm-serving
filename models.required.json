@@ -36,7 +36,9 @@
     "qwen3-tts/1.7B-Base",
     "qwen3-tts/1.7B-VoiceDesign",
     "sov-transcribe-1/mlx-q8",
-    "elephant-1"
+    "elephant-1",
+    "cosyvoice3/mlx-fp16",
+    "cosyvoice3/s3tokenizer-v3"
   ],
   "files": [
     "strata-mtp/mtp-q2_0.gguf",
@@ -77,6 +79,8 @@
     "qwen3-tts/1.7B-VoiceDesign/model.safetensors",
     "elephant-1/model.safetensors",
     "elephant-1/serve.patch",
-    "elephant-1/readout.json"
+    "elephant-1/readout.json",
+    "cosyvoice3/mlx-fp16/model.safetensors",
+    "cosyvoice3/s3tokenizer-v3/model.safetensors"
   ]
 }

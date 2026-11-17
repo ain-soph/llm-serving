@@ -24,6 +24,7 @@
 | 决策 | `elephant-1` | MLX 移植 + 官方 OneJev | 8-bit 权重（组 32）+ BF16 激活 | 短请求 0.10–0.12 s；16.1K token 4.02 s（4,000–4,130 tok/s） | wired 峰值 +8899 MiB | 18.84 GB⁵ |
 | 决策 | `elephant-1-int8` | 同上 | W8A8 | 短请求 0.08 s；16.1K token 2.78 s（5,790–6,070 tok/s） | wired 峰值 +8063 MiB | 同上⁵ |
 | 语音合成 | `qwen3-tts`／`-clone`／`-design` | mlx-audio fork | BF16 | 首段音频 0.08–0.14 s；实时率 0.22–0.23 | wired +4850／+5603／+5035 MiB | 12.22 GB⁴ |
+| 语音合成 | `cosyvoice3` | mlx-audio-plus（上游 4c9ec6a） | FP16 | 首段 0.48–0.88 s（按句输出）；实时率 0.10–0.12 | wired +4753 MiB（缓存上限 1 GiB） | 2.71 GB |
 | 语音转写 | `qwen3-asr-1.7b`（默认） | mlx-qwen3-asr fork | BF16 文件／FP16 运行 | en100 c1 15.4 s；WER 1.48% | wired +6.6 GB | 6.543 GB |
 | 语音转写 | `whisper-large-v3` | mlx-whisper fork | FP16 | en100 c1 22.8 s；WER 2.80% | wired +4.5 GB | 3.084 GB |
 | 语音转写 | `nemotron-3.5-transcribe` | NeMo-Speech.cpp Metal | AD-IQ4_NL + F16 编码器 | en100 c1 29.4 s；WER 1.43% | wired +21.2 GB | 21.35 GB |
@@ -249,7 +250,38 @@
 - 0.6B 与 1.7B 几乎一样快（每帧串行 15 步码本预测），只省 1.5 GB 内存（wired +3382 MiB），所以不单独上线。
 - 正确性：同 6 句贪心解码，官方 FP32 vs MLX BF16 的码本相同帧数与官方 FP32 vs 官方 BF16 同量级；解码器同码输入波形信噪比 44–49 dB。
 - 与 Flash-Next 共存（1449 字中文 + 11.6 万 token 提示词同时跑）：TTS 实时率 0.30（407 s 音频用 120 s），Flash-Next prefill 1968 tok/s；wired 峰值 77575 MiB，压缩区 6666 MiB，交换不变。
-- 未上线：CosyVoice3（MLX 移植 16 句错读 4 句、wired +8.4–15.6 GB）；Fish Audio Drama 3（4-bit 23.8 GB，只能独占）。
+- 未上线：Fish Audio Drama 3（4-bit 23.8 GB，只能独占）。
+
+## 语音合成：CosyVoice3
+
+**条件**：Fun-CosyVoice3-0.5B，mlx-audio-plus 上游 4c9ec6a，FP16，MLX 缓存上限 1 GiB；独占 GPU；ASR 回写用 Qwen3-ASR 1.7B（T2）。
+
+| 测试 | 首段 | 总时间 | 音频 | 实时率 |
+| --- | ---: | ---: | ---: | ---: |
+| 16 句短句（经服务） | 0.52–0.77 s | 0.52–0.77 s | 4.2–6.9 s | 0.11–0.17 |
+| 方言 4 句 | 0.48–0.88 s | 同左 | 3.9–8.2 s | 0.11–0.12 |
+| 1449 字中文 | 1.87 s | 32.4 s | 318.5 s | 0.10 |
+| 3621 字符英文 | 1.24 s | 25.3 s | 223.6 s | 0.11 |
+| 冷启动第一个请求（经 API） | 7.76 s | 7.84 s | 4.7 s | — |
+
+| 回写错误率 | 16 句（中英各 8） | 1449 字中文 | 3621 字符英文 | 方言 4 句 |
+| --- | ---: | ---: | ---: | ---: |
+| 官方 PyTorch FP32（CPU），种子 0／1 | 0%／0.35% | 0.53% | — | — |
+| PyPI mlx-audio-plus 0.1.8（旧） | 13%（中）／15%（英） | — | — | — |
+| 上游 4c9ec6a，种子 0／1／2 | 0%／0%／0% | 0.46% | 0.15% | — |
+| **上游 4c9ec6a，经服务（上线）** | **0%** | 合计 0.45% | （同左） | 0% |
+
+| 内存设置 | wired 峰值增量 | MLX 峰值 | MLX 缓存 |
+| --- | ---: | ---: | ---: |
+| 不设缓存上限，16 句 | +9234 MiB | 3.8 GB | 涨到 59 GB |
+| 不设缓存上限，长文本 | +39992 MiB | 5.0 GB | 涨到 85 GB |
+| 缓存 1 GiB，长文本（速度 −5%） | +4172 MiB | 5.0 GB | 1.1 GB |
+| **上线服务（缓存 1 GiB，全部测试）** | **+4753 MiB** | — | — |
+
+- 参照误差：官方换种子就有 0–0.35% 的差别，MLX 在这个范围内；采样与官方相同（RAS：top-p 0.8、top-k 25、窗口 10、τ 0.1）。官方 PyTorch 在 CPU 上实时率 1.3–1.7。
+- 旧版 0.1.8 读错的原因：提示文本前缺 `<|endofprompt|>` 标记，上游 2026-04 的提交已修好；我们没有改代码，不需要 fork。
+- 与 Flash-Next 共存（11.6 万 token 提示词同时合成 1449 字中文）：Flash-Next 约 1935 tok/s（TTFT 59.86 s）；CosyVoice 首段 4.89 s、318.2 s 音频用 68.2 s；wired 峰值 76,635 MiB，压缩区 6,868 MiB，交换不变。
+- 权重只有 1.6 GB，锁定内存主要是 flow 和声码器在长句上的激活；零拷贝收益很小，没做。
 
 ## 语音转写
 
@@ -481,6 +513,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | Perplexity Decider | 9.626 GB | 9.626 GB | 官方检查点，三个入口共用 |
 | elephant-1 | 18.842 GB | 18.842 GB | 官方 BF16，两个入口加载时量化 |
 | Qwen3-TTS（3 个变体） | 12.220 GB | — | 编解码器硬链接成一份 |
+| CosyVoice3 | 2.711 GB | — | MLX FP16 模型 + S3TokenizerV3；官方 PyTorch 检查点只作参照 |
 | SOV-Transcribe-1 | 29.770 GB | — | 8-bit；官方 BF16（53.3 GB）只作转换来源 |
 | Nemotron | 21.349 GB | 21.349 GB | decoder 19.679 + encoder 1.670 |
 | Whisper MLX | 3.084 GB | 3.084 GB | FP16 |
@@ -533,6 +566,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | QE | 11-16，Qwen3-Embedding 部署 | 64 × 450 token、8 × 3,600 token、32K 单条；官方 FP32 参照 |
 | AS | 11-17，ASR 复查与 SOV 部署 `asr/review/1117*`、`asr/sov/runs/` | en100／zh100／mix60／long_en／long_zh |
 | T | 11-17，TTS `tts/eval/out/s1`、`s2`，上线 `tts-deploy-1117-0229` | 16 句短文本、1449 字中文、3621 字符英文 |
+| T2 | 11-17，CosyVoice3 `tts/cosyvoice/eval/out/m1-1117-0643`，上线 `cosyvoice3-deploy-1117-0649` | 同上 + 方言 4 句 |
 | EG | 11-17，EmbeddingGemma 复查 `embedding-review-1117-0053` | 短查询、64 × 400、4 × 8000 token |
 | QF | 11-17，Qwen-Image 融合 `bench-fusion/results/f1-1117-0023`、提示词评测 `eval/runs/` | Turbo W8A8，1024²／2048² |
 | EL | 11-17，elephant-1 `decisions/jev/results/s2`～`s4` | `decisions/cases.py` 13 个问题；12.9K／16.1K／31.1K token |

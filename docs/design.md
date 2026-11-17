@@ -12,6 +12,8 @@ LaunchAgent 使用解释器与脚本的完整路径和参数数组，由 `plistl
 
 不要把临时评测、训练和模型转换工具任意装入部署环境。若未来出现真正的版本冲突，应先解决依赖约束；确实无法兼容的工具可另设非运行时环境。
 
+唯一的例外是 CosyVoice3：它的运行时 mlx-audio-plus 与主环境的 mlx-audio 安装成同一个模块 `mlx_audio`，且要求 transformers < 5，因此在 `tts/cosyvoice/.venv`（Python 3.12，`tools/cosyvoice_env.sh`）按固定的完整包列表单独安装。
+
 Homebrew 管理 Python、uv 和原生工具，uv 管理项目虚拟环境与 Python 包。Brewfile 是工具清单，**不是永久锁定历史 bottle 的锁文件**；`native.lock.json` 的 `observed_tools` 记录已使用的版本。Homebrew 更新后应重新检查接口兼容性。源码固定 commit 也不代表跨 SDK、编译器的二进制逐字节可复现。
 
 参考：[uv 锁定与同步](https://docs.astral.sh/uv/concepts/projects/sync/)。

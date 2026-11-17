@@ -14,6 +14,10 @@ The model variant comes from the checkpoint (config.json tts_model_type):
                 emotion / style.
   voice_design  `instructions` describes the voice to create (required); `voice` is ignored.
   base          voice cloning: `ref_audio` (3-20 s) with its exact transcript `ref_text`; `voice` is ignored.
+CosyVoice3 (Fun-CosyVoice3-0.5B via mlx-audio-plus, run from tts/cosyvoice/.venv with --voices):
+  `voice` picks a built-in prompt voice (voices.json; OpenAI names map to the first), or send `ref_audio`
+  (<= 30 s) with its exact transcript `ref_text` (zero-shot) or without it (cross-lingual);
+  `instructions` switches to instruct mode (dialect, emotion, speed, e.g. "请用四川话表达。"), ref_text is then unused.
 
 Audio is streamed as it is generated (chunked transfer; pcm = 24 kHz mono s16le). Long input is split into
 paragraphs and sentences of at most --max-chars characters, generated one after another; each piece stops after
@@ -21,7 +25,8 @@ paragraphs and sentences of at most --max-chars characters, generated one after 
 at a time on a single worker thread that owns the MLX model (MLX streams are per thread). `speed` != 1 is applied
 with ffmpeg atempo (pitch kept).
 
-Usage: .venv/bin/python tts/server.py --port PORT --model DIR --model-id ID [--cache-mb 512] [--max-chars 220]"""
+Usage: .venv/bin/python tts/server.py --port PORT --model DIR --model-id ID [--cache-mb 512] [--max-chars 220]
+       tts/cosyvoice/.venv/bin/python tts/server.py ... --voices tts/cosyvoice/voices/voices.json --s3tokenizer DIR"""
 import argparse
 import base64
 import concurrent.futures as cf
@@ -117,21 +122,33 @@ def split_text(text: str, limit: int) -> list[str]:
 
 
 class Engine:
-    def __init__(self, model_dir: str, cache_mb: int, max_chars: int):
+    def __init__(self, model_dir: str, cache_mb: int, max_chars: int, voices: str = None, s3tokenizer: str = None):
         self.model_dir, self.cache_mb, self.max_chars = model_dir, cache_mb, max_chars
+        self.voices_file, self.s3tokenizer = voices, s3tokenizer
         self.ready = False
         self.pool = cf.ThreadPoolExecutor(1)
         self.pool.submit(self._load).result()
 
     def _load(self):
         import mlx.core as mx
+
+        if self.s3tokenizer:  # CosyVoice3's speech tokenizer is fetched from the Hub unless pointed at a local copy
+            import mlx_audio.codec.models.s3tokenizer.model_v3 as s3v3
+            s3v3.fetch_from_hub = lambda repo: Path(self.s3tokenizer)
         from mlx_audio.tts.utils import load_model
 
         mx.set_cache_limit(self.cache_mb << 20)
         t = time.time()
         self.model = load_model(self.model_dir)
-        self.kind = getattr(self.model.config, "tts_model_type", "base")
-        self.speakers = sorted(s.lower() for s in (self.model.supported_speakers or []))
+        if getattr(self.model.config, "model_type", None) == "cosyvoice3":
+            self.kind = "cosyvoice3"
+            spec = json.loads(Path(self.voices_file).read_text())
+            self.prompts = {name: (decode_audio((Path(self.voices_file).parent / v["wav"]).read_bytes()), v["text"])
+                            for name, v in spec.items()}
+            self.speakers = list(self.prompts)
+        else:
+            self.kind = getattr(self.model.config, "tts_model_type", "base")
+            self.speakers = sorted(s.lower() for s in (self.model.supported_speakers or []))
         mx.clear_cache()
         log.info("loaded %s (%s) in %.1f s, speakers %s", self.model_dir, self.kind, time.time() - t, self.speakers)
         self.ready = True
@@ -158,6 +175,31 @@ class Engine:
         elif self.kind == "voice_design":
             if not opts["instruct"]:
                 raise BadRequest("this model creates a voice from `instructions` (a description of the voice)")
+        elif self.kind == "cosyvoice3":
+            if req.get("ref_audio"):
+                ref = req["ref_audio"]
+                if ref.startswith("data:"):
+                    ref = ref.split(",", 1)[1]
+                try:
+                    audio = decode_audio(base64.b64decode(ref, validate=False))
+                except ValueError:
+                    raise BadRequest("ref_audio is not valid base64")
+                if not 1.0 <= len(audio) / SR <= 30.0:
+                    raise BadRequest("ref_audio must be 1-30 s long")
+                opts["ref_audio"], opts["ref_text"] = audio, (req.get("ref_text") or "").strip() or None
+            else:
+                voice = req.get("voice") or self.speakers[0]
+                if isinstance(voice, dict):
+                    voice = voice.get("id") or voice.get("name") or self.speakers[0]
+                voice = str(voice).lower()
+                if voice in OPENAI_VOICES:
+                    voice = self.speakers[0]
+                if voice not in self.prompts:
+                    raise BadRequest(f"unknown voice {voice!r}; voices: {', '.join(self.speakers)} "
+                                     "(or send ref_audio, optionally with ref_text)")
+                opts["ref_audio"], opts["ref_text"] = self.prompts[voice]
+            if opts["instruct"]:
+                opts["ref_text"] = None
         else:
             ref, ref_text = req.get("ref_audio"), (req.get("ref_text") or "").strip()
             if not ref or not ref_text:
@@ -203,6 +245,11 @@ class Engine:
                 elif self.kind == "voice_design":
                     gen = self.model.generate_voice_design(text=piece, instruct=opts["instruct"],
                                                            language=opts["language"], **kw)
+                elif self.kind == "cosyvoice3":
+                    # Speech tokens are capped at 20 x the piece's text tokens inside the model (as upstream), and
+                    # the piece is split into sentences there; one result per sentence.
+                    gen = self.model.generate(text=piece, ref_audio=mx.array(opts["ref_audio"]),
+                                              ref_text=opts["ref_text"], instruct_text=opts["instruct"], verbose=False)
                 else:
                     gen = self.model.generate(text=piece, ref_audio=mx.array(opts["ref_audio"]),
                                               ref_text=opts["ref_text"], lang_code=opts["language"], **kw)
@@ -255,15 +302,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         engine = self.server.engine
-        if self.path == "/health":
+        path = self.path.split("?", 1)[0]  # llama-swap routes GETs by ?model=
+        if path == "/health":
             self._send(200 if engine.ready else 503, "application/json",
                        {"status": "ok" if engine.ready else "loading"})
-        elif self.path == "/v1/models":
+        elif path == "/v1/models":
             self._send(200, "application/json", {"object": "list", "data": [
                 {"id": self.server.model_id, "object": "model", "owned_by": "local"}]})
-        elif self.path == "/v1/audio/voices":
+        elif path == "/v1/audio/voices":
+            mapped = ({k: engine.speakers[0] for k in OPENAI_VOICES} if engine.kind == "cosyvoice3"
+                      else OPENAI_VOICES if engine.speakers else {})
             self._send(200, "application/json", {"kind": engine.kind, "voices": engine.speakers,
-                                                 "openai_voices": OPENAI_VOICES if engine.speakers else {}})
+                                                 "openai_voices": mapped})
         else:
             self._error(404, f"unknown path {self.path}")
 
@@ -377,11 +427,13 @@ def main():
     ap.add_argument("--model-id", required=True)
     ap.add_argument("--cache-mb", type=int, default=512)
     ap.add_argument("--max-chars", type=int, default=220)
+    ap.add_argument("--voices", help="CosyVoice3: JSON of built-in prompt voices {name: {wav, text}}")
+    ap.add_argument("--s3tokenizer", help="CosyVoice3: local speech_tokenizer_v3 MLX directory")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s", stream=sys.stderr)
     server = Server((a.host, a.port), Handler)
     server.model_id = a.model_id
-    server.engine = Engine(a.model, a.cache_mb, a.max_chars)
+    server.engine = Engine(a.model, a.cache_mb, a.max_chars, a.voices, a.s3tokenizer)
     log.info("serving %s on %s:%d", a.model_id, a.host, a.port)
     server.serve_forever()
 
