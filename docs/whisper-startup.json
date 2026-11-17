@@ -1,0 +1,164 @@
+{
+  "python": "3.15.2",
+  "source_baseline": "c1af8c46bd4c4704cff1561736a634cee38efc6c",
+  "source_candidate": "43308d480b4c647b3c542b8478054706ce1a3795",
+  "import_pairs": 7,
+  "equivalence": {
+    "python_315": true,
+    "python_312": true,
+    "formats": [
+      "json",
+      "verbose_json",
+      "srt",
+      "vtt"
+    ]
+  },
+  "baseline": {
+    "import_median_s": 0.5298330840014387,
+    "import_rss_median_mib": 167.296875,
+    "plain_warm_median_s": 0.23352779197739437,
+    "words_warm_median_s": 0.28676729201106355,
+    "mlx_peak_bytes": 4068935086,
+    "phase": {
+      "prefill_tokens": 6,
+      "prefill_s": 0.120189625013154,
+      "decode_tokens": 58,
+      "decode_s": 0.36262158601311967,
+      "kv_dtype": "mlx.core.float16",
+      "prefill_tok_s": 49.92111423380627,
+      "decode_tok_s": 159.9463524432921
+    }
+  },
+  "candidate": {
+    "import_median_s": 0.1338288749975618,
+    "import_rss_median_mib": 71.359375,
+    "plain_warm_median_s": 0.22796912500052713,
+    "words_warm_median_s": 0.2877125839877408,
+    "mlx_peak_bytes": 4068935086,
+    "phase": {
+      "prefill_tokens": 6,
+      "prefill_s": 0.12033433400210924,
+      "decode_tokens": 58,
+      "decode_s": 0.364599584863754,
+      "kv_dtype": "mlx.core.float16",
+      "prefill_tok_s": 49.86108120974709,
+      "decode_tok_s": 159.07862325645223
+    }
+  },
+  "measured_on": "2026-11-16",
+  "hardware": "Apple M5 Ultra, 96 GiB unified memory, macOS 27",
+  "audio": "Public whisper.cpp jfk.wav, 11 seconds, 16 kHz mono PCM",
+  "weight_precision": "FP16",
+  "kv_precision": "FP16 measured in decoder cache",
+  "allocator_cache_limit_mib": 512,
+  "concurrency": 1,
+  "import_pairs_data": {
+    "baseline": {
+      "import_s": [
+        0.5256861670059152,
+        0.5246727919729892,
+        0.5298330840014387,
+        0.5315787919971626,
+        0.5260387909947895,
+        0.5299830830190331,
+        0.5316908750100993
+      ],
+      "rss_peak_bytes": [
+        175357952,
+        175521792,
+        175259648,
+        175341568,
+        175620096,
+        175423488,
+        175472640
+      ]
+    },
+    "candidate": {
+      "import_s": [
+        0.13624374999199063,
+        0.13445725000929087,
+        0.13331237499369308,
+        0.13299462498980574,
+        0.1343102499959059,
+        0.1325733329867944,
+        0.1338288749975618
+      ],
+      "rss_peak_bytes": [
+        74858496,
+        75038720,
+        74842112,
+        74825728,
+        74678272,
+        74743808,
+        74465280
+      ]
+    }
+  },
+  "import_time_reduction_percent": 74.74131400273252,
+  "import_speedup": 3.9590341322908946,
+  "import_rss_reduction_mib": 95.9375,
+  "limitations": [
+    "Module import benchmark is not model loading or transcription throughput.",
+    "First inference/first timestamp timings were affected by shader/JIT/filesystem warmup order and are not used for a speedup claim.",
+    "Warm inference uses three samples per mode; no significance or throughput improvement is claimed.",
+    "Model inference outputs and four HTTP formats match for one public 11-second clip in Python 3.12 and 3.15."
+  ],
+  "sampling_followup": {
+    "method": "Cooperative in-process sys._current_frames sampling at requested 1ms intervals; affected by GIL scheduling, not CPU/GIL percentages. cProfile additionally recorded but timing aggregates are not used for performance claims.",
+    "external_profiler": "Tachyon could not access process memory under macOS permissions; sudo unavailable without password.",
+    "loop_repetitions": 12,
+    "arms": {
+      "baseline": {
+        "warm_worker_stack_samples": 1912,
+        "top_leaf_locations": [
+          [
+            "decoding.py:apply:343",
+            727
+          ],
+          [
+            "decoding.py:_main_loop:610",
+            725
+          ],
+          [
+            "decoding.py:_main_loop:600",
+            424
+          ],
+          [
+            "decoding.py:run:665",
+            24
+          ],
+          [
+            "thread.py:_worker:116",
+            12
+          ]
+        ]
+      },
+      "candidate": {
+        "warm_worker_stack_samples": 1902,
+        "top_leaf_locations": [
+          [
+            "decoding.py:apply:343",
+            730
+          ],
+          [
+            "decoding.py:_main_loop:610",
+            714
+          ],
+          [
+            "decoding.py:_main_loop:600",
+            422
+          ],
+          [
+            "decoding.py:run:665",
+            24
+          ],
+          [
+            "thread.py:_worker:116",
+            12
+          ]
+        ]
+      }
+    },
+    "finding": "Warm worker stack distributions are very similar. The common paths are decoder loop evaluation and token filtering. This does not measure native GPU execution time or establish a benefit from free threading."
+  }
+}

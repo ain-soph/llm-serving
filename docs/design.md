@@ -20,7 +20,7 @@ Homebrew 管理 Python、uv 和原生工具，uv 管理项目虚拟环境与 Pyt
 
 第三方引擎不复制进主仓库；改动留在相应 fork，部署引用不可变的完整 commit，分支 `serving` 用于维护。每次构建使用独立版本目录，保留旧目录即可回退。
 
-`tools/native.py` 使用 Homebrew CMake/Ninja 和 Apple clang，从固定源码构建 Strata、视觉编码器、H3 视频、NeMo Speech。Metal C++ 头文件单独下载并验证 SHA-256；嵌套源码按对应项目固定的版本准备。图片引擎从 `uv.lock` 中的 fork commit 安装。
+`tools/native.py` 使用 Homebrew CMake/Ninja 和 Apple clang，从固定源码构建 Strata、视觉编码器、H3 视频、NeMo Speech。Metal C++ 头文件单独下载并验证 SHA-256；嵌套源码按对应项目固定的版本准备。图片引擎和 Whisper 从 `uv.lock` 中的各自 fork commit 安装。
 
 每个构建树生成 `serving-build.json`，记录 commit、架构、macOS/SDK/编译器、构建参数、可执行文件 SHA-256 和动态库链接。该文件是本机产物，不提交公开仓库。未来发布二进制包时，应以引擎 commit、架构、最低系统版本、SDK/工具链和构建参数标记产物，并一并提供依赖库、shader、许可证和校验值。
 

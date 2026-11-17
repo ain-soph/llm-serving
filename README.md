@@ -25,7 +25,7 @@
 | 重排 | `qwen3-reranker-4b` | Homebrew llama.cpp | 未改引擎；自行转换为标准 Q8_0 | **1.64 s**，prefill 约 **4900 tok/s** | wired **+3.1–6.2 GB**；RSS **5.4 GB** | **4.280 GB** |
 | 重排 | `qwen3-reranker-8b` | Homebrew llama.cpp | 未改引擎；自行转换为标准 Q8_0 | **2.56 s**，prefill 约 **3100 tok/s** | wired **+5.0–6.6 GB**；RSS **9.0 GB** | **8.047 GB** |
 | 语音转写 | `nemotron-3.5-transcribe` | NeMo-Speech.cpp Metal | **未改引擎**，AD-IQ4_NL 部署配置 | 英文 100 条、c4：**22.66 s**（批次总耗时） | wired **+22284 MiB**；RSS **19318 MiB** | **21.35 GB**，含 F16 编码器 |
-| 语音转写 | `whisper-large-v3` | mlx-whisper | **A：自写服务层**，单 MLX worker、512 MiB allocator 缓存上限 | 英文 100 条、c4：**26.20 s**（批次总耗时） | wired **+4545 MiB**；RSS **3509 MiB** | **3.084 GB** |
+| 语音转写 | `whisper-large-v3` | mlx-whisper | **W：包与服务层**，按需导入词级对齐；单 worker、512 MiB 缓存上限 | 英文 100 条、c4：**26.20 s**（批次总耗时） | wired **+4545 MiB**；RSS **3509 MiB** | **3.084 GB** |
 | 语音转写 | `qwen3-asr-1.7b` | mlx-qwen3-asr | **A：自写服务层**，本地对齐器、单 worker、512 MiB 缓存上限 | 英文 100 条、c4：**16.97 s**；主模型 phase 测试 prefill **7776** / decode **179.8 tok/s** | wired **+6776 MiB**；加载/预热 profiler 峰值 **8.16 GB**（另一轮测试） | **6.543 GB**，含 0.6B 对齐器 |
 | 图片生成／编辑 | `minimax-h3-image` | **h3-image-mlx fork** | **I：引擎修改**，DiT 缓存预算、DiT/文本编码器页对齐 mmap 零拷贝 | 6 步：1024² **4.19 s**、2048² **12.18 s**；4096² 与空闲 Flash-Next 共存约 **120 s** | DiT footprint **1.95 / 3.29 GB**（1024² / 2048²）；不含可回收权重页缓存 | **49.32 GB** |
 | 视频／音频生成 | `minimax-h3-video` | **h3.c fork** | **V：引擎+服务层修改**，INT8 磁盘打包、BF16 VAE；fast 档稀疏注意力与 token 削减 | fast、1344×768：约 5 s 片段 **170 s**；约 15 s **758 s**（优化会话） | 同轮 DiT GPU 分配峰值 **22.20 / 33.00 GiB**（5 s / 15 s），不是 wired | **125.62 GB**，两种服务模式及 FL2VA/Ref2VA 共享，勿重复相加 |
@@ -35,7 +35,7 @@
 
 ## 修改前后的收益与代价
 
-“原版”在这里指各行写明的**具体本机基线**；没有官方实现的同口径实测就不标“比官方快”。S/I/V 是引擎修改，A 是服务层修改，换后端和量化选择另作说明。
+“原版”在这里指各行写明的**具体本机基线**；没有官方实现的同口径实测就不标“比官方快”。S/I/V 是引擎修改，W 是 Whisper 包的导入修改，A 是服务层修改，换后端和量化选择另作说明。
 
 | 修改 | 对照负载与基线 | 修改前 → 修改后 | 速度变化 | 内存变化 | 磁盘变化／正确性 |
 | --- | --- | --- | --- | --- | --- |
@@ -46,6 +46,7 @@
 | **V：INT8 磁盘打包** | 512×288、25 帧；新二进制读 BF16 并即时量化，对预打包 INT8；VAE FP32、稀疏关闭 | **28.92 → 17.95 s** | **1.61×**；耗时 **−37.9%**，主要省加载 | 该小样本进程 footprint **18.36 → 22.69 GB（+23.6%）**，不宣称全程省内存 | 每套 DiT 约 **66.28 → 23.91 GB（−63.9%）**；无条件文生视频逐字节一致，条件生成落在原版自身波动范围 |
 | **V：BF16 VAE** | 1344×768、124 帧；基线 FP32 VAE，对 BF16 线性层+注意力 | VAE 阶段 **79.01 → 33.59 s** | **2.35×**；阶段耗时 **−57.5%** | VAE GPU 分配峰值 **9.554 → 5.139 GiB（−46.2%）**；不是全进程峰值 | 权重磁盘不变；有舍入差异；仅 BF16 线性层方案 PSNR 51.7 dB，完整方案未测 PSNR |
 | **V：fast 视频预设** | INT8 h3 本机基线，45 层/reuse 2、密集注意力/FP32 VAE；加稀疏、token 削减及 BF16 VAE | 768p、约 5 s：**412 → 170 s** | **2.42×**；耗时 **−58.7%** | 同轮 DiT GPU 峰值 **22.191 → 22.196 GiB**，基本不变；VAE 阶段另见上行 | 不额外存权重；**近似算法，构图可能改变，不是无损加速** |
+| **W：Whisper 按需导入对齐模块** | Python 3.15.2；7 组交替新进程，仅测包导入 | **0.530 → 0.134 s**（中位数） | **3.96×**；导入耗时 **−74.7%**，不是转写吞吐 | 导入进程 RSS 峰值中位数 **167.3 → 71.4 MiB**，约少 **96 MiB**；模型 MLX 峰值两臂均 **4.069 GB** | 权重不变；普通/词级输出及 JSON/verbose JSON/SRT/VTT 对照一致，见[专项测试](docs/whisper-startup.md) |
 | **A：Whisper 缓存上限** | 同一 MLX 后端，无缓存上限 → 512 MiB；长音频 verbose+c4 复测 | c4 **25.65 → 26.20 s** | 耗时 **+2.1%**，基本持平 | wired **5804 → 4545 MiB（−21.7%）** | 权重不变；复测错误率相同 |
 | **A：Qwen ASR 缓存上限** | 同一 MLX 后端与长音频/c4 复测 | c4 **16.95 → 16.97 s** | 耗时 **+0.1%**，基本持平 | wired **10332 → 6776 MiB（−34.4%）** | 权重不变；复测错误率相同 |
 
@@ -53,7 +54,7 @@
 
 Strata 替代 llama.cpp 的历史测试约为单流 **59.9 → 123.2 tok/s（2.06×）**、长 prompt **1197 → 2058 tok/s（1.72×）**；两边槽位、上下文和 KV 精度不同，**不计入 Strata fork 的修改收益**。嵌入/重排没有本机官方实现的同配置速度基线；Whisper 切换后端的测试解码设置尚未完全对齐，均不据此声称修改后的加速倍数。
 
-源码入口：[Strata fork](https://github.com/ain-soph/Strata/tree/serving)、[图片 fork](https://github.com/ain-soph/h3-image-mlx/tree/serving)、[视频 fork](https://github.com/ain-soph/h3.c/tree/serving)。完整 commit 固定在 `native.lock.json` 或 `uv.lock`；[原生构建脚本](tools/native.py)、[模型路由](templates/conf.d/)、[Strata 配置](templates/strata/) 和自写接口都在本仓库。详见 [Strata 部署说明](docs/strata.md)。
+源码入口：[Whisper fork](https://github.com/ain-soph/mlx-examples/tree/serving/whisper)、[Strata fork](https://github.com/ain-soph/Strata/tree/serving)、[图片 fork](https://github.com/ain-soph/h3-image-mlx/tree/serving)、[视频 fork](https://github.com/ain-soph/h3.c/tree/serving)。完整 commit 固定在 `native.lock.json` 或 `uv.lock`；[原生构建脚本](tools/native.py)、[模型路由](templates/conf.d/)、[Strata 配置](templates/strata/) 和自写接口都在本仓库。详见 [Strata 部署说明](docs/strata.md)。
 
 ## 安装与迁移
 
