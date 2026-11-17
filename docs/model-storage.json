@@ -1,0 +1,217 @@
+{
+  "measured_on": "2026-11-16",
+  "units": {
+    "GB": "1000000000 bytes",
+    "allocated_bytes": "st_blocks * 512"
+  },
+  "method": "Sum stat().st_size excluding .cache directories and deduplicating (st_dev, st_ino) within each group. APFS clones sharing physical extents are not deduplicated. Model files only; source code, environments, generated media and serving logs excluded.",
+  "runtime_groups": {
+    "qwen3.8-flash-next": {
+      "relative_paths": [
+        "strata-ad427"
+      ],
+      "files": 13,
+      "bytes": 96943638945,
+      "GB": 96.943639,
+      "allocated_bytes": 96943661056
+    },
+    "qwen3.8-flash-next-uncensored": {
+      "relative_paths": [
+        "strata-uncensored"
+      ],
+      "files": 13,
+      "bytes": 96947183499,
+      "GB": 96.947183,
+      "allocated_bytes": 96951918592
+    },
+    "strata-shared-mtp": {
+      "relative_paths": [
+        "strata-mtp/mtp-q2_0.gguf",
+        "strata-mtp/rt"
+      ],
+      "files": 2,
+      "bytes": 889442412,
+      "GB": 0.889442,
+      "allocated_bytes": 889446400
+    },
+    "embeddinggemma-2": {
+      "relative_paths": [
+        "embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf"
+      ],
+      "files": 1,
+      "bytes": 557950176,
+      "GB": 0.55795,
+      "allocated_bytes": 557953024
+    },
+    "embeddinggemma-2-multimodal": {
+      "relative_paths": [
+        "embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf",
+        "embeddinggemma-2/ggml-org/mmproj-embeddinggemma-2-BF16.gguf"
+      ],
+      "files": 2,
+      "bytes": 1540024992,
+      "GB": 1.540025,
+      "allocated_bytes": 1540030464
+    },
+    "qwen3-reranker-0.6b": {
+      "relative_paths": [
+        "qwen3-reranker/qwen3-reranker-0.6b-q8_0.gguf"
+      ],
+      "files": 1,
+      "bytes": 639153184,
+      "GB": 0.639153,
+      "allocated_bytes": 639156224
+    },
+    "qwen3-reranker-4b": {
+      "relative_paths": [
+        "qwen3-reranker/qwen3-reranker-4b-q8_0.gguf"
+      ],
+      "files": 1,
+      "bytes": 4279675616,
+      "GB": 4.279676,
+      "allocated_bytes": 4285358080
+    },
+    "qwen3-reranker-8b": {
+      "relative_paths": [
+        "qwen3-reranker/qwen3-reranker-8b-q8_0.gguf"
+      ],
+      "files": 1,
+      "bytes": 8047131008,
+      "GB": 8.047131,
+      "allocated_bytes": 8052858880
+    },
+    "nemotron-3.5-transcribe": {
+      "relative_paths": [
+        "nemotron-3.5-transcribe-30b-a4b-gguf"
+      ],
+      "files": 4,
+      "bytes": 21349082363,
+      "GB": 21.349082,
+      "allocated_bytes": 21349089280
+    },
+    "whisper-large-v3": {
+      "relative_paths": [
+        "whisper-large-v3-mlx"
+      ],
+      "files": 4,
+      "bytes": 3083522487,
+      "GB": 3.083522,
+      "allocated_bytes": 3083534336
+    },
+    "qwen3-asr-1.7b": {
+      "relative_paths": [
+        "qwen3-asr-1.7b",
+        "qwen3-forcedaligner-0.6b"
+      ],
+      "files": 22,
+      "bytes": 6543186767,
+      "GB": 6.543187,
+      "allocated_bytes": 6543245312
+    },
+    "minimax-h3-image": {
+      "relative_paths": [
+        "minimax-h3-image"
+      ],
+      "files": 5,
+      "bytes": 49320267605,
+      "GB": 49.320268,
+      "allocated_bytes": 49340702720
+    },
+    "minimax-h3-video-and-stream-shared": {
+      "relative_paths": [
+        "minimax-h3"
+      ],
+      "files": 192,
+      "bytes": 125621855478,
+      "GB": 125.621855,
+      "allocated_bytes": 125622181888
+    },
+    "video-dit-FL2VA": {
+      "relative_paths": [
+        "minimax-h3/FL2VA/transformer-int8"
+      ],
+      "files": 54,
+      "bytes": 23914052189,
+      "GB": 23.914052,
+      "allocated_bytes": 23914123264
+    },
+    "video-dit-Ref2VA": {
+      "relative_paths": [
+        "minimax-h3/Ref2VA/transformer-int8"
+      ],
+      "files": 54,
+      "bytes": 23914052190,
+      "GB": 23.914052,
+      "allocated_bytes": 23914123264
+    }
+  },
+  "current_directory_inventory_including_comparison_models": {
+    "strata-ad427": {
+      "files": 13,
+      "bytes": 96943638945,
+      "GB": 96.943639,
+      "allocated_bytes": 96943661056
+    },
+    "strata-uncensored": {
+      "files": 13,
+      "bytes": 96947183499,
+      "GB": 96.947183,
+      "allocated_bytes": 96951918592
+    },
+    "strata-mtp": {
+      "files": 43,
+      "bytes": 10555684574,
+      "GB": 10.555685,
+      "allocated_bytes": 10555723776
+    },
+    "embeddinggemma-2": {
+      "files": 4,
+      "bytes": 1540321361,
+      "GB": 1.540321,
+      "allocated_bytes": 1540333568
+    },
+    "qwen3-reranker": {
+      "files": 138,
+      "bytes": 116349144084,
+      "GB": 116.349144,
+      "allocated_bytes": 116428382208
+    },
+    "nemotron-3.5-transcribe-30b-a4b-gguf": {
+      "files": 4,
+      "bytes": 21349082363,
+      "GB": 21.349082,
+      "allocated_bytes": 21349089280
+    },
+    "whisper-large-v3-mlx": {
+      "files": 4,
+      "bytes": 3083522487,
+      "GB": 3.083522,
+      "allocated_bytes": 3083534336
+    },
+    "qwen3-asr-1.7b": {
+      "files": 12,
+      "bytes": 4703114308,
+      "GB": 4.703114,
+      "allocated_bytes": 4703145984
+    },
+    "qwen3-forcedaligner-0.6b": {
+      "files": 10,
+      "bytes": 1840072459,
+      "GB": 1.840072,
+      "allocated_bytes": 1840099328
+    },
+    "minimax-h3-image": {
+      "files": 5,
+      "bytes": 49320267605,
+      "GB": 49.320268,
+      "allocated_bytes": 49340702720
+    },
+    "minimax-h3": {
+      "files": 192,
+      "bytes": 125621855478,
+      "GB": 125.621855,
+      "allocated_bytes": 125622181888
+    }
+  },
+  "shared_files": "Do not add text-only embeddings to multimodal, or add the two video serving modes. The two Strata models share one Q2_0 MTP GGUF plus draft vocabulary."
+}

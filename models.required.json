@@ -1,12 +1,19 @@
 {
   "note": "Weights are external data. Copy the validated prepared model directories during migration; a source Hub checkpoint may not match these converted/aligned layouts.",
   "directories": [
-    "strata-ad427/packs/ad427", "strata-ad427/metal", "strata-mtp/rt",
-    "strata-uncensored/packs/ad427", "strata-uncensored/metal",
-    "minimax-h3", "minimax-h3-image", "whisper-large-v3-mlx",
-    "qwen3-asr-1.7b", "qwen3-forcedaligner-0.6b"
+    "strata-ad427/packs/ad427",
+    "strata-ad427/metal",
+    "strata-mtp/rt",
+    "strata-uncensored/packs/ad427",
+    "strata-uncensored/metal",
+    "minimax-h3",
+    "minimax-h3-image",
+    "whisper-large-v3-mlx",
+    "qwen3-asr-1.7b",
+    "qwen3-forcedaligner-0.6b"
   ],
   "files": [
+    "strata-mtp/mtp-q2_0.gguf",
     "embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf",
     "embeddinggemma-2/ggml-org/mmproj-embeddinggemma-2-BF16.gguf",
     "qwen3-reranker/qwen3-reranker-0.6b-q8_0.gguf",

@@ -1,3 +1,4 @@
+brew "python@3.15"
 brew "uv"
 brew "caddy"
 brew "llama-swap"

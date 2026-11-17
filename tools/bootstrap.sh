@@ -4,5 +4,6 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 command -v brew >/dev/null || { echo 'Install Homebrew from https://brew.sh first.' >&2; exit 1; }
 brew bundle --file "$root/Brewfile"
 cd "$root"
-uv sync --locked
+python_bin="$(brew --prefix python@3.15)/bin/python3.15"
+uv sync --locked --python "$python_bin"
 printf '%s\n' 'Python environment ready. Next: .venv/bin/python tools/native.py --help'

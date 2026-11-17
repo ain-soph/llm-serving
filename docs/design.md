@@ -8,11 +8,11 @@ LaunchAgent 使用解释器与脚本的完整路径和参数数组，由 `plistl
 
 ## 一个 uv 环境
 
-部署的 Python 依赖统一声明在 `pyproject.toml`，解析结果保存在 `uv.lock`。Python 3.12 兼容现有 ASR 与图片推理依赖；所有服务进程都使用根目录 `.venv/bin/python`。独立进程仍各自管理模型和 GPU 内存，共享 venv 只统一解释器及库版本。
+部署的 Python 依赖统一声明在 `pyproject.toml`，解析结果保存在 `uv.lock`。部署使用 **Homebrew Python 3.15**，`requires-python` 限定 3.15 系列，`.python-version` 记录该系列；所有服务进程都使用根目录 `.venv/bin/python`。已在 3.15.2 验证依赖安装、导入和相关 CPU 基础调用，未发现需要降到 3.12 的阻碍；完整模型推理回归仍是生产切换前的必要步骤。独立进程仍各自管理模型和 GPU 内存，共享 venv 只统一解释器及库版本。
 
 不要把临时评测、训练和模型转换工具任意装入部署环境。若未来出现真正的版本冲突，应先解决依赖约束；确实无法兼容的工具可另设非运行时环境。
 
-Homebrew 管理 uv 和原生工具，uv 管理 Python 与 Python 包。Brewfile 是工具清单，**不是永久锁定历史 bottle 的锁文件**；`native.lock.json` 的 `observed_tools` 记录已使用的版本。Homebrew 更新后应重新检查接口兼容性。源码固定 commit 也不代表跨 SDK、编译器的二进制逐字节可复现。
+Homebrew 管理 Python、uv 和原生工具，uv 管理项目虚拟环境与 Python 包。Brewfile 是工具清单，**不是永久锁定历史 bottle 的锁文件**；`native.lock.json` 的 `observed_tools` 记录已使用的版本。Homebrew 更新后应重新检查接口兼容性。源码固定 commit 也不代表跨 SDK、编译器的二进制逐字节可复现。
 
 参考：[uv 锁定与同步](https://docs.astral.sh/uv/concepts/projects/sync/)。
 
