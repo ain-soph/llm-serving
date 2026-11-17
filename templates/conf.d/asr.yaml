@@ -1,0 +1,44 @@
+models:
+  "nemotron-3.5-transcribe":
+    name: "Nemotron 3.5 Transcribe 30B-A4B"
+    capabilities:
+      in: [audio]
+      out: [text]
+      disableAuto: true
+    concurrencyLimit: 4
+    cmd: @ROOT@/tools/nemo.sh ${PORT}
+    checkEndpoint: /ready
+    ttl: 600
+    capacities:
+      gpu: 26000
+    evict_cost: 10
+
+  "whisper-large-v3":
+    name: "Whisper large-v3"
+    capabilities:
+      in: [audio]
+      out: [text]
+      disableAuto: true
+    concurrencyLimit: 4
+    cmd: @ROOT@/tools/whisper.sh ${PORT}
+    checkEndpoint: /health
+    ttl: 600
+    capacities:
+      gpu: 6000
+    evict_cost: 10
+
+  "qwen3-asr-1.7b":
+    name: "Qwen3-ASR 1.7B"
+    capabilities:
+      in: [audio]
+      out: [text]
+      disableAuto: true
+    concurrencyLimit: 4
+    cmd: >
+      @PYTHON@
+      @ROOT@/asr/qwen3-asr-mlx/server.py --port ${PORT} --model-id qwen3-asr-1.7b --model @MODELS@/qwen3-asr-1.7b --aligner @MODELS@/qwen3-forcedaligner-0.6b
+    checkEndpoint: /health
+    ttl: 600
+    capacities:
+      gpu: 10000
+    evict_cost: 10

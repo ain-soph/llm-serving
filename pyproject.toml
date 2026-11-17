@@ -1,0 +1,27 @@
+[project]
+name = "llm-serving-macos"
+version = "0.1.0"
+description = "Local model APIs and reproducible deployment for Apple Silicon"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "h3-image-mlx",
+  "mlx==0.32.4",
+  "mlx-whisper==0.4.3",
+  "mlx-qwen3-asr[aligner]==0.4.4",
+  "numpy==2.5.3",
+  "pillow==13.0.0",
+  "jinja2==3.1.6",
+  "regex==2026.9.10",
+  "pyyaml==6.0.3",
+  "tqdm==4.70.1",
+  "requests==2.34.2",
+  "psutil==7.2.2",
+  "soundfile==0.14.0",
+]
+
+[tool.uv]
+package = false
+environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
+
+[tool.uv.sources]
+h3-image-mlx = { git = "https://github.com/ain-soph/h3-image-mlx", rev = "ce8d4a35afefdab11a7f54abe5cfa034ea247c94" }

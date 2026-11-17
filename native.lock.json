@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "sources": {
+    "strata": {
+      "url": "https://github.com/ain-soph/Strata.git",
+      "revision": "004d0d1197292b7819c9b3ed52c5bb8f29c18514",
+      "license": "MIT"
+    },
+    "strata-ggml": {
+      "url": "https://github.com/ggml-org/llama.cpp.git",
+      "revision": "3cf03257f219afbe7334045ff7c6a06ac68c627d",
+      "license": "MIT"
+    },
+    "h3": {
+      "url": "https://github.com/ain-soph/h3.c.git",
+      "revision": "821ada14f2e8f62147f990c521f624539d16fd58",
+      "license": "MIT"
+    },
+    "nemo": {
+      "url": "https://github.com/NVIDIA/NeMo-Speech.cpp.git",
+      "revision": "e790e463b2913cff9f989a3df224c587f14b4c5c",
+      "license": "Apache-2.0"
+    }
+  },
+  "metal_cpp": {
+    "url": "https://developer.apple.com/metal/cpp/files/metal-cpp_26.zip",
+    "sha256": "4df3c078b9aadcb516212e9cb03004cbc5ce9a3e9c068fa3144d021db585a3a4"
+  },
+  "observed_tools": {
+    "uv": "0.13.8",
+    "caddy": "2.11.9",
+    "llama-swap": "273",
+    "llama.cpp": "1.0.0 (build 12359, commit b1b770d90)",
+    "ffmpeg": "9.0.2_1",
+    "cmake": "4.5.0",
+    "ninja": "1.13.2"
+  }
+}

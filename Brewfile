@@ -1,0 +1,7 @@
+brew "uv"
+brew "caddy"
+brew "llama-swap"
+brew "llama.cpp"
+brew "ffmpeg"
+brew "cmake"
+brew "ninja"

@@ -1,0 +1,41 @@
+macros:
+  "rerank-cmd": >
+    @LLAMA_SERVER@ --reranking --host 127.0.0.1 --port ${PORT}
+    -c 8192 -b 8192 -ub 8192 -np 1
+
+models:
+  "qwen3-reranker-0.6b":
+    name: "Qwen3 Reranker 0.6B"
+    description: "Fast reranker (20 docs ~0.4 s)"
+    cmd: ${rerank-cmd} -m @MODELS@/qwen3-reranker/qwen3-reranker-0.6b-q8_0.gguf
+    capabilities:
+      reranker: true
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 3000
+    evict_cost: 0
+
+  "qwen3-reranker-4b":
+    name: "Qwen3 Reranker 4B"
+    description: "Default reranker (20 docs ~1.6 s)"
+    cmd: ${rerank-cmd} -m @MODELS@/qwen3-reranker/qwen3-reranker-4b-q8_0.gguf
+    capabilities:
+      reranker: true
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 7000
+    evict_cost: 0
+
+  "qwen3-reranker-8b":
+    name: "Qwen3 Reranker 8B"
+    description: "Most accurate reranker (20 docs ~2.6 s)"
+    cmd: ${rerank-cmd} -m @MODELS@/qwen3-reranker/qwen3-reranker-8b-q8_0.gguf
+    capabilities:
+      reranker: true
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 10500
+    evict_cost: 0

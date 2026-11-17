@@ -1,0 +1,34 @@
+models:
+  "minimax-h3-video":
+    name: "MiniMax H3 Video (resident int8)"
+    description: "Text/first/last-frame to video with stereo audio; POST /upstream/minimax-h3-video/v1/videos"
+    capabilities:
+      in: [text, image]
+      out: [video]
+      disableAuto: true
+    ttl: 120
+    checkEndpoint: /health
+    cmd: >
+      @PYTHON@ @ROOT@/h3-video/server.py
+      --port ${PORT} --models @MODELS@/minimax-h3 --out-dir @STATE@/media/videos
+      --model-id minimax-h3-video --mode resident
+    capacities:
+      gpu: ${env.LSW_GPU_EXCLUSIVE}
+    evict_cost: 0
+
+  "minimax-h3-video-stream":
+    name: "MiniMax H3 Video (SSD streaming)"
+    description: "Same model, DiT streamed from SSD layer by layer (INT8 from transformer-int8 when packed, else BF16); POST /upstream/minimax-h3-video-stream/v1/videos"
+    capabilities:
+      in: [text, image]
+      out: [video]
+      disableAuto: true
+    ttl: 30
+    checkEndpoint: /health
+    cmd: >
+      @PYTHON@ @ROOT@/h3-video/server.py
+      --port ${PORT} --models @MODELS@/minimax-h3 --out-dir @STATE@/media/videos
+      --model-id minimax-h3-video-stream --mode stream
+    capacities:
+      gpu: ${env.LSW_GPU_EXCLUSIVE}
+    evict_cost: 0

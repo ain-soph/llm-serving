@@ -1,0 +1,48 @@
+
+healthCheckTimeout: 600
+unloadTimeout: 30
+globalTTL: 0
+
+apiKeys:
+  - "${env.LLAMA_API_KEY}"
+
+store:
+  path: @STATE@/activity.sqlite
+
+macros:
+  "h3-image-cmd": >
+    @PYTHON@ @ROOT@/h3-image-mlx/server.py
+    --port ${PORT} --models @MODELS@/minimax-h3-image
+
+routing:
+  router:
+    use: capacity
+    settings:
+      capacity:
+        pools:
+          gpu: ${env.LSW_GPU_POOL}
+
+models:
+
+  "minimax-h3-image":
+    name: "MiniMax H3 Image"
+    description: "Every size, next to the chat model"
+    ttl: 600
+    capabilities:
+      in: [text, image]
+      out: [image]
+    checkEndpoint: /health
+    env:
+      - "H3_ZERO_COPY=1"
+      - "H3_ASYNC=1"
+      - "H3_GPU_BUDGET_MB=8000"
+    cmd: ${h3-image-cmd} --model-id minimax-h3-image
+    capacities:
+      gpu: 10000
+    evict_cost: 0
+
+hooks:
+  on_startup:
+    preload:
+      - "qwen3.8-flash-next"
+      - "embeddinggemma-2"

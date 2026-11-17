@@ -1,0 +1,23 @@
+models:
+  "embeddinggemma-2":
+    name: "EmbeddingGemma 2 (768d, always loaded)"
+    description: "Text embeddings for RAG / memory search; dimensions up to 768 (Matryoshka) or padded"
+    cmd: >
+      @PYTHON@ @ROOT@/embedding/server.py
+      --llama-server @LLAMA_SERVER@ --port ${PORT} --model @MODELS@/embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf
+    checkEndpoint: /health
+    evict_cost: 0
+
+  "embeddinggemma-2-multimodal":
+    name: "EmbeddingGemma 2 multimodal (text/image/audio/video)"
+    description: "Same vector space as embeddinggemma-2; inputs may be chat-style content-part lists"
+    cmd: >
+      @PYTHON@ @ROOT@/embedding/server.py
+      --llama-server @LLAMA_SERVER@ --port ${PORT} --model-id embeddinggemma-2-multimodal
+      --model @MODELS@/embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf
+      --mmproj @MODELS@/embeddinggemma-2/ggml-org/mmproj-embeddinggemma-2-BF16.gguf
+    checkEndpoint: /health
+    ttl: 600
+    capacities:
+      gpu: 3500
+    evict_cost: 0

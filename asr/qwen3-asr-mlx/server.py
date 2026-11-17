@@ -1,0 +1,119 @@
+"""OpenAI-compatible speech-to-text API for Qwen3-ASR via mlx-qwen3-asr, meant to run behind llama-swap.
+
+Endpoints:
+  GET  /health                    readiness probe for llama-swap's checkEndpoint (200 once the model is loaded)
+  GET  /v1/models                 lists the single model ID
+  POST /v1/audio/transcriptions   multipart: file, model, language, prompt, response_format
+                                  (json|text|srt|vtt|verbose_json), timestamp_granularities[] (word|segment),
+                                  temperature (accepted, ignored: decoding is greedy)
+
+Requests block until the transcript is ready; inference runs one request at a time on a single worker thread
+that owns the MLX model (MLX state should not be shared across threads). Long audio is split by the library into
+~30 s chunks at low-energy points. srt/vtt/verbose_json run the Qwen3-ForcedAligner-0.6B (preloaded and
+kept resident) for word timestamps; segments are subtitle-style cues grouped from the words.
+`prompt` is passed to Qwen3-ASR as its context (domain terms / hotwords).
+
+Usage: .venv/bin/python server.py --port PORT [--model DIR] [--aligner DIR] [--model-id ID] [--dtype float16]"""
+import argparse
+import concurrent.futures as cf
+import json
+import logging
+import os
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from http_api import SR, Server, Handler, ts
+
+log = logging.getLogger("qwen3-asr-server")
+
+class Engine:
+    """Owns the MLX model; every call runs on one dedicated thread."""
+
+    def __init__(self, model_dir, aligner_dir, dtype):
+        self.pool = cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx")
+        self.model_dir, self.aligner_dir, self.dtype_name = model_dir, aligner_dir, dtype
+        self.session = self.aligner = None
+        self.ready = False
+        self.pool.submit(self._load).result()
+
+    def _load(self):
+        import mlx.core as mx
+        from mlx_qwen3_asr import ForcedAligner, Session
+        # Bound reusable temporaries so long timestamp requests do not retain
+        # several GiB of allocator cache beside the resident model/aligner.
+        mx.set_cache_limit(512 * 1024**2)
+        t = time.time()
+        self.session = Session(self.model_dir, dtype=getattr(mx, self.dtype_name))
+        self.aligner = ForcedAligner(self.aligner_dir, dtype=getattr(mx, self.dtype_name))
+        self.aligner._ensure_loaded()  # keep it resident so memory is stable and the first srt is not slow
+        self.ready = True
+        log.info("loaded %s (%s) in %.1fs", self.model_dir, self.dtype_name, time.time() - t)
+
+    def transcribe(self, audio, language, context, timestamps):
+        return self.pool.submit(self._run, audio, language, context, timestamps).result()
+
+    def _run(self, audio, language, context, timestamps):
+        t = time.time()
+        r = self.session.transcribe(audio, language=language, context=context, return_timestamps=timestamps,
+                                    return_chunks=True, forced_aligner=self.aligner if timestamps else None)
+        if r.truncated:
+            raise RuntimeError("decoder token budget exhausted; refusing an incomplete transcript")
+        log.info("transcribed %.1fs audio in %.2fs (lang=%s, timestamps=%s)", len(audio) / SR, time.time() - t,
+                 r.language, timestamps)
+        return r
+
+def build_response(r, fmt, duration, words_wanted):
+    from mlx_qwen3_asr.writers import group_subtitle_segments
+    text = r.text
+    if fmt == "text":
+        return "text/plain; charset=utf-8", text + "\n"
+    if fmt == "json":
+        return "application/json", {"text": text}
+    words = r.segments or []
+    cues = group_subtitle_segments(words, language=r.language or "", text=text) if words else []
+    if not cues and r.chunks:  # aligner failed or produced nothing: fall back to chunk-level times
+        cues = [{"start": c["start"], "end": c["end"], "text": c["text"]} for c in r.chunks if c.get("text")]
+    if fmt == "srt":
+        body = "".join(f"{i}\n{ts(c['start'], ',')} --> {ts(c['end'], ',')}\n{c['text'].strip()}\n\n"
+                       for i, c in enumerate(cues, 1))
+        return "text/plain; charset=utf-8", body
+    if fmt == "vtt":
+        body = "WEBVTT\n\n" + "".join(f"{ts(c['start'], '.')} --> {ts(c['end'], '.')}\n{c['text'].strip()}\n\n"
+                                      for c in cues)
+        return "text/vtt; charset=utf-8", body
+    out = {"task": "transcribe", "language": (r.language or "").lower(), "duration": round(duration, 3),
+           "text": text,
+           "segments": [{"id": i, "seek": 0, "start": round(c["start"], 3), "end": round(c["end"], 3),
+                         "text": c["text"], "tokens": [], "temperature": 0.0, "avg_logprob": None,
+                         "compression_ratio": None, "no_speech_prob": None} for i, c in enumerate(cues)]}
+    if words_wanted:
+        out["words"] = [{"word": w["text"], "start": round(w["start"], 3), "end": round(w["end"], 3)}
+                        for w in words]
+    return "application/json", out
+
+def main():
+    home = Path.home()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, required=True)
+    ap.add_argument("--model", default=str(home / "models/qwen3-asr-1.7b"))
+    ap.add_argument("--aligner", default=str(home / "models/qwen3-forcedaligner-0.6b"))
+    ap.add_argument("--model-id", default="qwen3-asr-1.7b")
+    ap.add_argument("--dtype", default="float16", choices=("float16", "bfloat16", "float32"))
+    a = ap.parse_args()
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")  # weights are local; never fetch at runtime
+    logging.basicConfig(level=logging.INFO, format="[qwen3-asr] %(message)s")
+    server = Server((a.host, a.port), Handler)  # bind first so llama-swap sees the port while loading
+    server.model_id = a.model_id
+    server.response_builder = build_response
+    server.engine = type("E", (), {"ready": False})()
+    import threading
+    threading.Thread(target=lambda: setattr(server, "engine", Engine(a.model, a.aligner, a.dtype)),
+                     daemon=True).start()
+    log.info("listening on http://%s:%d (model %s)", a.host, a.port, a.model)
+    server.serve_forever()
+
+if __name__ == "__main__":
+    main()
