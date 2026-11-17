@@ -160,15 +160,14 @@
         "qwen-image-2.1/turbo/scheduler",
         "qwen-image-2.1/turbo/transformer/config.json",
         "qwen-image-2.1/w8a8/base/model.safetensors",
-        "qwen-image-2.1/w8a8/turbo/model.safetensors",
-        "qwen-image-2.1/w8a8/te/model.safetensors"
+        "qwen-image-2.1/w8a8/turbo/model.safetensors"
       ],
       "measured_on": "2026-11-17",
-      "files": 27,
-      "bytes": 42777043653,
-      "GB": 42.777044,
-      "allocated_bytes": 42824605696,
-      "note": "All four entries: W8A8 DiTs (base, turbo), BF16 and INT8 text encoders, FP32 VAE. The BF16 DiT files are not read when MFLUX_QWEN21_W8A8 is set; only transformer/config.json is."
+      "files": 26,
+      "bytes": 33426238837,
+      "GB": 33.426239,
+      "allocated_bytes": 33450819584,
+      "note": "Three entries (turbo, turbo-pe, base): W8A8 DiTs, BF16 text encoder, FP32 VAE. The BF16 DiT files are not read when MFLUX_QWEN21_W8A8 is set; only transformer/config.json is. The INT8 text encoder was dropped 2026-11-17."
     },
     "qwen3-reranker-4b-int8": {
       "relative_paths": [

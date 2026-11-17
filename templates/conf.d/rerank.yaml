@@ -21,7 +21,7 @@ models:
 
   "qwen3-reranker-4b":
     name: "Qwen3 Reranker 4B"
-    description: "Default reranker (20 docs ~0.85 s)"
+    description: "Exact 4B reranker (20 docs ~0.85 s)"
     cmd: ${rerank-cmd} --model-id qwen3-reranker-4b --model @MODELS@/qwen3-reranker/zc-4b-bf16
     capabilities:
       reranker: true
@@ -33,7 +33,7 @@ models:
 
   "qwen3-reranker-4b-int8":
     name: "Qwen3 Reranker 4B (W8A8)"
-    description: "4B with int8 weights and activations: 1.4x faster (20 docs ~0.6 s), scores within ~0.02"
+    description: "4B with int8 weights and activations: 1.4x faster (20 docs ~0.6 s), same nDCG; suggested for RAG frontends"
     cmd: ${rerank-cmd} --model-id qwen3-reranker-4b-int8 --model @MODELS@/qwen3-reranker/w8a8-4b
     capabilities:
       reranker: true

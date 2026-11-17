@@ -18,7 +18,7 @@
 | 文本／视觉 | `qwen3.8-flash-next`、`-uncensored` | [Strata fork](https://github.com/ain-soph/Strata/tree/serving) | 262k 上下文 × 2 路，MTP 投机解码 |
 | 嵌入 | `embeddinggemma-2`、`-multimodal` | llama.cpp | 文本常驻；多模态支持图片、音频、视频 |
 | 嵌入 | `qwen3-embedding-0.6b`／`4b`／`8b`（`4b`、`8b` 各有 `-int8`）、`voyage-4-nano` | MLX，自写服务 | 32K 输入；零拷贝；`-int8` 为 W8A8，快 1.5–1.7× |
-| 重排 | `qwen3-reranker-0.6b`／`4b`／`8b`（`4b`、`8b` 各有 `-int8`） | MLX，自写服务 | `/v1/rerank`，按长度排序批量计算；零拷贝 |
+| 重排 | `qwen3-reranker-0.6b`／`4b`／`8b`（`4b`、`8b` 各有 `-int8`） | MLX，自写服务 | `/v1/rerank`，按长度排序批量计算；零拷贝；RAG 推荐 `4b-int8` |
 | 决策 | `pplx-decider-flash`、`-multimodal`、`-int8` | MLX 移植 | SystemOne `/v1/systemone`：判断／选择／打分概率 |
 | 决策 | `elephant-1`、`-int8` | MLX 移植 + 官方 OneJev | 9B，文本，最长 16K token；8-bit 权重，与聊天模型共存 |
 | 语音转写 | `qwen3-asr-1.7b` | [mlx-qwen3-asr fork](https://github.com/ain-soph/mlx-qwen3-asr/tree/serving) | 默认；中文、中英混合；强制对齐器给词级时间戳 |
@@ -28,7 +28,7 @@
 | 语音合成 | `qwen3-tts`、`-clone`、`-design` | mlx-audio fork | `/v1/audio/speech`：预设音色、声音克隆、声音设计；边生成边输出 |
 | 语音合成 | `cosyvoice3` | mlx-audio-plus（单独环境） | 中文方言、情感指令、零样本／跨语言克隆 |
 | 图片生成／编辑 | `minimax-h3-image` | [h3-image-mlx fork](https://github.com/ain-soph/h3-image-mlx/tree/serving) | W8A8，零拷贝，融合内核；各尺寸与聊天模型共存 |
-| 图片生成／编辑 | `qwen-image-2.1-turbo`、`qwen-image-2.1`（各有 `-int8` 文本编码器版）、`qwen-image-2.1-turbo-pe` | [mflux fork](https://github.com/ain-soph/mflux/tree/serving) | 8／40 步；最多 10 张参考图、遮罩、透明 PNG、提示词增强；非商用许可 |
+| 图片生成／编辑 | `qwen-image-2.1-turbo`、`qwen-image-2.1-turbo-pe`、`qwen-image-2.1` | [mflux fork](https://github.com/ain-soph/mflux/tree/serving) | 8／40 步；最多 10 张参考图、遮罩、透明 PNG、提示词增强；非商用许可 |
 | 视频＋音频 | `minimax-h3-video` | [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving) | `best`／`standard`／`fast` 三档，最长 15 s；INT8 DiT 零拷贝 |
 
 完整 commit 固定在 `native.lock.json`（原生引擎）和 `uv.lock`（Python 包）；[原生构建脚本](tools/native.py)、[模型路由模板](templates/conf.d/)、[Strata 配置](templates/strata/) 和自写接口都在本仓库。权重准备与服务说明：[Strata](docs/strata.md)、[重排](docs/rerank.md)、[零拷贝与 W8A8 副本](docs/w8a8.md)、[决策模型](docs/decisions.md)、[SOV 语音转写](docs/sov.md)、[语音合成](docs/tts.md)、[H3 图片](docs/h3-image.md)、[Qwen-Image](docs/qwen-image.md)、[H3 视频](docs/h3-video.md)。

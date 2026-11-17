@@ -1,6 +1,7 @@
 # Qwen-Image-2.1 (Qwen Research License: non-commercial) via the mflux fork (github.com/ain-soph/mflux, pinned in
 # uv.lock): POST /v1/images/generations and /v1/images/edits (up to 10 references, OpenAI mask, transparent PNG).
-# DiT W8A8 (Comfy-Org int8_convrot) on the M5 TensorOps INT8 GEMM; text encoder BF16, or INT8 for the -int8 IDs.
+# DiT W8A8 (Comfy-Org int8_convrot) on the M5 TensorOps INT8 GEMM; text encoder BF16 (an INT8 text encoder was
+# tried and dropped 2026-11-17: no faster, only less page cache; W8A8 only where it speeds things up).
 # Zero-copy page-aligned weights streamed layer by layer; MLX cache 6 GB for the denoiser (2 GB with references),
 # 2 GB for the VAE, which decodes in two-pass row strips. Measured wired peak of a whole generation: 6.7-9.0 GB
 # (text to image up to 2400x1792), 5.6-8.4 GB with 3-10 references -> capacity 11000 fits next to the chat model.
@@ -19,29 +20,6 @@ models:
       - "MFLUX_ZERO_COPY=1"
       - "MFLUX_ZERO_COPY_STREAM=1"
       - "MFLUX_QWEN21_W8A8=@MODELS@/qwen-image-2.1/w8a8/turbo"
-      - "MFLUX_QWEN21_VAE_STRIP_FROM=2"
-      - "MFLUX_QWEN21_VAE_STRIP_BUDGET=16384"
-      - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
-      - "QWEN_IMAGE_CACHE_MB=6144"
-      - "QWEN_IMAGE_REF_CACHE_MB=2048"
-    capabilities:
-      in: [text, image]
-      out: [image]
-    checkEndpoint: /health
-    ttl: 600
-    capacities:
-      gpu: 11000
-    evict_cost: 0
-
-  "qwen-image-2.1-turbo-int8":
-    name: "Qwen Image 2.1 Turbo (int8 text encoder)"
-    description: "As qwen-image-2.1-turbo with the int8 text encoder: 8.8 GB less page cache"
-    cmd: ${qwen-image-cmd} --turbo --model @MODELS@/qwen-image-2.1/turbo --model-id qwen-image-2.1-turbo-int8
-    env:
-      - "MFLUX_ZERO_COPY=1"
-      - "MFLUX_ZERO_COPY_STREAM=1"
-      - "MFLUX_QWEN21_W8A8=@MODELS@/qwen-image-2.1/w8a8/turbo"
-      - "MFLUX_QWEN21_TE_W8A8=@MODELS@/qwen-image-2.1/w8a8/te"
       - "MFLUX_QWEN21_VAE_STRIP_FROM=2"
       - "MFLUX_QWEN21_VAE_STRIP_BUDGET=16384"
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
@@ -87,29 +65,6 @@ models:
       - "MFLUX_ZERO_COPY=1"
       - "MFLUX_ZERO_COPY_STREAM=1"
       - "MFLUX_QWEN21_W8A8=@MODELS@/qwen-image-2.1/w8a8/base"
-      - "MFLUX_QWEN21_VAE_STRIP_FROM=2"
-      - "MFLUX_QWEN21_VAE_STRIP_BUDGET=16384"
-      - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
-      - "QWEN_IMAGE_CACHE_MB=6144"
-      - "QWEN_IMAGE_REF_CACHE_MB=2048"
-    capabilities:
-      in: [text, image]
-      out: [image]
-    checkEndpoint: /health
-    ttl: 600
-    capacities:
-      gpu: 11000
-    evict_cost: 0
-
-  "qwen-image-2.1-int8":
-    name: "Qwen Image 2.1 (int8 text encoder)"
-    description: "As qwen-image-2.1 with the int8 text encoder: 8.8 GB less page cache"
-    cmd: ${qwen-image-cmd} --model @MODELS@/qwen-image-2.1/base --model-id qwen-image-2.1-int8
-    env:
-      - "MFLUX_ZERO_COPY=1"
-      - "MFLUX_ZERO_COPY_STREAM=1"
-      - "MFLUX_QWEN21_W8A8=@MODELS@/qwen-image-2.1/w8a8/base"
-      - "MFLUX_QWEN21_TE_W8A8=@MODELS@/qwen-image-2.1/w8a8/te"
       - "MFLUX_QWEN21_VAE_STRIP_FROM=2"
       - "MFLUX_QWEN21_VAE_STRIP_BUDGET=16384"
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"

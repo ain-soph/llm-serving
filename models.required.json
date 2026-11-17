@@ -51,7 +51,6 @@
     "qwen-image-2.1/turbo/transformer/config.json",
     "qwen-image-2.1/w8a8/base/model.safetensors",
     "qwen-image-2.1/w8a8/turbo/model.safetensors",
-    "qwen-image-2.1/w8a8/te/model.safetensors",
     "qwen3-reranker/zc-0.6b-bf16/model.safetensors",
     "qwen3-reranker/zc-0.6b-bf16/w8a8.json",
     "qwen3-reranker/zc-4b-bf16/model.safetensors",

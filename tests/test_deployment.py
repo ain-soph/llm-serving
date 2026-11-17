@@ -92,13 +92,12 @@ class DeploymentTests(unittest.TestCase):
             qwen = yaml.safe_load((output / "conf.d/qwen-image.yaml").read_text())
             command = shlex.split(qwen["macros"]["qwen-image-cmd"])
             self.assertEqual(command[:2], [str(root / ".venv/bin/python"), str(root / "qwen-image/server.py")])
-            for model_id, variant in [("qwen-image-2.1-turbo", "turbo"), ("qwen-image-2.1-int8", "base")]:
+            self.assertEqual(sorted(qwen["models"]), ["qwen-image-2.1", "qwen-image-2.1-turbo", "qwen-image-2.1-turbo-pe"])
+            for model_id, variant in [("qwen-image-2.1-turbo", "turbo"), ("qwen-image-2.1", "base")]:
                 entry = qwen["models"][model_id]
                 args = shlex.split(entry["cmd"])
                 self.assertEqual(args[args.index("--model") + 1], str(models / "qwen-image-2.1" / variant))
                 self.assertIn(f"MFLUX_QWEN21_W8A8={models / 'qwen-image-2.1/w8a8' / variant}", entry["env"])
-            self.assertIn(f"MFLUX_QWEN21_TE_W8A8={models / 'qwen-image-2.1/w8a8/te'}",
-                          qwen["models"]["qwen-image-2.1-int8"]["env"])
             env = environment(config)
             self.assertEqual(env["H3_VIDEO_FETCH_HOSTS"], "")
             self.assertEqual(env["H3_VIDEO_LSW_URL"], "http://127.0.0.1:8081")

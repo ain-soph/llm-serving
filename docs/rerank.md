@@ -15,6 +15,8 @@ Transformers 5.23.0，具体依赖由 `uv.lock` 固定。
 
 `zc-*` 是 `mlx-*` 转换结果重写成的页对齐零拷贝文件（分数与 `mlx-*` 完全相同；8B 输出头只留 yes/no 两行，
 所以比 9.228 GB 的 `mlx-8b-q8_0` 小），`w8a8-*` 是 W8A8 副本；生成步骤见 [零拷贝与 W8A8 副本](w8a8.md)。
+给 RAG 前端（例如 Open WebUI 的重排设置）推荐 `qwen3-reranker-4b-int8`：比精确的 4B 快 1.4 倍，SciFact nDCG@10 0.7498 对 0.7514，单个分数偏差约 0.02（排序几乎不变）；需要精确分数时用 `qwen3-reranker-4b`。
+
 迁移应复制这些已验证目录。`models.required.json` 检查必需文件，避免空目录被误判为完整模型。权重不上传 GitHub。
 
 ## 服务层优化
