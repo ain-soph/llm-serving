@@ -7,16 +7,19 @@ Transformers 5.23.0，具体依赖由 `uv.lock` 固定。
 
 | ID | 模型目录（相对于模型根目录） | 权重／激活 | 运行文件逻辑大小 |
 | --- | --- | --- | ---: |
-| `qwen3-reranker-0.6b` | `qwen3-reranker/mlx-0.6b-bf16` | BF16／BF16 | 1.203 GB |
-| `qwen3-reranker-4b` | `qwen3-reranker/mlx-4b-bf16` | BF16／BF16 | 8.055 GB |
-| `qwen3-reranker-8b` | `qwen3-reranker/mlx-8b-q8_0` | Q8_0 等价 MLX affine 8-bit、group 32、FP16 scale/bias／FP16 | 9.228 GB |
+| `qwen3-reranker-0.6b` | `qwen3-reranker/zc-0.6b-bf16` | BF16／BF16 | 1.203 GB |
+| `qwen3-reranker-4b` | `qwen3-reranker/zc-4b-bf16` | BF16／BF16 | 8.055 GB |
+| `qwen3-reranker-4b-int8` | `qwen3-reranker/w8a8-4b` | W8A8（INT8 权重与激活） | 4.426 GB |
+| `qwen3-reranker-8b` | `qwen3-reranker/zc-8b-q8_0` | Q8_0 等价 MLX affine 8-bit、group 32、FP16 scale/bias／FP16 | 8.529 GB |
+| `qwen3-reranker-8b-int8` | `qwen3-reranker/w8a8-8b` | W8A8 | 8.210 GB |
 
-迁移应复制这三个已验证目录，包括配置、tokenizer、索引及全部 safetensors 分片。
-`models.required.json` 检查必需文件，避免空目录被误判为完整模型。权重不上传 GitHub。
+`zc-*` 是 `mlx-*` 转换结果重写成的页对齐零拷贝文件（分数与 `mlx-*` 完全相同；8B 输出头只留 yes/no 两行，
+所以比 9.228 GB 的 `mlx-8b-q8_0` 小），`w8a8-*` 是 W8A8 副本；生成步骤见 [零拷贝与 W8A8 副本](w8a8.md)。
+迁移应复制这些已验证目录。`models.required.json` 检查必需文件，避免空目录被误判为完整模型。权重不上传 GitHub。
 
 ## 服务层优化
 
-- 把同一查询下的文档右侧补齐后批量计算，默认最多 8192 个补齐后 batch token。
+- 文档按长度排序（最长在前）后右侧补齐批量计算，默认最多 8192 个补齐后 batch token。
   这是批量预算，不是上下文长度限制；单篇更长的文档仍会独立计算，可能提高峰值内存。
 - 使用官方提示格式，取每篇最后一个真实 token 的 yes/no logits，计算 `sigmoid(yes-no)`。
   只保留输出头的两行；8B 的其余独立输出头加载后释放，约少 0.6 GB。

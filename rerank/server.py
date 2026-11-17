@@ -1,20 +1,29 @@
 """Qwen3-Reranker on MLX behind a llama.cpp-compatible /v1/rerank (2026-11-16).
 
-  .venv/bin/python rerank/server.py --port PORT --model MLX_DIR [--max-batch-tokens 8192] [--cache-mb 256]
+  .venv/bin/python rerank/server.py --port PORT --model MLX_DIR [--max-batch-tokens 8192] [--cache-mb 256] [--copy]
+
+MLX_DIR is an mlx_lm checkpoint, or a W8A8 / zero-copy copy written by ../common/qwen3_w8a8.py (w8a8.json): its
+projections run on the INT8 TensorOps GEMM and its weights are mapped from the page cache instead of copied
+(--copy: read them into memory as before).
 
 POST /v1/rerank (also /rerank, /v1/reranking): {"model", "query", "documents": [str], "top_n"?, "return_documents"?,
 "instruction"?} -> {"model", "object": "list", "results": [{"index", "relevance_score", "document"?}], "usage"}.
 relevance_score = sigmoid(logit("yes") - logit("no")) at the last token of the official Qwen3-Reranker prompt.
-Documents are right-padded into batches of up to --max-batch-tokens tokens (the causal mask keeps every document exact);
+Documents are sorted by length (longest first) and right-padded into batches of up to --max-batch-tokens tokens (the causal mask keeps every document exact);
 only the last real token of each goes through the "yes"/"no" rows of the head (the rest of an untied head is freed at
 load). Requests run one at a time.
-Performance and precision tradeoffs are documented in docs/rerank.md.
+Performance and precision tradeoffs are documented in docs/rerank.md and docs/performance.md.
 """
-import argparse, json, logging, math, threading, time
+import argparse, json, logging, math, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import mlx.core as mx
 from mlx_lm import load
+from mlx_lm.tokenizer_utils import load as load_tokenizer
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "common"))
+import mlx_w8a8, qwen3_w8a8  # noqa: E402
 
 from prompts import INSTRUCTION, PREFIX, SUFFIX
 
@@ -23,7 +32,12 @@ lock = threading.Lock()
 
 
 class Reranker:
-    def __init__(self, path, max_batch_tokens):
+    def __init__(self, path, max_batch_tokens, copy=False):
+        self.max_batch_tokens = max_batch_tokens
+        if qwen3_w8a8.is_w8a8(path):
+            self.inner, extras, _ = qwen3_w8a8.load(path, copy=copy)
+            self.tok, self.rows = load_tokenizer(Path(path)), extras["score_rows"]
+            return
         self.model, self.tok = load(path)
         self.inner = self.model.model
         pair = mx.array([self.tok.convert_tokens_to_ids("yes"), self.tok.convert_tokens_to_ids("no")])
@@ -38,25 +52,24 @@ class Reranker:
         if not tied:
             del self.model.lm_head
         mx.clear_cache()
-        self.max_batch_tokens = max_batch_tokens
 
     def scores(self, query, docs, instruction):
         ids = [self.tok.encode(PREFIX + f"<Instruct>: {instruction}\n<Query>: {query}\n<Document>: {d}" + SUFFIX)
                for d in docs]
-        out, start = [], 0
-        while start < len(ids):                     # pack documents in order until the batch would be too large
-            end, width = start, 0
-            while end < len(ids):
-                w = max(width, len(ids[end]))
-                if end > start and w * (end - start + 1) > self.max_batch_tokens:
-                    break
-                width, end = w, end + 1
-            chunk = ids[start:end]
+        order = sorted(range(len(ids)), key=lambda i: -len(ids[i]))
+        out, start = [0.0] * len(ids), 0
+        while start < len(order):                   # longest first: each batch's width is its first document
+            width, end = len(ids[order[start]]), start + 1
+            while end < len(order) and width * (end - start + 1) <= self.max_batch_tokens:
+                end += 1
+            chunk = [ids[i] for i in order[start:end]]
             hidden = self.inner(mx.array([x + [0] * (width - len(x)) for x in chunk]))
             last = hidden[mx.arange(len(chunk)), mx.array([len(x) - 1 for x in chunk])]
             logits = (last @ self.rows.T).astype(mx.float32)
             mx.eval(logits)
-            out += [1 / (1 + math.exp(-(a - b))) for a, b in logits.tolist()]
+            mlx_w8a8.release()
+            for i, (a, b) in zip(order[start:end], logits.tolist()):
+                out[i] = 1 / (1 + math.exp(-(a - b)))
             start = end
         return out, sum(map(len, ids))
 
@@ -112,11 +125,12 @@ def main():
     ap.add_argument("--model-id", default="qwen3-reranker")
     ap.add_argument("--max-batch-tokens", type=int, default=8192)
     ap.add_argument("--cache-mb", type=int, default=256, help="MLX buffer cache kept between requests (0 vs 1024: <1%% speed)")
+    ap.add_argument("--copy", action="store_true", help="W8A8 / zero-copy directory: copy the weights into memory")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="[rerank] %(message)s")
     mx.set_cache_limit(args.cache_mb << 20)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    server.reranker, server.model_id = Reranker(args.model, args.max_batch_tokens), args.model_id
+    server.reranker, server.model_id = Reranker(args.model, args.max_batch_tokens, args.copy), args.model_id
     log.info("listening on http://%s:%d (%s)", args.host, args.port, args.model)
     server.serve_forever()
 

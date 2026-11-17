@@ -1,8 +1,10 @@
 """OpenAI-style /v1/embeddings for EmbeddingGemma 2 (GGUF on llama-server), meant to run behind llama-swap.
 
-  python3 server.py --port PORT [--model GGUF] [--model-id ID]
+  python3 server.py --port PORT [--model GGUF] [--model-id ID] [--backend llama|mlx]
 
-Starts llama-server --embedding on a private port and adapts its answers to what the clients send:
+--backend llama (default) starts llama-server --embedding on a private port; --backend mlx (text only, run with an MLX
+venv) computes the vectors in this process with gemma2_mlx.py from the same GGUF: no ubatch-sized compute buffer kept
+allocated, inputs up to --max-tokens. Either way the answers are adapted to what the clients send:
   dimensions     < 768: Matryoshka truncation (the model is trained for 512/256/128) and L2 re-normalization;
                  > 768: zero-padding, which keeps cosine similarity and dot products unchanged (LobeChat always asks
                  for 1024 because its pgvector column is vector(1024)); 768 or absent: unchanged.
@@ -37,6 +39,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 NATIVE_DIM = 768
@@ -112,7 +115,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0].rstrip("/")
+        if path == "":     # llama-swap's preload hook requests GET /
+            return self._json(200, {"status": "ok", "model": self.server.model_id})
         if path == "/health":
+            if self.server.mlx:
+                return self._json(200, {"status": "ok"})
             try:
                 urllib.request.urlopen(f"{self.server.backend}/health", timeout=5).read()
                 return self._json(200, {"status": "ok"})
@@ -156,7 +163,12 @@ class Handler(BaseHTTPRequestHandler):
         vecs, tokens = [None] * len(inputs), 0
         try:
             texts = [i for i, t in enumerate(inputs) if isinstance(t, str)]
-            if texts:
+            if texts and self.server.mlx:
+                embedded, n = self.server.mlx.submit(self.server.embed_mlx, [prefix + inputs[i] for i in texts]).result()
+                for i, vec in zip(texts, embedded):
+                    vecs[i] = vec
+                tokens += n
+            elif texts:
                 up = self._backend("/v1/embeddings", {"input": [prefix + inputs[i] for i in texts],
                                                       "model": self.server.model_id})
                 for item in up["data"]:
@@ -212,8 +224,15 @@ def main():
     ap.add_argument("--mmproj", help="vision/audio projector GGUF: enables content-part inputs")
     ap.add_argument("--llama-server", default="llama-server")
     ap.add_argument("--llama-arg", action="append", default=[], help="extra llama-server argument (repeatable)")
+    ap.add_argument("--backend", choices=("llama", "mlx"), default="llama")
+    ap.add_argument("--tokenizer", help="mlx: tokenizer.json (default: next to the GGUF)")
+    ap.add_argument("--max-tokens", type=int, default=32768, help="mlx: longest input, BOS/EOS included")
+    ap.add_argument("--max-batch-tokens", type=int, default=8192, help="mlx: tokens packed into one forward pass")
+    ap.add_argument("--cache-mb", type=int, default=256, help="mlx: MLX buffer cache kept between requests")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="[embedding] %(message)s")
+    if args.backend == "mlx":
+        return serve_mlx(args)
     port = free_port()
     ctx = 8192 * args.parallel
     child = subprocess.Popen([args.llama_server, "-m", args.model, "--embedding", "--host", "127.0.0.1",
@@ -240,7 +259,7 @@ def main():
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     server = Server((args.host, args.port), Handler)
-    server.backend, server.model_id, server.marker = f"http://127.0.0.1:{port}", args.model_id, None
+    server.backend, server.model_id, server.marker, server.mlx = f"http://127.0.0.1:{port}", args.model_id, None, None
     for _ in range(240):
         if child.poll() is not None:
             sys.exit(f"llama-server exited with {child.returncode}")
@@ -253,6 +272,55 @@ def main():
         server.marker = json.loads(urllib.request.urlopen(f"{server.backend}/props", timeout=10).read())["media_marker"]
     log.info("listening on http://%s:%d -> llama-server :%d (%s)", args.host, args.port, port, args.model)
     server.serve_forever()
+
+
+def serve_mlx(args):
+    """Text-only: one worker thread owns the MLX model (MLX streams are per thread); requests run one at a time."""
+    if args.mmproj:
+        sys.exit("--backend mlx is text only; media inputs need --backend llama --mmproj")
+    state = {}
+
+    def load():
+        import mlx.core as mx
+        from gemma2_mlx import Gemma2Embedder
+        mx.set_cache_limit(args.cache_mb << 20)
+        tokenizer = args.tokenizer or os.path.join(os.path.dirname(args.model), "tokenizer.json")
+        state["model"], state["mx"] = Gemma2Embedder(args.model, tokenizer), mx
+        state["model"].forward([[2, 1]])
+
+    def embed(texts):
+        model = state["model"]
+        ids = model.tokenize(texts)
+        for n in map(len, ids):
+            if n > args.max_tokens:
+                raise ValueError(f"input ({n} tokens) is too large to process (maximum {args.max_tokens})")
+        out = [None] * len(ids)
+        batch, size = [], 0
+        for i in sorted(range(len(ids)), key=lambda i: len(ids[i])):
+            if batch and size + len(ids[i]) > args.max_batch_tokens:
+                _run(model, ids, batch, out)
+                batch, size = [], 0
+            batch.append(i)
+            size += len(ids[i])
+        if batch:
+            _run(model, ids, batch, out)
+        return out, sum(map(len, ids))
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    worker = ThreadPoolExecutor(1)
+    worker.submit(load).result()
+    signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
+    signal.signal(signal.SIGINT, lambda *_: os._exit(0))
+    server = Server((args.host, args.port), Handler)
+    server.backend, server.model_id, server.marker = None, args.model_id, None
+    server.mlx, server.embed_mlx = worker, embed
+    log.info("listening on http://%s:%d (MLX, %s)", args.host, args.port, args.model)
+    server.serve_forever()
+
+
+def _run(model, ids, batch, out):
+    for i, vec in zip(batch, model.forward([ids[i] for i in batch]).tolist()):
+        out[i] = vec
 
 
 if __name__ == "__main__":

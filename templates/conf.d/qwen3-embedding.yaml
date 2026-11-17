@@ -1,0 +1,69 @@
+# Qwen3-Embedding 0.6B / 4B / 8B and voyage-4-nano on MLX behind embedding/qwen3/server.py: OpenAI /v1/embeddings
+# (input_type, dimensions = Matryoshka truncation or zero padding, base64), like embeddinggemma-2.
+# Zero-copy copies (common/qwen3_w8a8.py --float, same vectors); voyage-4-nano in bfloat16 (float16 activations
+# overflow on some 300+ token inputs). -int8 entries: W8A8, their vectors differ from the exact entries (an index built
+# with one cannot be queried with the other). Capacities = wired peak on one ~32K-token input + margin.
+macros:
+  "qe-cmd": >
+    @PYTHON@ @ROOT@/embedding/qwen3/server.py --host 127.0.0.1 --port ${PORT}
+
+models:
+  "qwen3-embedding-0.6b":
+    name: "Qwen3 Embedding 0.6B (1024d)"
+    description: "Text embeddings, 32K context; dimensions 32-1024 (Matryoshka)"
+    cmd: ${qe-cmd} --model-id qwen3-embedding-0.6b --model @MODELS@/qwen3-embedding/zc-0.6b-fp16
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 3000
+    evict_cost: 0
+
+  "qwen3-embedding-4b":
+    name: "Qwen3 Embedding 4B (2560d)"
+    description: "Text embeddings, 32K context; dimensions 32-2560 (Matryoshka)"
+    cmd: ${qe-cmd} --model-id qwen3-embedding-4b --model @MODELS@/qwen3-embedding/zc-4b-fp16
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 11000
+    evict_cost: 0
+
+  "qwen3-embedding-4b-int8":
+    name: "Qwen3 Embedding 4B (2560d, W8A8)"
+    description: "4B with int8 weights and activations: 1.5x faster; vectors not interchangeable with qwen3-embedding-4b"
+    cmd: ${qe-cmd} --model-id qwen3-embedding-4b-int8 --model @MODELS@/qwen3-embedding/w8a8-4b
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 7000             # wired peak +6463 MiB
+    evict_cost: 0
+
+  "qwen3-embedding-8b":
+    name: "Qwen3 Embedding 8B (4096d)"
+    description: "Most accurate text embeddings, 32K context; dimensions 32-4096 (Matryoshka)"
+    cmd: ${qe-cmd} --model-id qwen3-embedding-8b --model @MODELS@/qwen3-embedding/zc-8b-q8_0
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 12000
+    evict_cost: 0
+
+  "qwen3-embedding-8b-int8":
+    name: "Qwen3 Embedding 8B (4096d, W8A8)"
+    description: "8B with int8 weights and activations: 1.7x faster; vectors not interchangeable with qwen3-embedding-8b"
+    cmd: ${qe-cmd} --model-id qwen3-embedding-8b-int8 --model @MODELS@/qwen3-embedding/w8a8-8b
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 11500            # wired peak +10605 MiB
+    evict_cost: 0
+
+  "voyage-4-nano":
+    name: "voyage-4-nano (2048d)"
+    description: "Small fast text embeddings, 32K context; dimensions 2048/1024/512/256"
+    cmd: ${qe-cmd} --model-id voyage-4-nano --model @MODELS@/voyage-4-nano/zc-bf16
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 2500
+    evict_cost: 0

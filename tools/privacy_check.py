@@ -15,7 +15,7 @@ RULES = {
     "literal Bearer credential": re.compile(rb"Bearer\s+[A-Za-z0-9_=-]{24,}"),
 }
 FORBIDDEN = {".env", ".api_key", "api_key", "AGENTS.md", "WORKLOG.md"}
-EXTENSIONS = {".py", ".md", ".json", ".toml", ".lock", ".sh", ".yaml", ".yml", ".txt"}
+EXTENSIONS = {".py", ".md", ".json", ".toml", ".lock", ".sh", ".yaml", ".yml", ".txt", ".metal"}
 
 
 def inspect_file(path, data, extra_literals=()):

@@ -1,0 +1,53 @@
+# Perplexity Decider Flash v1.3 (Apache-2.0; Qwen3.5-4B, noncausal attention + 255-code readout) on MLX behind
+# decisions/decider/server.py: SystemOne protocol, POST /v1/systemone (llama-swap routes it by `model`).
+# The official pplx_decider package (prompts, preprocessing, calibration) is read from the checkpoint's source/ folder.
+# Not included here: Drex v1.5 (needs nace-ai's llama.cpp branch) and the OpenAI /v1/decisions translator.
+models:
+  "pplx-decider-flash":
+    name: "Perplexity Decider Flash v1.3 (decisions, text)"
+    description: "Decision model: predicate / choice / score probabilities (text, up to 32K tokens per question)"
+    cmd: >
+      @PYTHON@ @ROOT@/decisions/decider/server.py
+      --model @MODELS@/pplx-decider-flash-v1.3 --model-id pplx-decider-flash --no-vision
+      --host 127.0.0.1 --port ${PORT}
+    capabilities:
+      in: [text]
+      out: [decisions]
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 11000            # MLX peak 9.77 GiB at 32.6K tokens
+    evict_cost: 0
+
+  "pplx-decider-flash-multimodal":
+    name: "Perplexity Decider Flash v1.3 (decisions, text + images)"
+    description: "Same model with its vision tower: images (base64 data URLs) shared by every question"
+    cmd: >
+      @PYTHON@ @ROOT@/decisions/decider/server.py
+      --model @MODELS@/pplx-decider-flash-v1.3 --model-id pplx-decider-flash-multimodal
+      --host 127.0.0.1 --port ${PORT}
+    capabilities:
+      in: [text, image]
+      out: [decisions]
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 12000            # MLX peak 10.39 GiB at 32.6K tokens
+    evict_cost: 0
+
+  # Language-model projections in W8A8, quantized at load (no extra file); the default entries stay FP16.
+  "pplx-decider-flash-int8":
+    name: "Perplexity Decider Flash v1.3 (decisions, text, W8A8)"
+    description: "Text decision model with int8 weights and activations: less memory, ~1.2-1.5x faster, probabilities within ~0.015"
+    cmd: >
+      @PYTHON@ @ROOT@/decisions/decider/server.py
+      --model @MODELS@/pplx-decider-flash-v1.3 --model-id pplx-decider-flash-int8 --no-vision --w8a8
+      --host 127.0.0.1 --port ${PORT}
+    capabilities:
+      in: [text]
+      out: [decisions]
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 9000             # MLX peak 6.98 GiB at 32.6K tokens; load peak 4.87 GiB
+    evict_cost: 0

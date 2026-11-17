@@ -288,6 +288,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "mflux" },
     { name = "mlx" },
+    { name = "mlx-audio" },
     { name = "mlx-lm" },
     { name = "mlx-qwen3-asr", extra = ["aligner"] },
     { name = "mlx-whisper" },
@@ -298,6 +299,7 @@ dependencies = [
     { name = "regex" },
     { name = "requests" },
     { name = "soundfile" },
+    { name = "torchvision" },
     { name = "tqdm" },
     { name = "transformers" },
 ]
@@ -306,11 +308,12 @@ dependencies = [
 requires-dist = [
     { name = "h3-image-mlx", git = "https://github.com/ain-soph/h3-image-mlx?rev=ce8d4a35afefdab11a7f54abe5cfa034ea247c94" },
     { name = "jinja2", specifier = "==3.1.6" },
-    { name = "mflux", git = "https://github.com/ain-soph/mflux?rev=e27c18d7aa425f0849f5ac1d6e03cc4bc2adb451" },
+    { name = "mflux", git = "https://github.com/ain-soph/mflux?rev=1770a76f4ee56e723f94e0d2df39069a8e195e95" },
     { name = "mlx", specifier = "==0.32.4" },
+    { name = "mlx-audio", git = "https://github.com/ain-soph/mlx-audio?rev=ec2105231760ca3895d38711cbca6abfe5b77d89" },
     { name = "mlx-lm", specifier = "==0.32.2" },
-    { name = "mlx-qwen3-asr", extras = ["aligner"], specifier = "==0.4.4" },
-    { name = "mlx-whisper", git = "https://github.com/ain-soph/mlx-examples?subdirectory=whisper&rev=43308d480b4c647b3c542b8478054706ce1a3795" },
+    { name = "mlx-qwen3-asr", extras = ["aligner"], git = "https://github.com/ain-soph/mlx-qwen3-asr?rev=38568173399a013b2856fc480a2dc06604d7a2e5" },
+    { name = "mlx-whisper", git = "https://github.com/ain-soph/mlx-examples?subdirectory=whisper&rev=46502543022c044396b44c83dd8848fcf4a1c168" },
     { name = "numpy", specifier = "==2.5.3" },
     { name = "pillow", specifier = "==13.0.0" },
     { name = "psutil", specifier = "==7.2.2" },
@@ -318,6 +321,7 @@ requires-dist = [
     { name = "regex", specifier = "==2026.9.10" },
     { name = "requests", specifier = "==2.34.2" },
     { name = "soundfile", specifier = "==0.14.0" },
+    { name = "torchvision" },
     { name = "tqdm", specifier = "==4.70.1" },
     { name = "transformers", specifier = "==5.23.0" },
 ]
@@ -389,7 +393,7 @@ wheels = [
 [[package]]
 name = "mflux"
 version = "0.24.0"
-source = { git = "https://github.com/ain-soph/mflux?rev=e27c18d7aa425f0849f5ac1d6e03cc4bc2adb451#e27c18d7aa425f0849f5ac1d6e03cc4bc2adb451" }
+source = { git = "https://github.com/ain-soph/mflux?rev=1770a76f4ee56e723f94e0d2df39069a8e195e95#1770a76f4ee56e723f94e0d2df39069a8e195e95" }
 dependencies = [
     { name = "anyio" },
     { name = "filelock" },
@@ -419,6 +423,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "miniaudio"
+version = "1.73"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cffi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1b/8b/2da6a5df7be82ff56810bd90fb79ef3574b2ffd121caa168d3cba4498f9d/miniaudio-1.73.tar.gz", hash = "sha256:6652da7e60fabde24d4f3b56c062d4be5f3bfb626818c5a2877f2c782d6e2c4f", size = 1143250, upload-time = "2026-11-10T20:11:18.627Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/53/60/c621a936553211aa30dee294aa50955e1f6bb65120ee0cc1f871a4b28ce5/miniaudio-1.73-cp315-cp315-macosx_11_0_arm64.whl", hash = "sha256:31f87f425f5d5449746eeecc66875cf134aa0f04295e38ead526f1cfba4d6523", size = 388029, upload-time = "2026-11-10T20:10:54.187Z" },
+    { url = "https://files.pythonhosted.org/packages/97/76/c30baf3f7c5db1695ba41bf2d845409f58553dd3c2ac8252c476e1c80698/miniaudio-1.73-cp315-cp315t-macosx_11_0_arm64.whl", hash = "sha256:e4df21c109139616d32dacb8e31ee44dd14c47196235c08ca9eb21a3ef57b877", size = 388142, upload-time = "2026-11-10T20:11:06.758Z" },
+]
+
+[[package]]
 name = "mlx"
 version = "0.32.4"
 source = { registry = "https://pypi.org/simple" }
@@ -432,6 +449,29 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a3/21/8b1b2f90bb3fa27d4bb5d0bbfb07c7f210844da6bb89f88476ab0ba84f50/mlx-0.32.4-cp315-cp315t-macosx_14_0_arm64.whl", hash = "sha256:95830850ababacf86d4e1e11b8cfa062a14b12c0c5f332dad1d4f99e1679a162", size = 692273, upload-time = "2026-10-14T21:17:16.639Z" },
     { url = "https://files.pythonhosted.org/packages/a5/90/a5f916a6937481cc5ebab3f461d4a3459175d0ddf7e0339ca15b97a42fc8/mlx-0.32.4-cp315-cp315t-macosx_15_0_arm64.whl", hash = "sha256:09da967a668de8b7033de3d74930efcf36ef993ede93173f51f11452a1c09b22", size = 692274, upload-time = "2026-10-14T21:17:18.385Z" },
     { url = "https://files.pythonhosted.org/packages/47/3e/7371d6df935a531dfcd1307c28d11d8308f8304bec25d0575a36e6c451e7/mlx-0.32.4-cp315-cp315t-macosx_26_0_arm64.whl", hash = "sha256:1e52124110303abb7513e6575f59c4c1d32e721c1a45f7a2ae200e8cc492ef13", size = 692240, upload-time = "2026-10-14T21:17:20.391Z" },
+]
+
+[[package]]
+name = "mlx-audio"
+version = "0.6.6"
+source = { git = "https://github.com/ain-soph/mlx-audio?rev=ec2105231760ca3895d38711cbca6abfe5b77d89#ec2105231760ca3895d38711cbca6abfe5b77d89" }
+dependencies = [
+    { name = "anyio" },
+    { name = "certifi" },
+    { name = "filelock" },
+    { name = "fsspec" },
+    { name = "huggingface-hub" },
+    { name = "jinja2" },
+    { name = "miniaudio" },
+    { name = "mlx" },
+    { name = "numpy" },
+    { name = "requests" },
+    { name = "scipy" },
+    { name = "sentencepiece" },
+    { name = "sounddevice" },
+    { name = "tqdm" },
+    { name = "transformers", extra = ["chat-template"] },
+    { name = "urllib3" },
 ]
 
 [[package]]
@@ -465,16 +505,12 @@ wheels = [
 [[package]]
 name = "mlx-qwen3-asr"
 version = "0.4.4"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/ain-soph/mlx-qwen3-asr?rev=38568173399a013b2856fc480a2dc06604d7a2e5#38568173399a013b2856fc480a2dc06604d7a2e5" }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "mlx" },
     { name = "numpy" },
     { name = "regex" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/33/43/e22f816218dafba76c3c5b58ef5a685e2c418368cccaa690f6804ca9cfc7/mlx_qwen3_asr-0.4.4.tar.gz", hash = "sha256:1431a900bd9e7c0ed5f0c7a021424bedb28fbb81dda1133685ba27d88bba39ff", size = 283264, upload-time = "2026-09-20T02:54:41.011Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/52/34/739a65c4ce4c5de51e53a943fe75d8702a6259286cedef8f8eb7356e42d4/mlx_qwen3_asr-0.4.4-py3-none-any.whl", hash = "sha256:37e7db641c93e7eff9880af856d7492800e5559006671b5fa837184166d35630", size = 182115, upload-time = "2026-09-20T02:54:39.59Z" },
 ]
 
 [package.optional-dependencies]
@@ -486,7 +522,7 @@ aligner = [
 [[package]]
 name = "mlx-whisper"
 version = "0.4.3"
-source = { git = "https://github.com/ain-soph/mlx-examples?subdirectory=whisper&rev=43308d480b4c647b3c542b8478054706ce1a3795#43308d480b4c647b3c542b8478054706ce1a3795" }
+source = { git = "https://github.com/ain-soph/mlx-examples?subdirectory=whisper&rev=46502543022c044396b44c83dd8848fcf4a1c168#46502543022c044396b44c83dd8848fcf4a1c168" }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "mlx" },
@@ -826,6 +862,19 @@ wheels = [
 ]
 
 [[package]]
+name = "sounddevice"
+version = "0.5.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cffi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ec/db/0c890e2d9aab9ba284021efc02e1d3aebfecab1b611762d7434602209bcf/sounddevice-0.5.6.tar.gz", hash = "sha256:8ec9fbfde2e32f020b167e348f3ab3bac6625a5f15af524d790108ac7147a410", size = 1120094, upload-time = "2026-08-17T07:55:05.048Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/72/1f/62eef605172bddc1017508469a12f75bc7c4194ece35c734f822795f53b1/sounddevice-0.5.6-py3-none-any.whl", hash = "sha256:de099612311ad81e55d31ccbd83f43ea6bf4d87b48f9b6ea55a1fbcde0eee4e0", size = 32793, upload-time = "2026-08-17T07:54:57.507Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/84/85e719d49cf98b2f406d9ac9c338892286c4448eb42ef0b2625ccf159616/sounddevice-0.5.6-py3-none-macosx_10_6_x86_64.macosx_10_6_universal2.whl", hash = "sha256:e3aef00ad8b1d1740eb66d9a7671eab88a4d2b8fa4ab33498d742e63b65c309c", size = 1009647, upload-time = "2026-08-17T07:54:58.814Z" },
+]
+
+[[package]]
 name = "soundfile"
 version = "0.14.0"
 source = { registry = "https://pypi.org/simple" }
@@ -930,6 +979,19 @@ wheels = [
 ]
 
 [[package]]
+name = "torchvision"
+version = "0.29.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "torch" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/60/ec/ce97c46e5322b588b95be388f2c21878d014ca20838478e7aab59edd128a/torchvision-0.29.2-py3-none-macosx_14_0_arm64.whl", hash = "sha256:d412494ff011f24c884a3cffd33eba1cb45a0299d4e26c1e175113f9d3b3ebc7", size = 1823414, upload-time = "2026-10-28T15:21:31.892Z" },
+]
+
+[[package]]
 name = "tqdm"
 version = "4.70.1"
 source = { registry = "https://pypi.org/simple" }
@@ -956,6 +1018,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7e/d3/1ff04cfc1ddbc6853af16973b17cd437426b4303599bc3e84af11fe55057/transformers-5.23.0.tar.gz", hash = "sha256:19d647a4d5d903a7c644ca5cde2d86efc3dde7d8c687ae7988806ff2205efa71", size = 10614788, upload-time = "2026-11-13T14:10:39.947Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bf/62/8c06b0b932cc9a5dac7ce48bf23737107143e75f9b20fd99e97dde1463c3/transformers-5.23.0-py3-none-any.whl", hash = "sha256:018e82fd07490ad5bb58414f65e31576033dc7f36bed10c574843f69b90991bf", size = 13336114, upload-time = "2026-11-13T14:10:36.154Z" },
+]
+
+[package.optional-dependencies]
+chat-template = [
+    { name = "jinja2" },
 ]
 
 [[package]]

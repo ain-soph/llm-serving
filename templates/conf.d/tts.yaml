@@ -1,0 +1,52 @@
+# Qwen3-TTS 12Hz 1.7B (Apache-2.0), BF16, via the mlx-audio fork behind tts/server.py: POST /v1/audio/speech
+# (OpenAI fields; audio is streamed as it is generated), GET /v1/audio/voices. Weights: docs/tts.md.
+# Capacities = measured wired peak + margin.
+macros:
+  "tts-cmd": >
+    @PYTHON@ @ROOT@/tts/server.py --port ${PORT}
+
+models:
+  # 9 preset voices and the OpenAI voice names mapped onto them; `instructions` sets emotion / style.
+  "qwen3-tts":
+    name: "Qwen3-TTS 1.7B"
+    description: "Preset voices + style instructions; zh/en/ja/ko/de/fr/ru/it/es/pt; ~4x real time, first audio ~0.1 s"
+    cmd: ${tts-cmd} --model @MODELS@/qwen3-tts/1.7B-CustomVoice --model-id qwen3-tts
+    capabilities:
+      in: [text]
+      out: [audio]
+      disableAuto: true
+    checkEndpoint: /health
+    ttl: 600
+    capacities:
+      gpu: 6500             # wired peak +4850 MiB
+    evict_cost: 10
+
+  # Voice cloning: ref_audio (base64 / data URL, 3-20 s) + ref_text (its exact transcript) in the JSON body.
+  "qwen3-tts-clone":
+    name: "Qwen3-TTS 1.7B voice clone"
+    description: "Clone a voice from ref_audio + ref_text"
+    cmd: ${tts-cmd} --model @MODELS@/qwen3-tts/1.7B-Base --model-id qwen3-tts-clone
+    capabilities:
+      in: [text]
+      out: [audio]
+      disableAuto: true
+    checkEndpoint: /health
+    ttl: 600
+    capacities:
+      gpu: 7000             # wired peak +5603 MiB
+    evict_cost: 10
+
+  # Voice design: `instructions` describes the voice to create.
+  "qwen3-tts-design":
+    name: "Qwen3-TTS 1.7B voice design"
+    description: "Create a voice from a text description in `instructions`"
+    cmd: ${tts-cmd} --model @MODELS@/qwen3-tts/1.7B-VoiceDesign --model-id qwen3-tts-design
+    capabilities:
+      in: [text]
+      out: [audio]
+      disableAuto: true
+    checkEndpoint: /health
+    ttl: 600
+    capacities:
+      gpu: 6500             # wired peak +5035 MiB
+    evict_cost: 10

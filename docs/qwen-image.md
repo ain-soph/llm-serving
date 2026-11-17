@@ -19,6 +19,22 @@ Qwen-Image-2.1，提供 OpenAI 兼容的 `/v1/images/generations` 和 `/v1/image
 默认 1–3 张 1024，更多张时按总面积约 3 MP 缩小，最小 512）。`background=transparent` 返回 RGBA PNG／WebP；
 `mask` 按 OpenAI 约定（完全透明的像素重绘）。尺寸每边 256–2752，面积不超过 2400×1792。
 
+提示词增强（默认关）：
+- `prompt_enhance: mflux`：文本编码器自己逐 token 改写提示词（权重逐层流式）。
+- `prompt_enhance: llm`：请聊天模型（默认 `qwen3.8-flash-next`，经本机 :8080）用 Qwen 官方改写系统提示词改写；编辑时附参考图。
+  需要先下载官方系统提示词（上游未写许可证，所以本仓库不附带）：
+
+  ```sh
+  mkdir -p qwen-image/prompt_rewrite/prompts
+  for f in system_prompt_t2i.txt system_prompt_edit.txt; do
+    curl -fsSL "https://raw.githubusercontent.com/QwenLM/Qwen-Image-2.1/main/prompt_rewrite/prompts/$f" \
+      -o "qwen-image/prompt_rewrite/prompts/$f"
+  done
+  ```
+  其他位置可用 `QWEN_IMAGE_SYSTEM_PROMPTS` 指定；聊天地址和模型用 `QWEN_IMAGE_LLM_URL`、`QWEN_IMAGE_LLM_MODEL`。
+- 返回 `revised_prompt`；文生图且 `size=auto` 时按改写给出的宽高比选画布。
+- `auto_mask: "<物体>"`：编辑时由文本编码器定位物体，只重绘它所在的矩形。
+
 ## 权重目录
 
 ```text
@@ -82,5 +98,6 @@ $PY -m mflux.models.common.weights.loading.zero_copy "$M/w8a8/base" "$M/w8a8/tur
 | `MFLUX_QWEN21_VAE_STRIP_FROM`、`_STRIP_BUDGET` | 2、16384 | VAE 两段条带解码，行数按图宽选 |
 | `MFLUX_QWEN21_VAE_CACHE_MB` | 2048 | VAE 的 MLX 缓存上限 |
 | `QWEN_IMAGE_CACHE_MB`、`QWEN_IMAGE_REF_CACHE_MB` | 6144、2048 | 去噪阶段 MLX 缓存上限（不带／带参考图） |
+| `QWEN21_FUSION` | 不设 | 逐元素融合（不设 = 全开，空 = 全关）；输出与不融合逐字节相同 |
 
 W8A8 GEMM 使用 M5 的 Metal TensorOps INT8 指令；其他机型未验证。

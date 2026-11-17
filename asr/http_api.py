@@ -2,8 +2,8 @@
 import email.parser
 import email.policy
 import json
-import logging
 import os
+import logging
 import socketserver
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,8 +16,31 @@ FORMATS = ("json", "text", "srt", "vtt", "verbose_json")
 class BadRequest(Exception):
     pass
 
+def _pcm16_wav(raw: bytes):
+    """Samples of a plain 16 kHz mono 16-bit PCM WAV, or None for anything else (ffmpeg handles those)."""
+    if len(raw) < 44 or raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
+        return None
+    pos, fmt_ok = 12, False
+    while pos + 8 <= len(raw):
+        cid, size = raw[pos:pos + 4], int.from_bytes(raw[pos + 4:pos + 8], "little")
+        body = raw[pos + 8:pos + 8 + size]
+        if cid == b"fmt ":
+            tag, channels, rate = (int.from_bytes(body[i:j], "little") for i, j in ((0, 2), (2, 4), (4, 8)))
+            fmt_ok = tag == 1 and channels == 1 and rate == SR and int.from_bytes(body[14:16], "little") == 16
+        elif cid == b"data":
+            if not fmt_ok or len(body) < 2:
+                return None
+            # ffmpeg's s16 -> f32 conversion is x / 32768, so this is the same array it would return
+            return np.frombuffer(body[:len(body) // 2 * 2], dtype="<i2").astype(np.float32) / np.float32(32768)
+        pos += 8 + size + (size & 1)
+    return None
+
 def decode_audio(raw: bytes) -> np.ndarray:
-    """Any container ffmpeg reads -> 16 kHz mono float32."""
+    """Any container ffmpeg reads -> 16 kHz mono float32. Plain 16 kHz mono PCM WAV skips the ffmpeg process
+    (~30 ms a request)."""
+    pcm = _pcm16_wav(raw)
+    if pcm is not None:
+        return pcm
     p = subprocess.run([os.environ.get("FFMPEG", "ffmpeg"), "-nostdin", "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
                         "-ac", "1", "-ar", str(SR), "-f", "f32le", "pipe:1"],
                        input=raw, capture_output=True)

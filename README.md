@@ -17,15 +17,19 @@
 | --- | --- | --- | --- |
 | 文本／视觉 | `qwen3.8-flash-next`、`-uncensored` | [Strata fork](https://github.com/ain-soph/Strata/tree/serving) | 262k 上下文 × 2 路，MTP 投机解码 |
 | 嵌入 | `embeddinggemma-2`、`-multimodal` | llama.cpp | 文本常驻；多模态支持图片、音频、视频 |
-| 重排 | `qwen3-reranker-0.6b`／`4b`／`8b` | MLX，自写服务 | `/v1/rerank`，批量计算 |
-| 语音转写 | `nemotron-3.5-transcribe` | NeMo-Speech.cpp | |
-| 语音转写 | `whisper-large-v3` | [mlx-whisper fork](https://github.com/ain-soph/mlx-examples/tree/serving/whisper) | |
-| 语音转写 | `qwen3-asr-1.7b` | mlx-qwen3-asr | 带强制对齐器（词级时间戳） |
+| 嵌入 | `qwen3-embedding-0.6b`／`4b`／`8b`（`4b`、`8b` 各有 `-int8`）、`voyage-4-nano` | MLX，自写服务 | 32K 输入；零拷贝；`-int8` 为 W8A8，快 1.5–1.7× |
+| 重排 | `qwen3-reranker-0.6b`／`4b`／`8b`（`4b`、`8b` 各有 `-int8`） | MLX，自写服务 | `/v1/rerank`，按长度排序批量计算；零拷贝 |
+| 决策 | `pplx-decider-flash`、`-multimodal`、`-int8` | MLX 移植 | SystemOne `/v1/systemone`：判断／选择／打分概率 |
+| 语音转写 | `qwen3-asr-1.7b` | [mlx-qwen3-asr fork](https://github.com/ain-soph/mlx-qwen3-asr/tree/serving) | 默认；中文、中英混合；强制对齐器给词级时间戳 |
+| 语音转写 | `whisper-large-v3` | [mlx-whisper fork](https://github.com/ain-soph/mlx-examples/tree/serving/whisper) | 多语种 |
+| 语音转写 | `nemotron-3.5-transcribe` | NeMo-Speech.cpp | 英文、说话人分离 |
+| 语音转写 | `sov-transcribe-1` | [mlx-audio fork](https://github.com/ain-soph/mlx-audio/tree/serving) | 仅英文和 6 种欧洲语言；不能与聊天模型共存 |
+| 语音合成 | `qwen3-tts`、`-clone`、`-design` | mlx-audio fork | `/v1/audio/speech`：预设音色、声音克隆、声音设计；边生成边输出 |
 | 图片生成／编辑 | `minimax-h3-image` | [h3-image-mlx fork](https://github.com/ain-soph/h3-image-mlx/tree/serving) | W8A8，零拷贝，各尺寸与聊天模型共存 |
-| 图片生成／编辑 | `qwen-image-2.1-turbo`、`qwen-image-2.1`（各有 `-int8` 文本编码器版） | [mflux fork](https://github.com/ain-soph/mflux/tree/serving) | 8／40 步；最多 10 张参考图、遮罩、透明 PNG；非商用许可 |
+| 图片生成／编辑 | `qwen-image-2.1-turbo`、`qwen-image-2.1`（各有 `-int8` 文本编码器版） | [mflux fork](https://github.com/ain-soph/mflux/tree/serving) | 8／40 步；最多 10 张参考图、遮罩、透明 PNG、提示词增强；非商用许可 |
 | 视频＋音频 | `minimax-h3-video` | [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving) | `best`／`standard`／`fast` 三档，最长 15 s；INT8 DiT 零拷贝 |
 
-完整 commit 固定在 `native.lock.json`（原生引擎）和 `uv.lock`（Python 包）；[原生构建脚本](tools/native.py)、[模型路由模板](templates/conf.d/)、[Strata 配置](templates/strata/) 和自写接口都在本仓库。另见 [Strata 部署说明](docs/strata.md)、[Qwen-Image 权重准备](docs/qwen-image.md)、[H3 视频权重准备](docs/h3-video.md)。
+完整 commit 固定在 `native.lock.json`（原生引擎）和 `uv.lock`（Python 包）；[原生构建脚本](tools/native.py)、[模型路由模板](templates/conf.d/)、[Strata 配置](templates/strata/) 和自写接口都在本仓库。权重准备与服务说明：[Strata](docs/strata.md)、[重排](docs/rerank.md)、[零拷贝与 W8A8 副本](docs/w8a8.md)、[Decider](docs/decisions.md)、[SOV 语音转写](docs/sov.md)、[TTS](docs/tts.md)、[Qwen-Image](docs/qwen-image.md)、[H3 视频](docs/h3-video.md)。
 
 ## 安装与迁移
 
@@ -72,7 +76,7 @@ cd llm-serving
 
 ## 验证范围
 
-已在开发机器使用 Python **3.15.2** 完成统一依赖安装与导入，以及 Numba JIT、PyTorch/SciPy CPU 和日语对齐 tokenizer 基础调用检查；同时完成配置生成、llama-swap/Caddy 配置校验、FFmpeg 编码器检查，以及安装路径和隐私扫描测试。重排的 Python 3.15 真实模型/API 检查见[专项说明](docs/rerank.md)。Qwen-Image 在统一 3.15 环境只做了导入与参数解析检查（生产用独立的 Python 3.12 环境运行，见[性能报告](docs/performance.md)）。当前生产服务仍使用原来的目录和环境。
+已在开发机器使用 Python **3.15.2** 完成统一依赖安装与导入，以及 Numba JIT、PyTorch/SciPy CPU 和日语对齐 tokenizer 基础调用检查；同时完成配置生成、llama-swap/Caddy 配置校验、FFmpeg 编码器检查，以及安装路径和隐私扫描测试。重排的 Python 3.15 真实模型/API 检查见[专项说明](docs/rerank.md)。Qwen-Image、TTS、SOV、Qwen3 嵌入、Decider 在统一 3.15 环境只做了导入与参数解析检查（生产各用独立环境运行，见[性能报告](docs/performance.md)）。当前生产服务仍使用原来的目录和环境。
 
 尚未在干净系统完成全套原生重编译和端到端推理恢复演练。本仓库提供可审查的迁移工具和当前配置，首次切换前仍需运行真实 API 冒烟检查。`doctor.py` 不加载模型，不替代正确性/性能验证。
 

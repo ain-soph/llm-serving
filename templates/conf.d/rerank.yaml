@@ -1,43 +1,68 @@
-# Python 3.15 validation: peak wired deltas 2772 / 8694 / 9869 MiB, including load.
-# Capacities include a margin; see docs/rerank-validation.json.
+# Qwen3-Reranker on MLX behind rerank/server.py: POST /v1/rerank. Zero-copy copies (common/qwen3_w8a8.py --float:
+# page-aligned, mapped from the page cache, same scores); documents sorted by length before batching.
+# -int8 entries: W8A8 copies (int8 weights and activations, INT8 TensorOps GEMM), separate so the defaults stay exact.
+# Capacities = measured wired peak + margin; see docs/rerank.md and docs/performance.md.
 macros:
   "rerank-cmd": >
     @PYTHON@ @ROOT@/rerank/server.py --host 127.0.0.1 --port ${PORT}
-    --max-batch-tokens 8192 --cache-mb 256
 
 models:
   "qwen3-reranker-0.6b":
     name: "Qwen3 Reranker 0.6B"
     description: "Fast reranker (20 docs ~0.13 s)"
-    cmd: ${rerank-cmd} --model-id qwen3-reranker-0.6b --model @MODELS@/qwen3-reranker/mlx-0.6b-bf16
+    cmd: ${rerank-cmd} --model-id qwen3-reranker-0.6b --model @MODELS@/qwen3-reranker/zc-0.6b-bf16
     capabilities:
       reranker: true
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 3500
+      gpu: 3000             # wired peak +2735 MiB
     evict_cost: 0
 
   "qwen3-reranker-4b":
     name: "Qwen3 Reranker 4B"
-    description: "Default reranker (20 docs ~0.84 s)"
-    cmd: ${rerank-cmd} --model-id qwen3-reranker-4b --model @MODELS@/qwen3-reranker/mlx-4b-bf16
+    description: "Default reranker (20 docs ~0.85 s)"
+    cmd: ${rerank-cmd} --model-id qwen3-reranker-4b --model @MODELS@/qwen3-reranker/zc-4b-bf16
     capabilities:
       reranker: true
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 10000
+      gpu: 10000            # wired peak +9432 MiB
+    evict_cost: 0
+
+  "qwen3-reranker-4b-int8":
+    name: "Qwen3 Reranker 4B (W8A8)"
+    description: "4B with int8 weights and activations: 1.4x faster (20 docs ~0.6 s), scores within ~0.02"
+    cmd: ${rerank-cmd} --model-id qwen3-reranker-4b-int8 --model @MODELS@/qwen3-reranker/w8a8-4b
+    capabilities:
+      reranker: true
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 6500             # wired peak +5833 MiB
     evict_cost: 0
 
   "qwen3-reranker-8b":
     name: "Qwen3 Reranker 8B"
-    description: "Most accurate reranker (20 docs ~1.80 s)"
-    cmd: ${rerank-cmd} --model-id qwen3-reranker-8b --model @MODELS@/qwen3-reranker/mlx-8b-q8_0
+    description: "Most accurate reranker (20 docs ~1.8 s)"
+    cmd: ${rerank-cmd} --model-id qwen3-reranker-8b --model @MODELS@/qwen3-reranker/zc-8b-q8_0
     capabilities:
       reranker: true
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 11000
+      gpu: 11000            # wired peak +9829 MiB
+    evict_cost: 0
+
+  "qwen3-reranker-8b-int8":
+    name: "Qwen3 Reranker 8B (W8A8)"
+    description: "8B with int8 weights and activations: 1.7x faster (20 docs ~1.1 s), scores within ~0.03"
+    cmd: ${rerank-cmd} --model-id qwen3-reranker-8b-int8 --model @MODELS@/qwen3-reranker/w8a8-8b
+    capabilities:
+      reranker: true
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 10000            # wired peak +9422 MiB
     evict_cost: 0

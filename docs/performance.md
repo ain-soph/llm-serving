@@ -9,21 +9,30 @@
 | --- | --- | --- | --- | --- | --- | ---: |
 | 文本／视觉 | `qwen3.8-flash-next` | Strata Metal fork | AD-4.27 混合（3.57 bpw 主体） | prefill 2014／2225 tok/s（26k／116k）；decode 117.2 tok/s | wired +69868 MiB（262k × 2 槽） | 96.94 GB |
 | 文本／视觉 | `qwen3.8-flash-next-uncensored` | Strata Metal fork | 同上 | decode 118–139 tok/s（历史） | wired +68771 MiB（历史） | 96.95 GB |
-| 文本嵌入 | `embeddinggemma-2` | llama.cpp + 适配层 | BF16 | 22036 token 0.93–1.04 s | wired +1664 MiB（常驻） | 0.558 GB |
-| 多模态嵌入 | `embeddinggemma-2-multimodal` | 同上 | BF16 | 图片 0.25 s；音频 0.17 s；视频 0.49 s | wired +2996 MiB | 1.540 GB |
-| 重排 | `qwen3-reranker-0.6b` | MLX，自写服务 | BF16 | 20 篇 0.137 s | RSS 1.66 GB；wired +2772 MiB | 1.203 GB |
-| 重排 | `qwen3-reranker-4b` | 同上 | BF16 | 20 篇 0.847 s | RSS 8.45 GB；wired +8694 MiB | 8.055 GB |
-| 重排 | `qwen3-reranker-8b` | 同上 | Q8_0 等价 MLX 8-bit | 20 篇 1.793 s | RSS 9.68 GB；wired +9869 MiB | 9.228 GB |
-| 语音转写 | `nemotron-3.5-transcribe` | NeMo-Speech.cpp Metal | AD-IQ4_NL + F16 编码器 | 100 条 c4 22.66 s | wired +22284 MiB | 21.35 GB |
-| 语音转写 | `whisper-large-v3` | mlx-whisper fork | FP16 | 100 条 c4 26.20 s | wired +4545 MiB | 3.084 GB |
-| 语音转写 | `qwen3-asr-1.7b` | mlx-qwen3-asr | BF16 文件／FP16 运行 | 100 条 c4 16.97 s | wired +6776 MiB | 6.543 GB |
+| 文本嵌入 | `embeddinggemma-2` | llama.cpp + 适配层 | BF16 | 短查询 12 ms；64 × 400 token 0.53 s（48,500 tok/s） | wired +1069／1327 MiB（空闲／峰值，常驻） | 0.558 GB |
+| 多模态嵌入 | `embeddinggemma-2-multimodal` | 同上 | BF16 | 图片 0.04–0.12 s；5 s 音频 0.035 s；4 s 视频 0.34 s | wired +2996 MiB | 1.540 GB |
+| 文本嵌入 | `qwen3-embedding-0.6b`／`-4b`／`-8b` | MLX，自写服务 | FP16／FP16／Q8_0 | 64 × 450 token 0.39／2.50／5.21 s | wired 峰值 +2705／+10323／+11026 MiB（32K 输入） | 1.21／8.06／8.53 GB |
+| 文本嵌入 | `qwen3-embedding-4b-int8`／`-8b-int8` | 同上 | W8A8 | SciFact 比精确入口快 1.5×／1.67× | +6463／+10605 MiB | 4.43／8.21 GB |
+| 文本嵌入 | `voyage-4-nano` | 同上 | BF16 | 64 × 450 token 0.24 s | +2614 MiB | 0.709 GB |
+| 重排 | `qwen3-reranker-0.6b` | MLX，自写服务 | BF16 | 20 篇 0.14 s | 加载后 footprint 0.30 GB；wired +2735 MiB | 1.203 GB |
+| 重排 | `qwen3-reranker-4b` | 同上 | BF16 | 20 篇 0.86 s | footprint 0.30 GB；wired +9432 MiB | 8.055 GB |
+| 重排 | `qwen3-reranker-4b-int8` | 同上 | W8A8 | 20 篇 0.61 s | wired +5833 MiB | 4.426 GB |
+| 重排 | `qwen3-reranker-8b` | 同上 | Q8_0 等价 MLX 8-bit | 20 篇 1.80 s | wired +9829 MiB | 8.529 GB |
+| 重排 | `qwen3-reranker-8b-int8` | 同上 | W8A8 | 20 篇 1.07 s | wired +9422 MiB | 8.210 GB |
+| 决策 | `pplx-decider-flash`（`-multimodal`） | MLX 移植 | FP16（官方 BF16 转换） | 短请求 33–48 ms；32.6K token 6.3 s | MLX 峰值 9.77（10.39）GiB | 9.63 GB³ |
+| 决策 | `pplx-decider-flash-int8` | 同上 | W8A8（加载时量化） | 短请求 21–35 ms；32.6K token 5.44 s | MLX 峰值 6.98 GiB | 同上³ |
+| 语音合成 | `qwen3-tts`／`-clone`／`-design` | mlx-audio fork | BF16 | 首段音频 0.08–0.14 s；实时率 0.22–0.23 | wired +4850／+5603／+5035 MiB | 12.22 GB⁴ |
+| 语音转写 | `qwen3-asr-1.7b`（默认） | mlx-qwen3-asr fork | BF16 文件／FP16 运行 | en100 c1 15.4 s；WER 1.48% | wired +6.6 GB | 6.543 GB |
+| 语音转写 | `whisper-large-v3` | mlx-whisper fork | FP16 | en100 c1 22.8 s；WER 2.80% | wired +4.5 GB | 3.084 GB |
+| 语音转写 | `nemotron-3.5-transcribe` | NeMo-Speech.cpp Metal | AD-IQ4_NL + F16 编码器 | en100 c1 29.4 s；WER 1.43% | wired +21.2 GB | 21.35 GB |
+| 语音转写 | `sov-transcribe-1` | mlx-audio fork | 解码器 8-bit（Q8_0 式）+ BF16 编码器 | en100 c1 32.5 s；WER 2.20%；仅英文和 6 种欧洲语言 | wired +32079 MiB | 29.77 GB |
 | 图片 | `minimax-h3-image` | h3-image-mlx fork | INT8 ConvRot（W8A8） | 1024² 4.19 s；2048² 12.18 s（6 步） | DiT footprint 1.95／3.29 GB | 49.32 GB |
-| 图片 | `qwen-image-2.1-turbo` | mflux fork | W8A8 DiT + BF16 文本编码器 | 1024² 约 9 s；2048² 约 43 s（8 步） | 生成期 wired 6.7–9.0 GB | 42.78 GB¹ |
+| 图片 | `qwen-image-2.1-turbo` | mflux fork | W8A8 DiT + BF16 文本编码器 | 1024² 7.8 s（经 API，中位）；2048² 约 43 s（8 步，融合前） | 生成期 wired 6.7–9.0 GB | 42.78 GB¹ |
 | 图片 | `qwen-image-2.1` | mflux fork | 同上 | 1024² 约 28 s（40 步） | 同上 | 同上¹ |
 | 图片 | `qwen-image-2.1-turbo-int8`／`qwen-image-2.1-int8` | mflux fork | W8A8 DiT + INT8 文本编码器 | 与对应 BF16 文本编码器入口相同 | 页缓存少 8.8 GB | 同上¹ |
 | 视频＋音频 | `minimax-h3-video`（旧名 `-stream` 为别名） | h3.c fork | INT8 DiT（零拷贝）、BF16 VAE 计算 | fast 768p：5 s 片段 170 s；15 s 片段 758 s | standard 768p wired +20.4 GB；DiT GPU 峰值 22.20／33.00 GiB（fast） | 125.62 GB² |
 
-¹ 四个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享文本编码器和 VAE。
+¹ 四个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享文本编码器和 VAE。³ 三个 Decider 入口读同一个官方检查点。⁴ 三个变体合计，语音编解码器硬链接成一份。
 
 ## 文本：Qwen3.8 Flash-Next（Strata）
 
@@ -59,13 +68,27 @@
 | `embeddinggemma-2` | 0.93–1.04 s（约 2.2 万 tok/s） | wired +1664 MiB，常驻 | 0.558 GB |
 | `embeddinggemma-2-multimodal` | 图片 0.25 s；音频 0.17 s；视频 0.49 s | 用后 wired +2996 MiB | 1.540 GB（含文本 0.558 + 投影 0.982） |
 
-- 权重 BF16 GGUF，投影器 BF16；无生成 KV，llama.cpp 上下文缓冲默认 F16；无 decode。
-- 我们的修改只在适配层（维度、输入前缀、base64、多模态请求），不改引擎。
-- 正确性：文本 BF16 GGUF 与官方 float32 CPU 输出余弦 1.00000，6/6 检索排序一致；多模态因预处理不同有差异。没有本机官方实现的同配置速度基线。
+**2026-11-17 复查**（Homebrew llama.cpp 1.0.0，4 槽 × 8192，`-b 8192 -ub 8192`）
+
+| 负载 | `embeddinggemma-2` | `-multimodal` | MLX 移植（对照，未上线） |
+| --- | ---: | ---: | ---: |
+| 短查询（~16 token，中位） | 12.2 ms（p90 17.4 ms） | 12 ms | 45 ms |
+| 单条 128／512／2048／8000 token | 15.6／21.3／50.9／423 ms | — | — |
+| 64 × 400 token，一个请求 | 0.528 s（48,500 tok/s） | 0.54 s | 3.53 s（7,300 tok/s） |
+| 同上，4 个客户端逐条发 | 0.604 s（42,400 tok/s） | — | — |
+| 4 × 8000 token | 1.683 s（19,000 tok/s） | 1.75 s | 4.18 s（7,700 tok/s） |
+| 最长输入 | 8192 | 8192 | 32768（5.4 s，wired +4225 MiB） |
+| wired 空闲／峰值 | +1069／+1327 MiB | +2516／+2996 MiB | 0／+2851 MiB |
+
+- 多模态（中位）：图片 0.123 s（1.1 MB）／0.038 s；5 s 音频 0.035 s；4 s 视频 0.342 s。
+- 权重 BF16 GGUF，投影器 BF16；无生成 KV（llama.cpp 对非因果模型不建 KV），无 decode。内存主要是按 `-ub 8192` 预分配的计算缓冲。
+- 我们的修改只在适配层（维度、输入前缀、base64、多模态请求），不改引擎；2026-11-17 修正 `GET /` 返回 404（llama-swap 预加载钩子会报错）。
+- MLX 移植（`embedding/gemma2_mlx.py`，`server.py --backend mlx`）读同一个 GGUF：比 llama.cpp 更接近官方（余弦 1.000000 vs 0.999994），支持 32K 输入，但慢 3.7–6.7 倍（FP32 激活用不上 BF16 TensorOps），所以不上线。
+- 正确性：llama.cpp 与官方 FP32 余弦最小 0.999994，6/6 排序一致；批量与逐条余弦最小 0.9999998；多模态与官方：图片 0.987–0.993，音频 0.976–0.997，视频 0.953（预处理差异）。
 
 ## 重排：Qwen3-Reranker
 
-**条件**：1 个查询 × 20 篇文档，共 9950 个实际 prompt token，c1；MLX 批量预算 8192 token、缓存 256 MiB；Python 3.15 统一环境复测（[验证记录](rerank-validation.json)、[说明](rerank.md)）。
+**条件**（零拷贝前的 `mlx-*` 目录）：1 个查询 × 20 篇文档，共 9950 个实际 prompt token，c1；MLX 批量预算 8192 token、缓存 256 MiB；Python 3.15 统一环境复测（[验证记录](rerank-validation.json)、[说明](rerank.md)）。
 
 | 入口 | 精度 | 耗时 | 端到端输入吞吐 | RSS | wired | 磁盘 |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -85,9 +108,147 @@
 - 提速是后端、批处理、精度（0.6B/4B 改 BF16）一起换的结果，不能归给单一改动；内存是跨会话对比（新值含加载峰值）。
 - 正确性：相对官方 BF16 最大分数差约 0.001／0.010／0.004，三个公开查询排序一致（旧 4B/8B GGUF 为 0.025／0.007）。
 
+**2026-11-17：零拷贝、按长度排序、W8A8**（OA；SciFact 300 个问题 × BM25 前 20 篇，共 281 万 token）
+
+| 版本 | 20 篇 | SciFact | nDCG@10 | 官方用例最大误差 | 加载后 footprint | wired 峰值 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.6B 原版 | 0.13 s | 61.9 s | 0.7378 | 0.0012 | 1614 MB | +2764 MiB |
+| 0.6B 排序 | 0.14 s | 55.7 s | 0.7378 | 0.0012 | 1617 MB | +2764 MiB |
+| **0.6B 排序 + 零拷贝（上线）** | 0.14 s | 57.4 s | 0.7378 | 0.0012 | **297 MB** | +2735 MiB |
+| 0.6B W8A8（不上线） | 0.14 s | 54.3 s | 0.7382 | 0.0141 | 295 MB | +2225 MiB |
+| 4B 原版 | 0.85 s | 358.1 s | 0.7520 | 0.0103 | 8153 MB | +9575 MiB |
+| 4B 排序 | 0.84 s | 317.0 s | 0.7514 | 0.0103 | 8150 MB | +9513 MiB |
+| **4B 排序 + 零拷贝（上线）** | 0.86 s | 318.7 s | 0.7514 | 0.0103 | **300 MB** | +9432 MiB |
+| **4B W8A8（`-int8`）** | **0.61 s** | **225.1 s** | 0.7498 | 0.0165 | 311 MB | **+5833 MiB** |
+| 8B 原版（Q8_0） | 1.80 s | 756.2 s | 0.7504 | 0.0044 | 9242 MB | +10694 MiB |
+| **8B W8A8（`-int8`）** | **1.07 s** | **396.2 s** | 0.7508 | 0.0312 | 271 MB | +9422 MiB |
+
+| 与原版逐分数比较（SciFact 6,000 对） | 分数差 最大／平均 | top-1 相同 | Kendall τ |
+| --- | --- | ---: | ---: |
+| 0.6B 排序、零拷贝 | 0.023／0.00002 | 100% | 0.997 |
+| 0.6B W8A8 | 0.224／0.0073 | 98.0% | 0.952 |
+| 4B 排序、零拷贝 | 0.062／0.0008 | 99.7% | 0.988 |
+| 4B W8A8 | 0.193／0.0097 | 97.0% | 0.955 |
+| 8B W8A8 | 0.066／0.0045 | 98.7% | 0.973 |
+
+- 按长度排序：少做填充，4B 快 11.5%、0.6B 快 10%；分数只有 BF16 舍入级变化（批次形状不同），nDCG 不变。
+- 零拷贝：分数与排序版相同；加载后 footprint 1.6／8.2 GB → 0.3 GB（空闲时权重是可回收的页缓存），启动快 0.2–0.5 s；计算时 wired 不变。8B 零拷贝副本 wired +9829 MiB。
+- W8A8：0.6B 几乎不提速、误差大 10 倍，不做；4B 快 1.4×、wired 少 3.7 GB，8B 快 1.7–1.9×，nDCG 不变但单个分数偏差更大，所以做成单独的 `-int8` 入口，默认入口保持精确。
+
+## 嵌入：Qwen3-Embedding 与 voyage-4-nano
+
+**条件**：自写 MLX 服务（按长度排序，≤ 8192 token 一批；> 8192 token 的单条输入 MLP 精确分块）；2026-11-16 基线（QE）+ 2026-11-17 零拷贝与 W8A8（OA）。
+
+| 入口 | 维度 | 精度 | 64 × 450 token | 8 × 3,600 token | 短查询 | 单条 32K | 稳态内存（基线） | 32K wired 峰值（零拷贝） | 磁盘（零拷贝副本） |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `qwen3-embedding-0.6b` | 1024 | FP16 | 0.39 s（73,000 tok/s） | 0.50 s | 9 ms | 2.1 s | 1.1 GiB | +2705 MiB | 1.208 GB |
+| `qwen3-embedding-4b` | 2560 | FP16 | 2.50 s（11,500 tok/s） | 2.81 s | 17 ms | 7.1 s | 7.5 GiB | +10323 MiB | 8.059 GB |
+| `qwen3-embedding-8b` | 4096 | Q8_0 等价 MLX 8-bit，FP16 激活 | 5.21 s（5,500 tok/s） | 5.46 s | 31 ms | 10.0 s | 7.9 GiB | +11026 MiB | 8.529 GB |
+| `voyage-4-nano` | 2048 | BF16（原 FP16） | 0.24 s（119,000 tok/s） | 0.31 s | 3 ms | 1.6 s | 0.65 GiB | +2614 MiB | 0.709 GB |
+| `qwen3-embedding-4b-int8` | 2560 | W8A8 | — | — | — | — | — | +6463 MiB | 4.431 GB |
+| `qwen3-embedding-8b-int8` | 4096 | W8A8 | — | — | — | — | — | +10605 MiB | 8.210 GB |
+
+**SciFact 检索**（5,183 篇 + 300 个问题，共 172 万 token；OA）
+
+| 版本 | 耗时 | nDCG@10 | 官方用例最小余弦 | 加载后 footprint | wired 峰值 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0.6B 原版 | 34.2 s | 0.7019 | 1.00000 | 1350 MB | +2338 MiB |
+| 0.6B W8A8（不上线） | 31.9 s | 0.7013 | 0.99745 | 216 MB | +2224 MiB |
+| 4B 原版 | 205.2 s | 0.7764 | 1.00000 | 7886 MB | +9490 MiB |
+| **4B W8A8（`-int8`）** | **136.3 s** | 0.7752 | 0.99775 | 220 MB | **+5882 MiB** |
+| 8B 原版（Q8_0） | 399.9 s | 0.7929 | 0.99975 | 8338 MB | +9410 MiB |
+| **8B W8A8（`-int8`）** | **239.0 s** | 0.7903 | 0.99842 | 216 MB | +9599 MiB |
+| voyage FP16（原线上） | 22.3 s | 0.6585 | 1.00000 | 1013 MB | +1949 MiB |
+| voyage W8A8（不上线） | 21.2 s | 0.6560 | 0.99811 | 170 MB | +2012 MiB |
+| **voyage BF16（现线上）** | 21.5 s | **0.7499** | 0.99996 | — | — |
+
+**我们的修改及收益**
+
+| 修改 | 前 → 后 | 正确性 |
+| --- | --- | --- |
+| MLX 自写服务（替代 llama-server） | 64 篇：0.6B 0.70 → 0.39 s，4B 4.20 → 2.50 s（均为 Q8_0 → FP16），voyage 0.38 → 0.24 s（BF16 → FP16）；1.5–2.2× | 最大分数差 0.0006／0.0004／0.0026／0.0002（对官方 FP32） |
+| 预先转存 FP16（不在加载时转换） | 4B 加载峰值 15 GiB → 不再出现 | FP16 激活误差是 BF16 的约 1/10 |
+| 长输入 MLP 分块 | 8B 32K 峰值 11.5 → 10.3 GiB | 结果相同 |
+| 零拷贝副本 | 加载后 footprint 7.9 → 0.2 GB（4B） | 向量相同 |
+| W8A8 `-int8` 入口 | SciFact 4B 1.5×、8B 1.67× | 与精确入口余弦平均 0.998–0.999、最小 0.996–0.998；前 10 结果重合 96–98% |
+| voyage 改回 BF16 | NaN 文档 327 → 0（SciFact 5,183 篇） | FP16 激活在部分 300 token 以上的文档上溢出；之前用 voyage 建的索引都受影响 |
+
+- 嵌入只有预填充：decode n/a，KV n/a。8B 用 Q8_0：FP16 要 16.5 GiB（实测分数差 0.0003、4.67 s），不能与聊天模型共存。
+- `-int8` 入口的向量与精确入口不通用，换入口要重建索引。0.6B、voyage 的 W8A8 只快 5–7%，不做。
+
+## 决策：Perplexity Decider Flash
+
+**条件**：MLX 移植（Qwen3.5-4B 骨干，非因果注意力），官方 `pplx_decider` 处理提示与校准；对照官方 float32（MPS）参考；无 decode、无 KV 复用。
+
+| 入口 | 精度 | 文本／图片最大概率差 | 短请求 | 2K／8K／32.6K token | 计算峰值 |
+| --- | --- | --- | ---: | --- | ---: |
+| `pplx-decider-flash` | FP16 | 0.00048／0.00011 | 32–56 ms | 0.227／0.953／6.253 s | 10.11 GiB |
+| `pplx-decider-flash-multimodal` | FP16 + 视觉塔 | 同上 | 图片 150–600 ms | 同上 | 10.39 GiB（32.6K） |
+| `pplx-decider-flash-int8` | W8A8 | 0.0139（从原始 BF16 量化时 0.024）／0.00025 | 21–35 ms | 0.166／0.764／5.442 s | 6.98 GiB |
+
+- 其他基线（2026-11-16）：12.8K token × 2 题 3.3 s，28K 4.9 s；官方 MPS 实现短请求 0.4–1.9 s、12.8K 两题 65 s（占用 30.7 GiB）。
+- 激活精度：FP16 0.00048、BF16 0.003、FP32 0.0005（与官方 FP32 的最大概率差），都没有答案变化 → 用 FP16。
+- 无答案翻转。W8A8 短输入快 1.4–1.5×，长输入 1.15–1.25×（32K 时注意力占比大），内存少 3.1 GiB。
+
+**我们的修改及收益**
+
+| 修改 | 前 → 后 |
+| --- | --- |
+| 正确加载（键名映射 + strict）、`model.eval()` | 修正随机权重；线性注意力快 10 倍 |
+| 线性注意力与 MLP 按 4096 token 精确分块，注意力按查询分块 | 32K 峰值 15.7 → 9.8 GiB |
+| 逐张量转 FP16 | 加载峰值 15.67 → 7.88／8.50 GiB |
+| W8A8 读权重时直接量化 | 加载峰值 8.25（第一版 11.5）→ 4.87 GiB，加载 1.1 s；FP16 入口结果逐位不变 |
+
+## 语音合成：Qwen3-TTS
+
+**条件**：Qwen3-TTS 12Hz 1.7B，mlx-audio，BF16，KV BF16；服务端到端（HTTP，pcm），实时率 = 生成耗时 ÷ 音频时长。
+
+| 入口 | 首段音频（中位） | 实时率（中位） | wired 峰值 | 磁盘 | ASR 回写错误（16 句） |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `qwen3-tts`（CustomVoice） | 0.085 s（最大 0.093） | 0.232（4.3 倍实时） | +4850 MiB | 3.83 GB + 0.68 GB 共享编解码器 | 0%（官方 0%） |
+| `qwen3-tts-clone`（Base） | 0.14 s | 0.22 | +5603 MiB（含失控长生成） | 3.86 GB | 0%（官方 0%） |
+| `qwen3-tts-design`（VoiceDesign） | 0.08 s | 0.225 | +5035 MiB | 3.83 GB | 0% |
+
+| 长文本 | 1.7B CustomVoice | 0.6B（未上线） |
+| --- | --- | --- |
+| 1449 字中文（9 段） | 375 s 音频用 87 s；首段 0.95 s；回写错误 0.5% | 358 s 音频用 76 s；0.15% |
+| 3621 字符英文（24 段） | 249 s 音频用 59 s；首段 0.10 s | 264 s 音频用 57 s |
+| 加载 | 1.1 s | — |
+
+- 0.6B 与 1.7B 几乎一样快（每帧串行 15 步码本预测），只省 1.5 GB 内存（wired +3382 MiB），所以不单独上线。
+- 正确性：同 6 句贪心解码，官方 FP32 vs MLX BF16 的码本相同帧数与官方 FP32 vs 官方 BF16 同量级；解码器同码输入波形信噪比 44–49 dB。
+- 与 Flash-Next 共存（1449 字中文 + 11.6 万 token 提示词同时跑）：TTS 实时率 0.30（407 s 音频用 120 s），Flash-Next prefill 1968 tok/s；wired 峰值 77575 MiB，压缩区 6666 MiB，交换不变。
+- 未上线：CosyVoice3（MLX 移植 16 句错读 4 句、wired +8.4–15.6 GB）；Fish Audio Drama 3（4-bit 23.8 GB，只能独占）。
+
 ## 语音转写
 
-**条件**：英文 100 条，c1／c4（c4 是客户端并发、批次墙钟，MLX 后端单 worker 顺序推理）；不含首次加载，含 HTTP 和音频预处理。长音频复测：英文 946.9 s、中文 722.6 s。
+**2026-11-17 复查与 SOV 上线**（AS；独占 GPU、直连 HTTP、c1 墙钟，含音频解码；不含加载）
+
+| 入口 | 适用 | en100 WER | zh100 CER | mix60 MER | long_en WER | long_zh CER | en100 c1 | long_en 用时 | wired 峰值 | 磁盘 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `qwen3-asr-1.7b` | 默认；中文、混合、长音频 | 1.48% | 3.06% | 11.58% | 0.76% | 1.28% | 15.4 s | 16.5 s | +6.6 GB | 6.5 GB |
+| `whisper-large-v3` | 多语种 | 2.80% | 8.05% | 18.86% | 0.85% | 2.91% | 22.8 s¹ | 15.4 s¹ | +4.5 GB | 3.1 GB |
+| `nemotron-3.5-transcribe` | 英文、短中文、说话人 | 1.43% | 3.46% | 23.90% | 0.89% | 失败² | 29.4 s | 22.7 s | +21.2 GB | 21.4 GB |
+| `sov-transcribe-1` | 英文和 6 种欧洲语言 | 2.20% | 不支持³ | 不支持³ | 0.98% | 不支持³ | 32.5 s | 31.2 s | +31.3 GB | 29.8 GB |
+
+¹ 进程内测量（融合注意力之后）；HTTP 为 26.9／20.1 s（之前）。² 12 分钟中文输出英文翻译：CER 370%，指定 zh 仍 221%；短中文指定 zh 3.59%。³ 中文被译成英文或乱码（zh 314%、mix 87%、long_zh 97%，官方参照同样），服务对 `language=zh` 返回 400。
+
+测试集：en = LibriSpeech test-clean 100 条（11.3 min），zh = AISHELL-1 100 条（8.6 min），mix = ASCEND 60 条（4.1 min），long_en 15.8 min，long_zh 12.0 min；按语料整体计算错误率。
+
+**SOV-Transcribe-1**（Whisper large-v3 编码器 + Gemma 4 26B-A4B 解码器，26.6B／激活 4.6B；官方参照 = 模型卡 Transformers 代码，MPS BF16）
+
+| 版本 | en100 WER | 与官方不同 | 与官方差异 | long_en WER | en100 进程内 | prefill（含编码器） | decode | long_en | MLX 峰值 | 磁盘 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 官方 BF16（MPS） | 2.14% | — | — | 1.07% | 151 s | — | — | — | — | 53.3 GB |
+| MLX BF16 | 2.20% | 1/100 | 0.05% | 1.03% | 38.9 s | 3068 tok/s | 87.6 tok/s | 41.0 s | 53.6 GB | 53.3 GB |
+| **MLX 8-bit（上线）** | 2.20% | 1/100 | 0.05% | 0.98% | 35.2 → 33.0 s | 2962 tok/s | 105 → 116 tok/s | 37.4 s | 31.2 GB | 29.8 GB |
+| MLX 4-bit affine g64 | 1.98% | 9/100 | 0.71% | 1.07% | 29.6 s | 3524 tok/s | 124.6 tok/s | 30.7 s | 17.0 GB | 15.6 GB |
+
+- 8-bit 与 MLX BF16 在 en100 上逐条相同；4-bit 与官方的差异是参照误差的 14 倍，long_zh 会陷入重复，所以用 8-bit。KV BF16；每 30 s 音频 375 个 token。
+- HTTP（8-bit）：c4 33.6 s、srt 36.0 s（WER 2.36%）、long_en verbose_json 33.2 s（WER 0.94%）；加载 4.2 s；wired +32079 MiB（16 分钟 verbose_json），RSS 29.8 GB。
+- 不能与聊天模型共存：加载时 llama-swap 先卸下聊天模型。
+
+**11-15 首次测量**（A；英文 100 条，c1／c4；c4 是客户端并发、批次墙钟，MLX 后端单 worker 顺序推理）
 
 | 入口 | 权重 | 100 条 c1 | 100 条 c4 | wired | 其他内存 | 磁盘 |
 | --- | --- | ---: | ---: | ---: | --- | ---: |
@@ -101,11 +262,17 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 
 | 修改 | 对照 | 前 → 后 | 速度 | 内存 |
 | --- | --- | --- | --- | --- |
+| 16 kHz 单声道 PCM WAV 直读，不启动 ffmpeg（`asr/http_api.py`） | Qwen en100 c1 | 21.6 → 18.8 s | 每请求省约 30 ms | — |
+| 贪心解码先排下一步再读当前 token（mlx-qwen3-asr fork） | Qwen en100／long_en | 16.7 → 15.0 s；18.1 → 16.2 s | 1.11× | — |
+| 同上（mlx-audio fork） | SOV decode | 105 → 116 tok/s；en100 35.2 → 33.0 s | 1.07× | — |
+| Whisper 融合注意力，logits 只在要词级时间戳时算（mlx-examples fork） | en100／zh100／long_en | 28.9 → 22.8 s；26.6 → 21.1 s；20.0 → 15.4 s | 1.26–1.31× | — |
+| SOV 解码上限按音频长度（64 + 10 token/s） | 中文混合音频 | 每条约 70 s 失控生成 → 不再出现 | — | — |
 | Whisper：按需导入词级对齐（fork） | Python 3.15.2，7 组交替新进程，只测导入 | 0.530 → 0.134 s（中位数） | 3.96×（导入耗时 −74.7%） | 导入 RSS 167.3 → 71.4 MiB（约 −96 MiB）；模型 MLX 峰值两臂均 4.069 GB |
 | Whisper：MLX 缓存上限 512 MiB | 长音频 verbose + c4 | 25.65 → 26.20 s | +2.1%，持平 | wired 5804 → 4545 MiB（−21.7%） |
 | Qwen3-ASR：MLX 缓存上限 512 MiB | 长音频 + c4 | 16.95 → 16.97 s | +0.1%，持平 | wired 10332 → 6776 MiB（−34.4%） |
 
-- 正确性：缓存上限前后错误率相同；Whisper 导入修改后普通／词级输出及 JSON、verbose JSON、SRT、VTT 一致（[专项测试](whisper-startup.md)）。
+- Qwen 端到端合计：en100 c1 21.6 → 15.4 s（−29%），long_en 18.7 → 16.5 s（−12%）。
+- 正确性：WAV 直读 262 个评测文件与 ffmpeg 输出逐位相同；Qwen 流水线 101/101、SOV 100/100 文本相同；Whisper 融合注意力 261/262 相同、另一条 WER 相同，时间戳 logits 逐位相同。缓存上限前后错误率相同；Whisper 导入修改后普通／词级输出及 JSON、verbose JSON、SRT、VTT 一致（[专项测试](whisper-startup.md)）。
 - Nemotron 长中文自动模式曾输出英文翻译，低英文 WER 不代表中文可靠。
 - Whisper.cpp 与 MLX 的历史解码设置未完全对齐，换后端的差异不算作修改收益；Qwen3-ASR 请求期 RSS 1053 MiB 漏掉了加载峰值，不代表模型大小。
 
@@ -163,6 +330,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | 激活旋转量化改为 Metal 内核 | 16384×12288：7.2 → 2.2 ms | 快速 Hadamard |
 | 去噪缓存 2 → 6 GB | 2048² 每 block 160 → 119 ms | 带参考图时仍用 2 GB |
 | INT8 文本编码器（可选入口） | 页缓存 −8.8 GB | embedding 误差 2.6% → 6.2% |
+| 逐元素融合（调制广播、Q/K norm + RoPE 融合内核、门控残差编译） | 每 block 1024² 20.0 → 17.7 ms（−12%），2048² 121.0 → 108.0 ms（−11%）；每步 0.656 → 0.576 s／3.90 → 3.48 s | 输出逐字节相同；`QWEN21_FUSION` 可关 |
 
 **正确性**（同噪声与官方 diffusers 对比，第一步速度场相对 L2；官方自身 BF16 → FP16 为 10.9%）
 
@@ -175,6 +343,19 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 - 终图 PSNR（BF16，官方 vs mflux）：Turbo 28.5 dB、base 26.5 dB；编辑 43.9–44.0 dB。mflux 自带 Q8 在 Turbo 上改变构图（21.5 dB），不用。
 - 共存压测（2752×1536 与 Flash-Next 11.6 万 token 提示词同时计算）：出图 90 s，Flash-Next 首 token 74.4 s，压缩区 10.9 GB，交换 +1.05 GB；日常交替使用不会同时计算。
 - 许可：Qwen Research License（非商用）。
+
+**提示词增强**（`prompt_enhance`，默认关；32 条短提示词 × 6 类，1024²，经 API，中位数）
+
+| 变体 | 文生图 | 编辑 |
+| --- | ---: | ---: |
+| Turbo，不改写 | 7.8 s | 9.9 s |
+| Turbo + `mflux`（文本编码器改写） | 44.0 s | 28.4 s |
+| Turbo + `llm`（聊天模型 + 官方系统提示词） | 36.3 s | 27.6 s |
+| Turbo（INT8 文本编码器），不改写 | 8.1 s | 10.4 s |
+| Turbo（INT8 文本编码器）+ `mflux` | 69.0 s | 38.1 s |
+
+- 改写明显提升提示词遵循（聊天模型看图两两评判），`llm` 最好、比 `mflux` 快；改写每次多 18–36 s，所以默认关。
+- `mflux` 改写和 `auto_mask` 时 Qwen 进程 wired 峰值 4.7–8.0 GB（容量 11000 内）。
 
 ## 视频＋音频：MiniMax H3 Video
 
@@ -225,7 +406,11 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | Uncensored Flash-Next | 96.947 GB | 96.947 GB | 独立权重，不假设与默认版共享 extent |
 | 共用 MTP | 0.889 GB | 10.556 GB | 只需 Q2_0 GGUF 与草稿词表；目录里的 Q4／Q8 和转换张量不是部署所需 |
 | EmbeddingGemma 全部模态 | 1.540 GB | 1.540 GB | 文本 0.558 + 投影 0.982 |
-| 三个 MLX 重排器 | 18.487 GB | 18.487 GB | 旧目录 116.349 GB 含评测副本，已清理 |
+| 重排（3 个零拷贝 + 2 个 W8A8） | 30.424 GB | — | 零拷贝 1.203 + 8.055 + 8.529，W8A8 4.426 + 8.210；`mlx-*` 源目录（18.487 GB）服务不再读取 |
+| Qwen3 嵌入 + voyage（4 个零拷贝 + 2 个 W8A8） | 31.146 GB | — | 1.208 + 8.059 + 8.529 + 0.709 + 4.431 + 8.210 |
+| Perplexity Decider | 9.626 GB | 9.626 GB | 官方检查点，三个入口共用 |
+| Qwen3-TTS（3 个变体） | 12.220 GB | — | 编解码器硬链接成一份 |
+| SOV-Transcribe-1 | 29.770 GB | — | 8-bit；官方 BF16（53.3 GB）只作转换来源 |
 | Nemotron | 21.349 GB | 21.349 GB | decoder 19.679 + encoder 1.670 |
 | Whisper MLX | 3.084 GB | 3.084 GB | FP16 |
 | Qwen ASR + 对齐器 | 6.543 GB | 6.543 GB | 4.703 + 1.840 |
@@ -248,7 +433,9 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 - **耗时**：不含首次下载和权重准备；图片阶段计时含子进程启动；Strata 热 shader 数据不含首次编译。
 - **样本**：大多是单次测量，没有方差或置信区间。
 - **收益计算**：倍数 = 旧耗时 ÷ 新耗时；吞吐增幅 = 新 ÷ 旧 − 1；耗时变化 = 新 ÷ 旧 − 1。没有同口径基线的项不计算收益；“原版”指各行写明的本机基线，没有同口径实测就不写“比官方快”。
-- **环境**：数据来自各组件当时的环境（Strata／ASR 为 Python 3.12，图片、视频包装器为 3.15）；公开仓库的统一 3.15 环境只在重排上复测过，依赖验证不等于性能验收。
+- **环境**：数据来自各组件当时的环境（Strata／ASR 为 Python 3.12，图片、视频包装器为 3.15）；公开仓库的统一 3.15 环境只在重排上复测过，其余只做了导入检查，依赖验证不等于性能验收。
+- **错误率**：英文 WER（Whisper EnglishTextNormalizer），中文 CER（转简体、数字转汉字、去标点），混合 MER；按语料整体计算。TTS 用 Qwen3-ASR 回写后算错误率。
+- **检索质量**：SciFact（BEIR，300 个问题、5,183 篇摘要）nDCG@10；W8A8 与原版同时与官方用例比较，以原版误差为参照。
 - **磁盘**：`stat().st_size` 逻辑大小；`model-storage.json` 另记 `st_blocks × 512`，APFS 共享 extent 未去重，不能用来精确计算可回收空间。不含源码、venv、Homebrew、uv 缓存和生成的媒体。
 
 ### 测试记录索引
@@ -271,3 +458,9 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | V2 | 11-16，`p2-15s/trC.log` | 1344×768、362 帧 |
 | VP | 11-16，`int8-pack-1116-0910` | 512×288、25 帧、seed=7、20 步、VAE FP32、稀疏关闭 |
 | ZC | 11-17，`zc-1117-0010`；上线验证 `h3-video-zc-deploy-1117-0033` | T2V standard、VAE BF16；512² 56 帧与 1344×768 124 帧；原常驻 / 零拷贝常驻 / 原 SSD 流式 |
+| OA | 11-17，优化普查 `evals/w8a8/s1`～`s3` | 重排、Qwen3 嵌入、voyage、Decider 的零拷贝与 W8A8 |
+| QE | 11-16，Qwen3-Embedding 部署 | 64 × 450 token、8 × 3,600 token、32K 单条；官方 FP32 参照 |
+| AS | 11-17，ASR 复查与 SOV 部署 `asr/review/1117*`、`asr/sov/runs/` | en100／zh100／mix60／long_en／long_zh |
+| T | 11-17，TTS `tts/eval/out/s1`、`s2`，上线 `tts-deploy-1117-0229` | 16 句短文本、1449 字中文、3621 字符英文 |
+| EG | 11-17，EmbeddingGemma 复查 `embedding-review-1117-0053` | 短查询、64 × 400、4 × 8000 token |
+| QF | 11-17，Qwen-Image 融合 `bench-fusion/results/f1-1117-0023`、提示词评测 `eval/runs/` | Turbo W8A8，1024²／2048² |

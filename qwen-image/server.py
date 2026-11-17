@@ -10,7 +10,10 @@ Requests block until the image is done, so llama-swap counts them as in flight a
 the model out mid-generation. Generations run one at a time; concurrent requests queue on a lock.
 Images are always returned as b64_json, with "id" (kept under MEDIA_DIR, like the H3 images) and "seed".
 Extension fields: seed, steps, negative_prompt + guidance (base only, true CFG), reference_resolution (edits: the
-side each reference is resized to; default 1024 for 1-3 references, smaller for more, see reference_side).
+side each reference is resized to; default 1024 for 1-3 references, smaller for more, see reference_side),
+prompt_enhance (off | mflux: the text encoder rewrites | llm: the chat model rewrites with the official Qwen system
+prompts; the result is returned as revised_prompt, and with size auto its aspect ratio picks the canvas),
+auto_mask (edits: a phrase; the text encoder locates it and only that box is repainted).
 background="transparent" uses the official RGBA prompt template and returns RGBA PNG/WebP.
 mask follows OpenAI: fully transparent pixels of the mask are repainted, the rest of image[0] is kept.
 
@@ -27,6 +30,7 @@ import os
 import secrets
 import socketserver
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -130,6 +134,73 @@ def reference_side(count, requested=None):
     return max(512, int(side) // 32 * 32)
 
 
+PROMPT_ENHANCE = ("off", "mflux", "llm")
+# Default when a request does not say (llama-swap entry env): "off" for the plain IDs, "llm" for the -pe ID.
+DEFAULT_ENHANCE = os.environ.get("QWEN_IMAGE_DEFAULT_ENHANCE", "off")
+# llm: the chat model rewrites the prompt with the official Qwen-Image-2.1 prompt-rewrite system prompts
+# (QwenLM/Qwen-Image-2.1 prompt_rewrite/prompts, copied to ./prompt_rewrite).
+LLM_URL = os.environ.get("QWEN_IMAGE_LLM_URL", "http://127.0.0.1:8080/v1/chat/completions")
+LLM_MODEL = os.environ.get("QWEN_IMAGE_LLM_MODEL", "qwen3.8-flash-next")
+LLM_KEY_FILE = Path(os.environ.get("QWEN_IMAGE_LLM_KEY_FILE") or Path(os.environ.get("LLM_STATE_DIR", str(Path.home() / "Library/Application Support/llm-serving"))) / "api_key")
+# Not redistributed here (no license stated upstream): docs/qwen-image.md shows where to download them.
+SYSTEM_PROMPTS = Path(os.environ.get("QWEN_IMAGE_SYSTEM_PROMPTS") or Path(__file__).resolve().parent / "prompt_rewrite/prompts")
+RATIO_SIDES = {"1:1": (2048, 2048), "4:3": (2400, 1792), "3:4": (1792, 2400), "3:2": (2528, 1696),
+               "2:3": (1696, 2528), "16:9": (2752, 1536), "9:16": (1536, 2752)}
+
+
+def ratio_size(ratio, area=DEFAULT_SIDE * DEFAULT_SIDE):
+    """(width, height) for "W:H" at about `area` pixels, multiples of 32 (the rewrite's suggested canvas)."""
+    try:
+        w, h = (float(v) for v in ratio.split(":"))
+    except (AttributeError, ValueError):
+        return None
+    if not (w > 0 and h > 0) or not 1 / 4 <= w / h <= 4:
+        return None
+    width = (area * w / h) ** 0.5
+    return max(MIN_SIDE, round(width / 32) * 32), max(MIN_SIDE, round(width * h / w / 32) * 32)
+
+
+def parse_rewrite_json(text):
+    """(rewritten_prompt, wh_ratio or None) from the last JSON object in a reply, or None."""
+    from mflux.models.qwen21.model.qwen21_text_encoder.grounding import QwenImage21Grounding
+
+    text = text.split("</think>")[-1]
+    for candidate in reversed(QwenImage21Grounding.balanced_json_spans(text)):
+        try:
+            obj = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        rewritten = obj.get("rewritten_prompt") or obj.get("rewrited_prompt")
+        if isinstance(rewritten, str) and rewritten.strip():
+            ratio = obj.get("wh_ratio")
+            return rewritten.strip(), ratio if isinstance(ratio, str) and ratio.strip() else None
+    return None
+
+
+def llm_rewrite(prompt, references=()):
+    """Rewrite with the chat model and the official system prompt (t2i, or edit with the references attached)."""
+    task = "edit" if references else "t2i"
+    system = (SYSTEM_PROMPTS / f"system_prompt_{task}.txt").read_text()
+    content = [{"type": "text", "text": prompt}]
+    for image in references:
+        buf = io.BytesIO()
+        small = image.convert("RGB")
+        small.thumbnail((1024, 1024))
+        small.save(buf, format="JPEG", quality=90)
+        content.append({"type": "image_url",
+                        "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}})
+    body = json.dumps({"model": LLM_MODEL, "temperature": 0.7, "max_tokens": 4096,
+                       "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}]})
+    req = urllib.request.Request(LLM_URL, data=body.encode(), headers={
+        "Content-Type": "application/json", "Authorization": f"Bearer {LLM_KEY_FILE.read_text().strip()}"})
+    with urllib.request.urlopen(req, timeout=600) as r:
+        reply = json.load(r)["choices"][0]["message"]["content"] or ""
+    parsed = parse_rewrite_json(reply)
+    if parsed is None:
+        raise RuntimeError(f"the chat model's rewrite could not be parsed: {reply[:160]!r}")
+    return parsed
+
+
 def openai_mask(raw, size):
     """OpenAI mask (transparent = edit) -> mflux mask (white = repaint), at the source image's size."""
     try:
@@ -174,7 +245,17 @@ class Generator:
         if background == "transparent":
             if fmt == "JPEG":
                 raise BadRequest("background=transparent needs output_format png or webp")
-            prompt = RGBA_TEMPLATE.format(prompt.strip().rstrip("."))
+            if (req.get("prompt_enhance") or DEFAULT_ENHANCE) == "off":
+                prompt = RGBA_TEMPLATE.format(prompt.strip().rstrip("."))
+        enhance = req.get("prompt_enhance") or DEFAULT_ENHANCE
+        if enhance not in PROMPT_ENHANCE:
+            raise BadRequest(f"prompt_enhance must be one of {', '.join(PROMPT_ENHANCE)}")
+        auto_mask = req.get("auto_mask")
+        if auto_mask and not references:
+            raise BadRequest("auto_mask needs an image to edit")
+        if auto_mask and mask is not None:
+            raise BadRequest("give either mask or auto_mask")
+        auto_size = req.get("size") in (None, "", "auto") and not references
         width, height = parse_size(req.get("size"), references)
         n = parse_int(req.get("n"), "n", 1, 1, MAX_N)
         seed = parse_int(req.get("seed"), "seed", None, 0, 2**31 - 1)
@@ -188,13 +269,43 @@ class Generator:
             kw["mask_image"] = mask
         if references:
             kw["output_resolution"] = reference_side(len(references), req.get("reference_resolution"))
+        if auto_mask:
+            kw["auto_mask"] = str(auto_mask)
+        revised = None
+        if enhance == "llm":
+            t = time.time()
+            try:
+                revised, ratio = llm_rewrite(req["prompt"], references)
+            except Exception as e:
+                raise BadRequest(f"prompt_enhance=llm failed: {e}")
+            log.info("llm rewrite in %.1fs: %r", time.time() - t, revised[:120])
+            if auto_size and ratio_size(ratio):
+                width, height = ratio_size(ratio)
+            prompt = RGBA_TEMPLATE.format(revised.rstrip(".")) if background == "transparent" else revised
         rw, rh = render_size(width, height)
         return self.worker.submit(self._generate, prompt, fmt, fmt_name, background, width, height, rw, rh, n, seed,
-                                  steps, references, mask, kw).result()
+                                  steps, references, mask, kw, enhance, auto_size, revised).result()
 
-    def _generate(self, prompt, fmt, fmt_name, background, width, height, rw, rh, n, seed, steps, references, mask, kw):
+    def _generate(self, prompt, fmt, fmt_name, background, width, height, rw, rh, n, seed, steps, references, mask, kw,
+                  enhance="off", auto_size=False, revised=None):
         mx.set_cache_limit(self.ref_cache_bytes if references else self.cache_bytes)
         mx.clear_cache()
+        if enhance == "mflux":
+            # The text encoder itself rewrites (its generation head): edits with mflux's condensation of the
+            # official edit recipe, text-to-image with ours of the t2i recipe.
+            t = time.time()
+            try:
+                if references:
+                    revised = self.model.rewrite_prompt(prompt, list(references))
+                else:
+                    revised, ratio = self.model.rewrite_text_prompt(prompt)
+                    if auto_size and ratio_size(ratio):
+                        width, height = ratio_size(ratio)
+                        rw, rh = render_size(width, height)
+            except Exception as e:
+                raise BadRequest(f"prompt_enhance=mflux failed: {e}")
+            log.info("mflux rewrite in %.1fs: %r", time.time() - t, revised[:120])
+            prompt = RGBA_TEMPLATE.format(revised.rstrip(".")) if background == "transparent" else revised
         data = []
         for i in range(n):
             t = time.time()
@@ -210,8 +321,10 @@ class Generator:
                 image = image.convert("RGB")
             buf = io.BytesIO()
             image.save(buf, format=fmt)
-            data.append({"b64_json": base64.b64encode(buf.getvalue()).decode(), "seed": seed + i,
-                         "id": keep_media(image)})
+            item = {"b64_json": base64.b64encode(buf.getvalue()).decode(), "seed": seed + i, "id": keep_media(image)}
+            if revised:
+                item["revised_prompt"] = revised
+            data.append(item)
             log.info("generated %dx%d refs=%d mask=%s seed=%d in %.1fs", width, height, len(references),
                      mask is not None, seed + i, time.time() - t)
         return {"created": int(time.time()), "output_format": fmt_name, "background": background, "data": data}

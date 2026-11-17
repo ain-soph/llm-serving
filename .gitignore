@@ -19,3 +19,4 @@ api_key
 *.key
 *.safetensors
 *.gguf
+qwen-image/prompt_rewrite/
