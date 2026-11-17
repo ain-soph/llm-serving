@@ -1,6 +1,6 @@
 # llm-serving
 
-面向 Apple Silicon 的本地模型接口与部署工具。当前参数来自 **M5 Ultra、96 GiB 统一内存**的单机部署，包含文本、嵌入、重排、语音识别、图片和视频。
+面向 Apple Silicon 的本地模型接口与部署工具。当前参数来自 **M5 Ultra、96 GiB 统一内存**的单机部署，包含文本、嵌入、重排、语音识别、图片和视频。**主要文本后端是 Strata Metal**，提供 Qwen3.8 Flash-Next 及其 Uncensored 版本。
 
 模型服务独立运行；不依赖另一台电脑、外部推理 API、聊天前端、MCP 或公网反向代理。
 
@@ -8,6 +8,17 @@
 客户端 → Caddy :8080 → llama-swap 127.0.0.1:8081 → 按需加载模型
                  └→ 只读媒体服务 127.0.0.1:8090
 ```
+
+## 引擎与源码位置
+
+| 用途 | 引擎 | 本仓库中的入口 |
+| --- | --- | --- |
+| 主要文本生成、工具调用、视觉输入 | [Strata fork，serving 分支](https://github.com/ain-soph/Strata/tree/serving) | [构建脚本](tools/native.py)、[模型路由](templates/conf.d/strata.yaml)、[引擎配置](templates/strata/) |
+| 图片生成与编辑 | [h3-image-mlx fork](https://github.com/ain-soph/h3-image-mlx/tree/serving) | `pyproject.toml` / `uv.lock`、`h3-image-mlx/server.py` |
+| 视频生成 | [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving) | `tools/native.py`、`h3-video/server.py` |
+| 嵌入与重排 | Homebrew llama.cpp | `embedding/server.py`、`templates/conf.d/rerank.yaml` |
+
+Strata 的引擎代码和 HTTP 服务在独立 fork 中维护，本仓库引用固定 commit，安装时自动获取源码；因此顶层没有重复的 `strata/` 源码目录。Homebrew llama.cpp 用于嵌入和重排，主要文本请求走 Strata。详见 [Strata 部署说明](docs/strata.md)。
 
 ## 安装与迁移
 
