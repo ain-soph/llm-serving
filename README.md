@@ -23,9 +23,9 @@
 | 语音转写 | `qwen3-asr-1.7b` | mlx-qwen3-asr | 带强制对齐器（词级时间戳） |
 | 图片生成／编辑 | `minimax-h3-image` | [h3-image-mlx fork](https://github.com/ain-soph/h3-image-mlx/tree/serving) | W8A8，零拷贝，各尺寸与聊天模型共存 |
 | 图片生成／编辑 | `qwen-image-2.1-turbo`、`qwen-image-2.1`（各有 `-int8` 文本编码器版） | [mflux fork](https://github.com/ain-soph/mflux/tree/serving) | 8／40 步；最多 10 张参考图、遮罩、透明 PNG；非商用许可 |
-| 视频＋音频 | `minimax-h3-video`、`-stream` | [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving) | `best`／`standard`／`fast` 三档，最长 15 s |
+| 视频＋音频 | `minimax-h3-video` | [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving) | `best`／`standard`／`fast` 三档，最长 15 s；INT8 DiT 零拷贝 |
 
-完整 commit 固定在 `native.lock.json`（原生引擎）和 `uv.lock`（Python 包）；[原生构建脚本](tools/native.py)、[模型路由模板](templates/conf.d/)、[Strata 配置](templates/strata/) 和自写接口都在本仓库。另见 [Strata 部署说明](docs/strata.md)、[Qwen-Image 权重准备](docs/qwen-image.md)。
+完整 commit 固定在 `native.lock.json`（原生引擎）和 `uv.lock`（Python 包）；[原生构建脚本](tools/native.py)、[模型路由模板](templates/conf.d/)、[Strata 配置](templates/strata/) 和自写接口都在本仓库。另见 [Strata 部署说明](docs/strata.md)、[Qwen-Image 权重准备](docs/qwen-image.md)、[H3 视频权重准备](docs/h3-video.md)。
 
 ## 安装与迁移
 
@@ -65,7 +65,7 @@ cd llm-serving
 
 ## 模型与状态
 
-- 模型目录完全独立，必要布局见 `models.required.json`。转换过的 Strata pack、INT8 视频权重和页对齐图片权重（H3 图片、Qwen-Image，见 [准备步骤](docs/qwen-image.md)）应一并迁移；原始 Hub 权重不一定能直接替代这些文件。
+- 模型目录完全独立，必要布局见 `models.required.json`。转换过的 Strata pack、INT8 视频权重（[准备步骤](docs/h3-video.md)）和页对齐图片权重（Qwen-Image 见[准备步骤](docs/qwen-image.md)）应一并迁移；原始 Hub 权重不一定能直接替代这些文件。
 - 运行数据默认在 `~/Library/Application Support/llm-serving`：API key、活动数据库、日志、图片与视频。模型权重和运行数据都不提交到 Git。
 - 迁移时可以保留旧 API key，放到新状态目录的 `api_key` 文件，权限设为 `0600`；否则配置工具会生成一个新凭证，供客户端使用。不要将密钥放到命令行参数或公开配置中。
 - 有权重文件后，推理不需要外部 API key 或下载 token。个别模型首次下载可能需要模型托管站点的授权；这属于准备阶段。

@@ -1,0 +1,51 @@
+# MiniMax H3 Video：权重准备与服务
+
+服务 `h3-video/server.py` 调用 [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving)（commit 固定在 `native.lock.json`，
+`tools/native.py h3` 构建 `h3` 和 `h3_pack_int8`），每次渲染启动一个 `h3` 子进程，空闲时不占模型内存。
+路由模板：`templates/conf.d/h3-video.yaml`。速度与内存：[性能与资源报告](performance.md#视频音频minimax-h3-video)。
+
+## 入口
+
+只有一个入口 `minimax-h3-video`（常驻模式，INT8 DiT 零拷贝映射）。请求体的 `model` 可以带预设后缀
+`-best`／`-standard`／`-fast`；旧名 `minimax-h3-video-stream` 仍被接受，作为别名走同一模式。
+
+2026-11-17 起合并为一个入口：页对齐后的 INT8 DiT 用 `newBufferWithBytesNoCopy` 直接映射，常驻模式的 DiT 加载
+2.29 → 0.33 s，速度与原 SSD 流式相同，三种方式输出逐字节相同。
+
+## 权重目录
+
+```text
+<models>/minimax-h3/
+  FL2VA/    text_encoder/、video_vae/、audio_vae/、processor/、tokenizer/、transformer-int8/（页对齐）
+  Ref2VA/   processor/、tokenizer/、transformer-int8/（页对齐）；text_encoder、video_vae、audio_vae 链接到 ../FL2VA
+```
+
+运行时只读 `transformer-int8/`，不需要官方 BF16 `transformer/`（每份约 66 GB）。两个检查点合计约 125.6 GB。
+
+## 准备步骤
+
+```sh
+M="$HOME/models/minimax-h3"                 # 换成实际的模型目录
+H3=".local/src/h3-<commit 前 12 位>"          # tools/native.py h3 构建出的源码目录
+
+# 1. 官方权重（含 BF16 transformer，打包要用）
+hf download MiniMaxAI/MiniMax-H3 --local-dir "$M"
+
+# 2. （可选，省空间）Ref2VA 的 text_encoder、video_vae、audio_vae 与 FL2VA 相同：先比对，再换成符号链接
+for d in text_encoder video_vae audio_vae; do diff -rq "$M/FL2VA/$d" "$M/Ref2VA/$d"; done
+#    比对无差异后：mv "$M/Ref2VA/$d" 到别处，再 ln -s "../FL2VA/$d" "$M/Ref2VA/$d"
+
+# 3. DiT 打包为 INT8（逐位校验），然后页对齐（逐字节校验后原子替换）
+for v in FL2VA Ref2VA; do
+  "$H3/h3_pack_int8" "$M/$v/transformer" "$M/$v/transformer-int8" --max-steps 20 --verify
+done
+python3 "$H3/tools/align_int8_pack.py" "$M/FL2VA/transformer-int8" "$M/Ref2VA/transformer-int8"
+
+# 4. 确认无误后可删除 BF16 transformer（每份约 66 GB）；以后重新打包时再下载：
+#    hf download MiniMaxAI/MiniMax-H3 --include "FL2VA/transformer/*" "Ref2VA/transformer/*" --local-dir "$M"
+```
+
+- `align_int8_pack.py` 把每个文件改写为普通 safetensors：整页大小的张量排在前面，每个都从 16 KiB 页开始，可以零拷贝；
+  每行 scale 等小张量放在后面，加载时照常拷贝。已对齐的文件会跳过。
+- 未对齐的 `transformer-int8` 也能运行（自动回退到拷贝），只是加载慢一些。
+- 打包和对齐后 doctor 只检查目录是否存在（`models.required.json` 的 `minimax-h3`），不校验内容。

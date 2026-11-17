@@ -1,6 +1,10 @@
+# MiniMax-H3 video + stereo audio via the h3.c fork (native.lock.json). One entry since 2026-11-17: the packed INT8
+# DiT is page-aligned (tools/align_int8_pack.py in h3.c) and mapped zero-copy, so the resident mode loads in 0.33 s and
+# renders as fast as the former SSD-streaming entry (byte-identical output); the wrapper still accepts the old
+# minimax-h3-video-stream name as an alias. A render keeps the GPU busy for minutes, so it takes the whole pool.
 models:
   "minimax-h3-video":
-    name: "MiniMax H3 Video (resident int8)"
+    name: "MiniMax H3 Video"
     description: "Text/first/last-frame to video with stereo audio; POST /upstream/minimax-h3-video/v1/videos"
     capabilities:
       in: [text, image]
@@ -16,19 +20,3 @@ models:
       gpu: ${env.LSW_GPU_EXCLUSIVE}
     evict_cost: 0
 
-  "minimax-h3-video-stream":
-    name: "MiniMax H3 Video (SSD streaming)"
-    description: "Same model, DiT streamed from SSD layer by layer (INT8 from transformer-int8 when packed, else BF16); POST /upstream/minimax-h3-video-stream/v1/videos"
-    capabilities:
-      in: [text, image]
-      out: [video]
-      disableAuto: true
-    ttl: 30
-    checkEndpoint: /health
-    cmd: >
-      @PYTHON@ @ROOT@/h3-video/server.py
-      --port ${PORT} --models @MODELS@/minimax-h3 --out-dir @STATE@/media/videos
-      --model-id minimax-h3-video-stream --mode stream
-    capacities:
-      gpu: ${env.LSW_GPU_EXCLUSIVE}
-    evict_cost: 0

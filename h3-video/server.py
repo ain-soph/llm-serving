@@ -67,8 +67,9 @@ status line goes out at once and then a space every 15 s (proxy read timeouts), 
 render. Renders run one at a time; a POST while one runs gets 429 (Retry-After: 60) instead of queueing.
 Each render runs the h3 CLI as a child process, so the wrapper holds no model memory while idle.
 
-The body's optional "model" picks the DiT mode and preset per request: "minimax-h3-video[-stream][-fast|-standard|
--best]" (old -quality/-draft still work) (-stream renders with --ssd-streaming; the suffix sets the preset unless "preset" is given); any other
+The body's optional "model" picks the preset per request: "minimax-h3-video[-fast|-standard|-best]" (old
+-quality/-draft and -stream still work; -stream is now an alias: one zero-copy mode since 2026-11-17; the suffix sets
+the preset unless "preset" is given); any other
 value (or none) uses --mode and the default preset. This lets one public URL (an optional reverse proxy maps /v1/videos onto this
 wrapper) serve every variant, and lets clients that only send a model name (LobeChat) pick the preset.
 --files-only runs a no-render instance for GET (status, MP4) that refuses POST, so fetching a finished video
@@ -109,8 +110,11 @@ DEFAULT_SECONDS = 5.0
 KEEPALIVE_S = 15
 KEEP_DAYS = 30            # outputs older than this are deleted ...
 KEEP_BYTES = 2 << 30      # ... and the oldest go first while all outputs exceed 2 GiB (user choice, 2026-11-16)
-MODE_BY_MODEL = {"minimax-h3-video": "resident", "minimax-h3-video-stream": "stream"}   # body "model" -> DiT mode
-MODEL_BY_MODE = {v: k for k, v in MODE_BY_MODEL.items()}
+# body "model" -> DiT mode. Since 2026-11-17 the packed INT8 DiT is mapped zero-copy (h3.c fork 183be4a): resident
+# loads in 0.33 s and renders as fast as --ssd-streaming did (outputs byte-identical), so there is one llama-swap
+# entry and the old -stream name is an alias of it (old clients keep working). --mode stream still exists for tests.
+MODE_BY_MODEL = {"minimax-h3-video": "resident", "minimax-h3-video-stream": "resident"}
+MODEL_BY_MODE = {"resident": "minimax-h3-video", "stream": "minimax-h3-video"}
 MODEL_RE = re.compile(r"(minimax-h3-video(?:-stream)?)(?:-(fast|standard|best|quality|draft))?")
 LSW_URL = os.environ.get("H3_VIDEO_LSW_URL", "http://127.0.0.1:8080")       # where the hold request goes
 LSW_KEY_FILE = Path(os.environ.get("H3_VIDEO_LSW_KEY_FILE") or Path(os.environ.get("LLM_STATE_DIR", str(Path.home() / "Library/Application Support/llm-serving"))) / "api_key")
