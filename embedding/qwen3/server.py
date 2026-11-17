@@ -46,13 +46,17 @@ DOC_TYPES = {"document", "passage", "search_document"}
 
 
 class Embedder:
-    def __init__(self, path, max_batch_tokens, max_tokens, dtype=None, copy=False):
+    def __init__(self, path, max_batch_tokens, max_tokens, dtype=None, copy=False, w8a8_classes=None,
+                 float_model=None):
         path = Path(path)
         cfg = json.loads((path / "config.json").read_text())
         self.tok = AutoTokenizer.from_pretrained(str(path))
         self.max_batch_tokens, self.max_tokens = max_batch_tokens, max_tokens
-        if qwen3_w8a8.is_w8a8(path):
-            self.model, extras, _ = qwen3_w8a8.load(path, copy=copy)
+        if w8a8_classes is not None or qwen3_w8a8.is_w8a8(path):
+            if w8a8_classes is not None:  # per-class precision (INT8 audit 2026-11-17)
+                self.model, extras, _ = qwen3_w8a8.load_mixed(path, float_model, w8a8_classes, copy=copy)
+            else:
+                self.model, extras, _ = qwen3_w8a8.load(path, copy=copy)
             self.proj = extras.get("linear.weight")
             self.voyage = self.proj is not None
             self.dim = self.proj.shape[0] if self.voyage else cfg["hidden_size"]
@@ -205,11 +209,15 @@ def main():
     ap.add_argument("--cache-mb", type=int, default=256, help="MLX buffer cache kept between requests")
     ap.add_argument("--dtype", choices=["float16", "bfloat16", "float32"], help="cast the (unquantized) weights")
     ap.add_argument("--copy", action="store_true", help="W8A8 / zero-copy directory: copy the weights into memory")
+    ap.add_argument("--w8a8-classes", help="with --float-model: comma-separated projections (q_proj, ..., down_proj) "
+                    "taken W8A8 from --model; the rest stay float")
+    ap.add_argument("--float-model", help="zero-copy float copy (qwen3_w8a8.py --float) for the other projections")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="[embed] %(message)s")
     mx.set_cache_limit(args.cache_mb << 20)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    server.embedder = Embedder(args.model, args.max_batch_tokens, args.max_tokens, args.dtype, args.copy)
+    server.embedder = Embedder(args.model, args.max_batch_tokens, args.max_tokens, args.dtype, args.copy,
+                               args.w8a8_classes.split(",") if args.w8a8_classes else None, args.float_model)
     server.model_id = args.model_id
     log.info("listening on http://%s:%d (%s, %d dims); MLX active %.2f GiB, load peak %.2f GiB", args.host, args.port,
              args.model, server.embedder.dim, mx.get_active_memory() / 2**30, mx.get_peak_memory() / 2**30)

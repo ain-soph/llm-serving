@@ -34,13 +34,15 @@ models:
   "qwen3-reranker-4b-int8":
     name: "Qwen3 Reranker 4B (W8A8)"
     description: "4B with int8 weights and activations: 1.4x faster (20 docs ~0.6 s), same nDCG; suggested for RAG frontends"
-    cmd: ${rerank-cmd} --model-id qwen3-reranker-4b-int8 --model @MODELS@/qwen3-reranker/w8a8-4b
+    cmd: >
+      ${rerank-cmd} --model-id qwen3-reranker-4b-int8 --model @MODELS@/qwen3-reranker/w8a8-4b
+      --w8a8-classes q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj --float-model @MODELS@/qwen3-reranker/zc-4b-bf16
     capabilities:
       reranker: true
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 6500             # wired peak +5833 MiB
+      gpu: 7500             # wired peak +5833 MiB all-W8A8; down_proj float since 2026-11-17: +~0.9 GB
     evict_cost: 0
 
   "qwen3-reranker-8b":

@@ -145,7 +145,9 @@ DEFAULT_PRESET = "standard"
 H3_ENV = {"H3_VAE_BF16": "2"}
 # Sparse attention: dense for the first evaluations (layout forms there) and the first/last block; with fewer
 # than 10 passes (a custom "steps") only the first two stay dense.
-SPARSE_ENV = {"H3_ATTN": "int8",
+# BF16 attention since 2026-11-17 (INT8 audit): int8 Q@K^T saved 5 of 160 s on a 768p 5 s fast render (DiT
+# 128.4 vs 134.2 s) with 14x the attention error (rel. RMS 0.021 vs 0.0015).
+SPARSE_ENV = {"H3_ATTN": "nax",
               "H3_SPARSE": "t0=1,r0=4,rmin=0,sink=0,dense_head=1,dense_tail=1,dense_steps=4"}
 SPARSE_ENV_FEW_STEPS = dict(SPARSE_ENV, H3_SPARSE=SPARSE_ENV["H3_SPARSE"].replace("dense_steps=4", "dense_steps=2"))
 

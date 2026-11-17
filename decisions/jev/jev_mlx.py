@@ -14,6 +14,7 @@ suffix token to the whole prefix and its whole suffix, so the full-attention lay
 the cache is cut at the block boundary (qev checks that boundary in `_split`); the gated-delta layers carry their
 conv / recurrent state from the prefix into each branch. Right-padded suffix keys are masked.
 """
+import os
 import sys
 import threading
 import time
@@ -63,7 +64,7 @@ TOKEN_BLOCK = 2048     # prefix tokens per gated-delta / MLP block
 
 class MLXJev(DecisionEngine):
     def __init__(self, checkpoint, dtype="bfloat16", max_branch_tokens=32768, max_request_tokens=65536,
-                 batch_tokens=65536, quant=None):
+                 batch_tokens=65536, quant=None, w8a8_skip=None):
         import transformers
         from mlx_vlm.models import qwen3_5
         from mlx_vlm.utils import load_config, sanitize_weights, update_module_configs
@@ -120,7 +121,7 @@ class MLXJev(DecisionEngine):
         self.slot_head = mx.array(np.ascontiguousarray(head[self.slot_ids])).view(mx.bfloat16).astype(mx.float32)
         del weights, head
         if quant is not None:
-            self._quantize(quant)
+            self._quantize(quant, w8a8_skip)
         mx.eval(self.model.parameters())
         mx.clear_cache()
         self.info = EngineInfo(model_path=str(ck), model_type="qwen3_5", dtype=dtype, device="mlx", fork_mode="batched",
@@ -129,7 +130,7 @@ class MLXJev(DecisionEngine):
                                                         "calibration": self.calibration.source})
         self.load_seconds = time.perf_counter() - t0
 
-    def _quantize(self, quant):
+    def _quantize(self, quant, w8a8_skip=None):
         """8-bit weights at load, one decoder layer at a time from the lazily mapped bfloat16 file, so the bfloat16
         copy never exists in full: "q8" = MLX affine 8-bit, group 32, scales in the activation dtype (weight-only,
         like Q8_0); "w8a8" = per-row int8 weights of the Hadamard-rotated projections with int8 activations on the
@@ -148,6 +149,16 @@ class MLXJev(DecisionEngine):
             import mlx_w8a8
             names = ("q_proj", "k_proj", "v_proj", "o_proj", "in_proj_qkv", "in_proj_z", "out_proj",
                      "gate_proj", "up_proj", "down_proj")
+            # skip: projections that stay 8-bit weight-only (q8) instead of W8A8. A projection whose input is not
+            # shared with another (o_proj, out_proj) pays the activation rotate-quantize alone, which loses to q8 on
+            # ~200-token prefills (decisions/jev/results/p1b-*). Default: none (env JEV_W8A8_SKIP=a,b overrides).
+            skip = set(w8a8_skip if w8a8_skip is not None else
+                       [n for n in os.environ.get("JEV_W8A8_SKIP", "").split(",") if n])
+            names = tuple(n for n in names if n not in skip)
+
+            def q8_pred(path, m):
+                return (isinstance(m, nn.Linear) and path.rpartition(".")[2] in skip
+                        and m.weight.shape[-1] % 32 == 0)
             for layer in self.text.layers:
                 modules = dict(layer.named_modules())
                 for path in mlx_w8a8.linear_paths(layer, names):
@@ -158,6 +169,8 @@ class MLXJev(DecisionEngine):
                     new.weight, new.scale = mlx_w8a8.quantize_weight(old.weight)
                     parent, _, name = path.rpartition(".")
                     setattr(modules[parent], name, new)
+                if skip:
+                    nn.quantize(layer, group_size=32, bits=8, class_predicate=q8_pred)
                 layer.update(tree_map_cast(layer.parameters(), self.dtype))
                 mx.eval(layer.parameters())
             self.text.norm.update(tree_map_cast(self.text.norm.parameters(), self.dtype))

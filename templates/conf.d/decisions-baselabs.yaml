@@ -11,7 +11,7 @@ models:
     description: "Decision model (9B): predicate / choice / score probabilities, text, up to 16K tokens"
     cmd: >
       @PYTHON@ @ROOT@/decisions/jev/server.py
-      --model @MODELS@/elephant-1 --model-id elephant-1 --dtype bfloat16 --quant q8
+      --model @MODELS@/elephant-1 --model-id elephant-1 --dtype bfloat16 --quant q8 --cache-mb 1024
       --host 127.0.0.1 --port ${PORT}
     capabilities:
       in: [text]
@@ -19,17 +19,17 @@ models:
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 10000            # wired peak +8899 MiB (15K-token request)
+      gpu: 11000            # wired peak +9730 MiB at the 16,384-token limit, 1024 MB cache
     evict_cost: 0
 
-  # W8A8 (int8 weights and activations): ~1.4x faster prefill, max |dp| 0.019, no answer flips. The default stays
-  # 8-bit weight-only.
+  # W8A8 (int8 weights and activations) on the projection classes that get faster; the linear-attention in_proj_z
+  # stays 8-bit weight-only (accuracy for no speed). The default stays 8-bit weight-only.
   "elephant-1-int8":
     name: "Base Labs elephant-1 (decisions, W8A8)"
     description: "Same decision model with int8 weights and activations: ~1.4x faster, probabilities within ~0.02"
     cmd: >
       @PYTHON@ @ROOT@/decisions/jev/server.py
-      --model @MODELS@/elephant-1 --model-id elephant-1-int8 --dtype bfloat16 --quant w8a8
+      --model @MODELS@/elephant-1 --model-id elephant-1-int8 --dtype bfloat16 --quant w8a8 --w8a8-skip in_proj_z --cache-mb 1024
       --host 127.0.0.1 --port ${PORT}
     capabilities:
       in: [text]
@@ -37,5 +37,5 @@ models:
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 9500             # wired peak +8063 MiB
+      gpu: 10500            # wired peak +9151 MiB, same test
     evict_cost: 0

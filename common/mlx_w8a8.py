@@ -146,6 +146,11 @@ def linear_paths(model, names):
             if isinstance(m, (nn.Linear, nn.QuantizedLinear)) and p.rsplit(".", 1)[-1] in names]
 
 
+def linear_paths_w8a8(model):
+    """Paths of the W8A8Linear modules."""
+    return [p for p, m in model.named_modules() if isinstance(m, W8A8Linear)]
+
+
 def replace(model, paths):
     """Swap the modules at `paths` for empty W8A8Linear layers (their weights come from load_weights)."""
     from mlx.utils import tree_unflatten

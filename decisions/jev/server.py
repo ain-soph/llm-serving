@@ -92,6 +92,8 @@ def main():
     ap.add_argument("--model-id", default="elephant-1")
     ap.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float16", "float32"])
     ap.add_argument("--quant", choices=["q8", "w8a8"], help="8-bit weights at load (jev_mlx.MLXJev._quantize)")
+    ap.add_argument("--w8a8-skip", default="",
+                    help="with --quant w8a8: comma-separated projections kept 8-bit weight-only (e.g. o_proj,out_proj)")
     ap.add_argument("--max-branch-tokens", type=int, default=16384,
                     help="state + one question (16,384 = the model card's maximum sequence length)")
     ap.add_argument("--max-request-tokens", type=int, default=65536, help="state + all questions")
@@ -103,7 +105,8 @@ def main():
     server.worker = ThreadPoolExecutor(1)
     server.worker.submit(mx.set_cache_limit, args.cache_mb << 20).result()
     server.engine = server.worker.submit(MLXJev, args.model, dtype=args.dtype, max_branch_tokens=args.max_branch_tokens,
-                                         max_request_tokens=args.max_request_tokens, quant=args.quant).result()
+                                         max_request_tokens=args.max_request_tokens, quant=args.quant,
+                                         w8a8_skip=[n for n in args.w8a8_skip.split(",") if n]).result()
     server.model_id = args.model_id
     log.info("listening on http://%s:%d (%s, %s, %s, loaded in %.1f s); MLX active %.2f GiB", args.host, args.port,
              args.model, args.dtype, args.quant or "no quantization", server.engine.load_seconds,

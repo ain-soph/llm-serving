@@ -1,5 +1,5 @@
 """Quick GPU check of mlx_w8a8 (2026-11-17): W8A8Linear vs float matmul, zero-copy load == mx.load, GEMM speed.
-  rerank/.venv-mlx/bin/python common/w8a8_selftest.py [MODEL_SAFETENSORS]"""
+  .venv/bin/python common/w8a8_selftest.py [MODEL_SAFETENSORS]"""
 import sys, time
 from pathlib import Path
 

@@ -29,10 +29,14 @@ import mlx_w8a8  # noqa: E402
 DTYPES = {"bfloat16": mx.bfloat16, "float16": mx.float16, "float32": mx.float32}
 ATTN_BLOCK = 2048      # queries per attention block on long sequences (fewer above 8K tokens, see attention())
 TOKEN_BLOCK = 4096     # tokens per linear-attention / MLP block on one long sequence
+# Language-model projections that can run W8A8 (MLXDecider(w8a8=True) takes all; a tuple of names takes those).
+W8A8_NAMES = ("q_proj", "k_proj", "v_proj", "o_proj", "in_proj_qkv", "in_proj_z", "out_proj",
+              "gate_proj", "up_proj", "down_proj")
 
 
 class MLXDecider:
     def __init__(self, checkpoint, dtype="float16", vision=True, max_length=32768, batch_tokens=8192, w8a8=False):
+        """w8a8: False, True (all W8A8_NAMES) or a tuple of projection names."""
         ck = Path(checkpoint)
         if load_json(ck / "joint_config.json") != PROTOCOL:
             raise ValueError("This checkpoint does not declare the chunked joint protocol (version 4)")
@@ -78,7 +82,7 @@ class MLXDecider:
             del self.model.vision_tower
         weights = sanitize_weights(qwen3_5.LanguageModel, weights, mcfg.text_config)
         target = DTYPES[dtype]
-        quantized = self.w8a8_targets() if w8a8 else set()
+        quantized = self.w8a8_targets(W8A8_NAMES if w8a8 is True else tuple(w8a8)) if w8a8 else set()
         scales = {}
         for k, v in weights.items():          # one tensor at a time: never both copies of every weight (15.7 GiB)
             if k.endswith(".weight") and k[:-len(".weight")] in quantized:
@@ -99,13 +103,13 @@ class MLXDecider:
         mx.clear_cache()
         self.text = self.model.language_model.model
 
-    def w8a8_targets(self):
-        """Make the language-model projections (attention q/k/v/o, gated-delta in_proj_qkv / in_proj_z / out_proj, MLP)
-        W8A8 (../../common/mlx_w8a8.py: Hadamard-rotated int8 weights and activations on the M5 INT8 TensorOps GEMM);
-        their weights are quantized while loading, so the float model never exists at once. in_proj_a / in_proj_b
-        (32 outputs) stay float. Returns the module paths."""
-        names = ("q_proj", "k_proj", "v_proj", "o_proj", "in_proj_qkv", "in_proj_z", "out_proj",
-                 "gate_proj", "up_proj", "down_proj")
+    def w8a8_targets(self, names):
+        """Make the language-model projections named in `names` (default W8A8_NAMES: attention q/k/v/o, gated-delta
+        in_proj_qkv / in_proj_z / out_proj, MLP) W8A8 (../../common/mlx_w8a8.py: Hadamard-rotated int8 weights and
+        activations on the M5 INT8 TensorOps GEMM); their weights are quantized while loading, so the float model never
+        exists at once. in_proj_a / in_proj_b (32 outputs) always stay float. Returns the module paths."""
+        if unknown := set(names) - set(W8A8_NAMES):
+            raise ValueError(f"not W8A8 projections: {sorted(unknown)}")
         modules = dict(self.model.named_modules())
         paths = [p for p in mlx_w8a8.linear_paths(self.model.language_model, names) if "bias" not in
                  modules["language_model." + p]]

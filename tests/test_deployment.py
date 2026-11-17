@@ -78,6 +78,11 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(args[1], str(root / "decisions/jev/server.py"))
             self.assertEqual(args[args.index("--model") + 1], str(models / "elephant-1"))
             self.assertEqual(args[args.index("--quant") + 1], "w8a8")
+            mammoth = yaml.safe_load((output / "conf.d/decisions-mammoth.yaml").read_text())
+            args = shlex.split(mammoth["models"]["mammoth-1-int8"]["cmd"])
+            self.assertEqual(args[args.index("--w8a8-skip") + 1], "out_proj")
+            args = shlex.split(rerank["models"]["qwen3-reranker-4b-int8"]["cmd"])
+            self.assertEqual(args[args.index("--float-model") + 1], str(models / "qwen3-reranker/zc-4b-bf16"))
             qwen_pe = yaml.safe_load((output / "conf.d/qwen-image.yaml").read_text())["models"]["qwen-image-2.1-turbo-pe"]
             self.assertIn("QWEN_IMAGE_DEFAULT_ENHANCE=llm", qwen_pe["env"])
             tts = yaml.safe_load((output / "conf.d/tts.yaml").read_text())

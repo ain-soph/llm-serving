@@ -306,6 +306,17 @@
       "GB": 2.710994,
       "allocated_bytes": 2711023616,
       "note": "Plus the two prompt voices (about 0.5 MB, not in the model directory)."
+    },
+    "mammoth-1": {
+      "relative_paths": [
+        "mammoth-1"
+      ],
+      "measured_on": "2026-11-17",
+      "files": 17,
+      "bytes": 54734136859,
+      "GB": 54.734137,
+      "allocated_bytes": 54734180352,
+      "note": "Both entries quantize the official BF16 shards at load."
     }
   },
   "current_directory_inventory_including_comparison_models": {

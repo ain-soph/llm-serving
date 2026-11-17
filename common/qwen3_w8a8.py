@@ -55,6 +55,34 @@ def load(path, copy=False):
     return model, extras, model.norm.weight.dtype
 
 
+def load_mixed(w8a8_path, float_path, classes, copy=False):
+    """Per-class precision (2026-11-17, W8A8 only where it pays): the W8A8 copy, with the projections whose last name
+    is NOT in `classes` swapped back to the float copy's weights (`--float` copy of the same model: plain float, or the
+    exact Q8_0 MLX 8-bit for 8B). Both files are mapped; only the swapped-back float tensors are read from the second."""
+    model, extras, dtype = load(w8a8_path, copy=copy)
+    back = [p for p in mlx_w8a8.linear_paths_w8a8(model) if p.rsplit(".", 1)[-1] not in set(classes)]
+    if back:
+        marker = json.loads((Path(float_path) / MARKER).read_text())
+        q = marker.get("mlx_quantization")
+        f = mlx_w8a8.load(Path(float_path) / "model.safetensors", copy=copy)
+        modules = dict(model.named_modules())
+        swaps, params = [], []
+        for p in back:
+            out, k = modules[p].weight.shape
+            if q:
+                layer = nn.QuantizedLinear(k, out, bias=False, group_size=q["group_size"], bits=q["bits"])
+                names = ("weight", "scales", "biases")
+            else:
+                layer, names = nn.Linear(k, out, bias=False), ("weight",)
+            swaps.append((p, layer))
+            params += [(f"{p}.{n}", f[f"{p}.{n}"]) for n in names]
+        from mlx.utils import tree_unflatten
+        model.update_modules(tree_unflatten(swaps))
+        model.load_weights(params, strict=False)
+        mx.eval(model.parameters())
+    return model, extras, dtype
+
+
 def _source(kind, src):
     """The source backbone as a Qwen3Model, plus the extras to keep."""
     cfg = json.loads((src / "config.json").read_text())

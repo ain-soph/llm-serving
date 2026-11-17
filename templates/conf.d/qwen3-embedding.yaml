@@ -31,11 +31,13 @@ models:
   "qwen3-embedding-4b-int8":
     name: "Qwen3 Embedding 4B (2560d, W8A8)"
     description: "4B with int8 weights and activations: 1.5x faster; vectors not interchangeable with qwen3-embedding-4b"
-    cmd: ${qe-cmd} --model-id qwen3-embedding-4b-int8 --model @MODELS@/qwen3-embedding/w8a8-4b
+    cmd: >
+      ${qe-cmd} --model-id qwen3-embedding-4b-int8 --model @MODELS@/qwen3-embedding/w8a8-4b
+      --w8a8-classes q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj --float-model @MODELS@/qwen3-embedding/zc-4b-fp16
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 7000             # wired peak +6463 MiB
+      gpu: 8000             # wired peak +6463 MiB all-W8A8 (32K input); down_proj float since 2026-11-17: +~0.9 GB
     evict_cost: 0
 
   "qwen3-embedding-8b":

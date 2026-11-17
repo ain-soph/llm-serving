@@ -36,12 +36,15 @@ models:
     evict_cost: 0
 
   # Language-model projections in W8A8, quantized at load (no extra file); the default entries stay FP16.
+  # down_proj stays FP16: its W8A8 was most of the error (max |dp| 0.0009 -> 0.024) for 2-5% of the time;
+  # in_proj_a/b and the vision tower (no speedup) stay float too.
   "pplx-decider-flash-int8":
     name: "Perplexity Decider Flash v1.3 (decisions, text, W8A8)"
     description: "Text decision model with int8 weights and activations: less memory, ~1.2-1.5x faster, probabilities within ~0.015"
     cmd: >
       @PYTHON@ @ROOT@/decisions/decider/server.py
       --model @MODELS@/pplx-decider-flash-v1.3 --model-id pplx-decider-flash-int8 --no-vision --w8a8
+      --w8a8-names q_proj,k_proj,v_proj,o_proj,in_proj_qkv,in_proj_z,out_proj,gate_proj,up_proj
       --host 127.0.0.1 --port ${PORT}
     capabilities:
       in: [text]
@@ -49,5 +52,5 @@ models:
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 9000             # MLX peak 6.98 GiB at 32.6K tokens; load peak 4.87 GiB
+      gpu: 9000             # MLX peak 7.64 GiB at 32.6K tokens (down_proj FP16); load peak 4.87 GiB
     evict_cost: 0

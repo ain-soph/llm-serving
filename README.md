@@ -21,6 +21,7 @@
 | 重排 | `qwen3-reranker-0.6b`／`4b`／`8b`（`4b`、`8b` 各有 `-int8`） | MLX，自写服务 | `/v1/rerank`，按长度排序批量计算；零拷贝；RAG 推荐 `4b-int8` |
 | 决策 | `pplx-decider-flash`、`-multimodal`、`-int8` | MLX 移植 | SystemOne `/v1/systemone`：判断／选择／打分概率 |
 | 决策 | `elephant-1`、`-int8` | MLX 移植 + 官方 OneJev | 9B，文本，最长 16K token；8-bit 权重，与聊天模型共存 |
+| 决策 | `mammoth-1`、`-int8` | 同上 | 27B；加载时卸下聊天模型 |
 | 语音转写 | `qwen3-asr-1.7b` | [mlx-qwen3-asr fork](https://github.com/ain-soph/mlx-qwen3-asr/tree/serving) | 默认；中文、中英混合；强制对齐器给词级时间戳 |
 | 语音转写 | `whisper-large-v3` | [mlx-whisper fork](https://github.com/ain-soph/mlx-examples/tree/serving/whisper) | 多语种 |
 | 语音转写 | `nemotron-3.5-transcribe` | NeMo-Speech.cpp | 英文、说话人分离 |
@@ -32,6 +33,23 @@
 | 视频＋音频 | `minimax-h3-video` | [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving) | `best`／`standard`／`fast` 三档，最长 15 s；INT8 DiT 零拷贝 |
 
 完整 commit 固定在 `native.lock.json`（原生引擎）和 `uv.lock`（Python 包）；[原生构建脚本](tools/native.py)、[模型路由模板](templates/conf.d/)、[Strata 配置](templates/strata/) 和自写接口都在本仓库。权重准备与服务说明：[Strata](docs/strata.md)、[重排](docs/rerank.md)、[零拷贝与 W8A8 副本](docs/w8a8.md)、[决策模型](docs/decisions.md)、[SOV 语音转写](docs/sov.md)、[语音合成](docs/tts.md)、[H3 图片](docs/h3-image.md)、[Qwen-Image](docs/qwen-image.md)、[H3 视频](docs/h3-video.md)。
+
+## 上游贡献
+
+我们在 fork 里做的改动，能独立成立的已向上游提交（均为开放状态，2026-11-17）：
+
+| 上游 | PR | 内容 |
+| --- | --- | --- |
+| antirez/h3.c | [#98](https://github.com/antirez/h3.c/pull/98) | 修两处 threadgroup 归约竞争（因果 GQA softmax、VAE 编码器 group norm），条件渲染可复现 |
+| antirez/h3.c | [#99](https://github.com/antirez/h3.c/pull/99) | 可选的离线 INT8 DiT 打包（`h3_pack_int8`）与页对齐零拷贝加载 |
+| Anionex/h3-image-mlx | [#20](https://github.com/Anionex/h3-image-mlx/pull/20) | 零拷贝权重（`align`、`H3_ZERO_COPY`）与 DiT 缓存预算 |
+| Anionex/h3-image-mlx | [#21](https://github.com/Anionex/h3-image-mlx/pull/21) | W8A8 GEMM 64×128 分块与 DiT 逐元素融合（输出相同） |
+| mflux-community/mflux | [#998](https://github.com/mflux-community/mflux/pull/998) | Qwen-Image-2.1 文生图也支持 `--enhance-prompt` |
+| mflux-community/mflux | [#999](https://github.com/mflux-community/mflux/pull/999) | Qwen-Image-2.1 W8A8 DiT（ComfyUI int8_convrot，M5 TensorOps） |
+| ml-explore/mlx-examples | [#1464](https://github.com/ml-explore/mlx-examples/pull/1464) | Whisper 融合注意力，词级对齐按需导入 |
+| moona3k/mlx-qwen3-asr | [#32](https://github.com/moona3k/mlx-qwen3-asr/pull/32) | 贪心解码先排下一步再读当前 token |
+| Neywa-Labs/mlx-audio | [#1206](https://github.com/Neywa-Labs/mlx-audio/pull/1206) | SOV-Transcribe-1 解码同样的流水线 |
+| Niko1221/Strata | [#6183](https://github.com/Niko1221/Strata/pull/6183)（issue [#6182](https://github.com/Niko1221/Strata/issues/6182)） | Metal `--prefill auto` 让主机行与 GPU 重叠 |
 
 ## 安装与迁移
 

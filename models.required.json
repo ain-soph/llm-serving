@@ -38,7 +38,8 @@
     "sov-transcribe-1/mlx-q8",
     "elephant-1",
     "cosyvoice3/mlx-fp16",
-    "cosyvoice3/s3tokenizer-v3"
+    "cosyvoice3/s3tokenizer-v3",
+    "mammoth-1"
   ],
   "files": [
     "strata-mtp/mtp-q2_0.gguf",
@@ -80,6 +81,8 @@
     "elephant-1/serve.patch",
     "elephant-1/readout.json",
     "cosyvoice3/mlx-fp16/model.safetensors",
-    "cosyvoice3/s3tokenizer-v3/model.safetensors"
+    "cosyvoice3/s3tokenizer-v3/model.safetensors",
+    "mammoth-1/model.safetensors.index.json",
+    "mammoth-1/readout.json"
   ]
 }
