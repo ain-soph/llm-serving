@@ -43,6 +43,24 @@ models:
       gpu: 10000
     evict_cost: 10
 
+  # Same model with the text decoder and lm_head in 8-bit weights + float16 activations (W8A16, --q8, converted at
+  # load): 1.27-1.31x faster end to end, same error rates; the audio encoder stays float16. The default stays exact.
+  "qwen3-asr-1.7b-int8":
+    name: "Qwen3-ASR 1.7B (8-bit decoder, faster)"
+    capabilities:
+      in: [audio]
+      out: [text]
+      disableAuto: true
+    concurrencyLimit: 4
+    cmd: >
+      @PYTHON@
+      @ROOT@/asr/qwen3-asr-mlx/server.py --port ${PORT} --model-id qwen3-asr-1.7b-int8 --model @MODELS@/qwen3-asr-1.7b --aligner @MODELS@/qwen3-forcedaligner-0.6b --q8
+    checkEndpoint: /health
+    ttl: 600
+    capacities:
+      gpu: 10000            # as the exact entry (MLX peak 3.78 vs 4.59 GB)
+    evict_cost: 10
+
   # Salesforce SOV-Transcribe-1 (Whisper large-v3 encoder + Gemma 4 26B-A4B decoder) via the mlx-audio fork; decoder
   # 8-bit Q8_0-style (asr/sov/quantize.py), encoder BF16. English + fr/de/es/it/pt/nl only (language=zh -> 400),
   # up to 30 min per request; srt/vtt/verbose_json via Qwen3-ForcedAligner-0.6B. Wired peak +32079 MiB (16-min audio,

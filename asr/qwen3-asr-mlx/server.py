@@ -13,7 +13,12 @@ that owns the MLX model (MLX state should not be shared across threads). Long au
 kept resident) for word timestamps; segments are subtitle-style cues grouped from the words.
 `prompt` is passed to Qwen3-ASR as its context (domain terms / hotwords).
 
-Usage: .venv/bin/python server.py --port PORT [--model DIR] [--aligner DIR] [--model-id ID] [--dtype float16]"""
+--q8: the text decoder's linear layers and lm_head become 8-bit weights with float16 activations (W8A16, Q8_0-style
+blocks of 32; asr/w8a8/asr_quant.py, converted at load). Decoding reads every weight once per token, so
+this is 1.27-1.31x faster end to end with the same error rates (reports/asr.md); the audio encoder stays float16
+(W8A8 gave no speed-up there). Used by the qwen3-asr-1.7b-int8 entry; the default entry stays exact.
+
+Usage: .venv/bin/python server.py --port PORT [--model DIR] [--aligner DIR] [--model-id ID] [--dtype float16] [--q8]"""
 import argparse
 import concurrent.futures as cf
 import json
@@ -31,9 +36,9 @@ log = logging.getLogger("qwen3-asr-server")
 class Engine:
     """Owns the MLX model; every call runs on one dedicated thread."""
 
-    def __init__(self, model_dir, aligner_dir, dtype):
+    def __init__(self, model_dir, aligner_dir, dtype, q8=False):
         self.pool = cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx")
-        self.model_dir, self.aligner_dir, self.dtype_name = model_dir, aligner_dir, dtype
+        self.model_dir, self.aligner_dir, self.dtype_name, self.q8 = model_dir, aligner_dir, dtype, q8
         self.session = self.aligner = None
         self.ready = False
         self.pool.submit(self._load).result()
@@ -46,6 +51,12 @@ class Engine:
         mx.set_cache_limit(512 * 1024**2)
         t = time.time()
         self.session = Session(self.model_dir, dtype=getattr(mx, self.dtype_name))
+        if self.q8:
+            sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "w8a8"))
+            import asr_quant
+            counts = asr_quant.convert(self.session.model, asr_quant.plan(asr_quant.QWEN, "dec_q8+dec_q8_head"),
+                                       getattr(mx, self.dtype_name))
+            log.info("W8A16 text decoder: %s", counts)
         self.aligner = ForcedAligner(self.aligner_dir, dtype=getattr(mx, self.dtype_name))
         self.aligner._ensure_loaded()  # keep it resident so memory is stable and the first srt is not slow
         self.ready = True
@@ -102,6 +113,7 @@ def main():
     ap.add_argument("--aligner", default=str(home / "models/qwen3-forcedaligner-0.6b"))
     ap.add_argument("--model-id", default="qwen3-asr-1.7b")
     ap.add_argument("--dtype", default="float16", choices=("float16", "bfloat16", "float32"))
+    ap.add_argument("--q8", action="store_true", help="8-bit text decoder weights (W8A16)")
     a = ap.parse_args()
     os.environ.setdefault("HF_HUB_OFFLINE", "1")  # weights are local; never fetch at runtime
     logging.basicConfig(level=logging.INFO, format="[qwen3-asr] %(message)s")
@@ -110,7 +122,7 @@ def main():
     server.response_builder = build_response
     server.engine = type("E", (), {"ready": False})()
     import threading
-    threading.Thread(target=lambda: setattr(server, "engine", Engine(a.model, a.aligner, a.dtype)),
+    threading.Thread(target=lambda: setattr(server, "engine", Engine(a.model, a.aligner, a.dtype, a.q8)),
                      daemon=True).start()
     log.info("listening on http://%s:%d (model %s)", a.host, a.port, a.model)
     server.serve_forever()

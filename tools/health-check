@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""One health-check round of the model server; run every 10 minutes by the LaunchAgent app.llm-serving.health.
+
+Logs only (no alerts): one JSON line per round is appended to <state>/logs/health/health.jsonl
+(rotated daily to health-YYYYMMDD.jsonl, 30 days kept), and logs/health/STATUS holds a short summary of the latest
+round: first line "OK|WARN|FAIL <time>", then one line per problem. Agents check service state there first.
+
+Checks (none of them loads a model that would unload Flash-Next):
+  gateway   :8080 /health, and /v1/models with the API key
+  embedding the always-loaded embeddinggemma-2 returns a vector (skipped while a gpu-lock holder has llama-swap paused)
+  procs     llama-swap and the Caddy gateway are running
+  disk      free space on the data volume (WARN < 60 GiB, FAIL < 20 GiB)
+  memory    kern.memorystatus_level, the % of memory macOS considers available, best of 3 readings (WARN < 15, FAIL < 8)
+  boot      a reboot since the previous round (WARN, with the newest panic report if one was written after the last round)
+  gpu-lock  a share held > 90 min, or without a heartbeat for > 30 min (WARN)
+Standard library only, system Python, so it keeps working while venvs change.
+"""
+import datetime
+import glob
+import json
+import os
+import shutil
+import subprocess
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+STATE = Path(os.environ.get("LLM_STATE_DIR") or Path.home() / "Library/Application Support/llm-serving")
+LOG_DIR = STATE / "logs" / "health"
+ROUND = LOG_DIR / "state.json"
+KEY_FILE = STATE / "api_key"
+# optional: the gpu-lock holder directory of a multi-agent setup (not part of this repository)
+HOLDERS = Path(os.environ["GPU_LOCK_HOLDERS"]) if os.environ.get("GPU_LOCK_HOLDERS") else None
+GATEWAY = os.environ.get("LLM_GATEWAY", "http://127.0.0.1:8080")
+KEEP_DAYS = 30
+RANK = {"OK": 0, "INFO": 0, "WARN": 1, "FAIL": 2}
+
+
+def http(path, body=None, key=None, timeout=20):
+    req = urllib.request.Request(GATEWAY + path, data=json.dumps(body).encode() if body else None)
+    if key:
+        req.add_header("Authorization", "Bearer " + key)
+    if body:
+        req.add_header("Content-Type", "application/json")
+    t = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read(), time.time() - t
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()[:200], time.time() - t
+    except Exception as e:  # connection refused, timeout
+        return None, str(e).encode()[:200], time.time() - t
+
+
+def holders():
+    out = []
+    if HOLDERS is None or not HOLDERS.is_dir():
+        return out
+    for f in HOLDERS.glob("*"):
+        if not f.is_file() or f.name.endswith(".tmp"):
+            continue
+        first = f.read_text(errors="replace").splitlines()[:1]
+        since = None
+        if first and " since " in first[0]:
+            try:
+                since = datetime.datetime.strptime(first[0].split(" since ", 1)[1].strip(), "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                pass
+        out.append({"name": f.name, "since": since, "idle_s": time.time() - f.stat().st_mtime})
+    return out
+
+
+def check():
+    results = {}
+
+    def put(name, level, detail):
+        results[name] = {"level": level, "detail": detail}
+
+    # gateway
+    code, _, dt = http("/health", timeout=10)
+    put("gateway_health", "OK" if code == 200 else "FAIL", f"http {code} in {dt:.2f} s")
+    key = KEY_FILE.read_text().strip() if KEY_FILE.exists() else None
+    code, body, dt = http("/v1/models", key=key, timeout=10)
+    try:
+        n = len(json.loads(body)["data"]) if code == 200 else 0
+    except Exception:
+        n = 0
+    put("gateway_models", "OK" if code == 200 and n else "FAIL", f"http {code}, {n} models")
+
+    # embedding (llama-swap is paused while a gpu-lock holder works: requests then fail by design)
+    held = holders()
+    if held:
+        put("embedding", "INFO", "skipped: gpu-lock held by " + ", ".join(h["name"] for h in held))
+    else:
+        code, body, dt = http("/v1/embeddings", {"model": "embeddinggemma-2", "input": "health check"}, key, 30)
+        try:
+            dim = len(json.loads(body)["data"][0]["embedding"]) if code == 200 else 0
+        except Exception:
+            dim = 0
+        put("embedding", "OK" if dim else "FAIL", f"http {code}, dim {dim}, {dt:.2f} s")
+
+    # processes
+    for name, pattern in (("llama_swap", "llama-swap -config"), ("gateway_proc", "caddy run")):
+        alive = subprocess.run(["pgrep", "-f", pattern], capture_output=True).returncode == 0
+        put(name, "OK" if alive else "FAIL", "running" if alive else "not running")
+
+    # disk
+    free = shutil.disk_usage(str(Path.home())).free / 2**30
+    put("disk", "FAIL" if free < 20 else "WARN" if free < 60 else "OK", f"{free:.0f} GiB free")
+
+    # memory
+    # best of 3 readings 3 s apart: the level dips for a few seconds while one large model replaces another
+    readings = []
+    for i in range(3):
+        if i:
+            time.sleep(3)
+        readings.append(int(subprocess.run(["sysctl", "-n", "kern.memorystatus_level"], capture_output=True,
+                                           text=True).stdout or 0))
+    lvl = max(readings)
+    put("memory", "FAIL" if lvl < 8 else "WARN" if lvl < 15 else "OK", f"memorystatus_level {lvl}%")
+
+    # boot / panic
+    out = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True, text=True).stdout
+    boot = int(out.split("sec = ")[1].split(",")[0]) if "sec = " in out else 0
+    prev = json.loads(ROUND.read_text()) if ROUND.exists() else {}
+    if prev.get("boot") and boot != prev["boot"]:
+        panics = [p for p in glob.glob("/Library/Logs/DiagnosticReports/panic-full-*.panic")
+                  if os.path.getmtime(p) > prev.get("time", 0)]
+        latest = max(panics, key=os.path.getmtime) if panics else None
+        put("boot", "WARN", "rebooted at " + time.strftime("%F %T", time.localtime(boot))
+            + (f"; panic report {os.path.basename(latest)}" if latest else "; no new panic report"))
+    else:
+        put("boot", "OK", "up since " + time.strftime("%F %T", time.localtime(boot)))
+    ROUND.write_text(json.dumps({"boot": boot, "time": time.time()}))
+
+    # gpu-lock
+    now = datetime.datetime.now()
+    issues = []
+    for h in held:
+        if h["since"] and (now - h["since"]).total_seconds() > 90 * 60:
+            issues.append(f"{h['name']} held {int((now - h['since']).total_seconds() // 60)} min")
+        if h["idle_s"] > 30 * 60:
+            issues.append(f"{h['name']} no heartbeat for {int(h['idle_s'] // 60)} min")
+    put("gpu_lock", "WARN" if issues else "OK",
+        "; ".join(issues) if issues else (f"{len(held)} holder(s)" if held else "free"))
+    return results
+
+
+def rotate():
+    log = LOG_DIR / "health.jsonl"
+    today = datetime.date.today()
+    if log.exists():
+        day = datetime.date.fromtimestamp(log.stat().st_mtime)
+        if day != today:
+            log.rename(LOG_DIR / f"health-{day:%Y%m%d}.jsonl")
+    for old in LOG_DIR.glob("health-*.jsonl"):
+        try:
+            if (today - datetime.datetime.strptime(old.stem[7:], "%Y%m%d").date()).days > KEEP_DAYS:
+                old.unlink()
+        except ValueError:
+            pass
+    return log
+
+
+def main():
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%F %T")
+    results = check()
+    overall = max((r["level"] for r in results.values()), key=lambda lv: RANK[lv])
+    overall = "OK" if overall == "INFO" else overall
+    with rotate().open("a") as f:
+        f.write(json.dumps({"time": stamp, "status": overall, "checks": results}) + "\n")
+    lines = [f"{overall} {stamp}"]
+    lines += [f"{k}: {v['level']} {v['detail']}" for k, v in results.items() if RANK[v["level"]] > 0]
+    lines.append("details: " + str(LOG_DIR / "health.jsonl"))
+    tmp = LOG_DIR / "STATUS.tmp"
+    tmp.write_text("\n".join(lines) + "\n")
+    tmp.replace(LOG_DIR / "STATUS")
+
+
+if __name__ == "__main__":
+    main()

@@ -8,11 +8,15 @@ LaunchAgent 使用解释器与脚本的完整路径和参数数组，由 `plistl
 
 ## 一个 uv 环境
 
-部署的 Python 依赖统一声明在 `pyproject.toml`，解析结果保存在 `uv.lock`。部署使用 **Homebrew Python 3.15**，`requires-python` 限定 3.15 系列，`.python-version` 记录该系列；所有服务进程都使用根目录 `.venv/bin/python`。已在 3.15.2 验证依赖安装、导入和相关 CPU 基础调用，未发现需要降到 3.12 的阻碍；完整模型推理回归仍是生产切换前的必要步骤。独立进程仍各自管理模型和 GPU 内存，共享 venv 只统一解释器及库版本。
+**线上只有一个环境**：部署的 Python 依赖统一声明在 `pyproject.toml`，解析结果保存在 `uv.lock`。部署使用 **Homebrew Python 3.15**，`requires-python` 限定 3.15 系列，`.python-version` 记录该系列；所有服务进程都使用根目录 `.venv/bin/python`。参照部署（M5 Ultra）2026-11-18 起所有 Python 入口都运行在这同一个环境里，用 `uv sync --frozen` 从本仓库的 `uv.lock` 同步，切换前后 `tools/regress` 全部用例一致。独立进程仍各自管理模型和 GPU 内存，共享 venv 只统一解释器及库版本。
+
+**依赖只写下限**：`pyproject.toml` 不写 `==` 或 `<X` 上限，`uv.lock` 负责精确锁定；升级时重新 `uv lock`，用 `tools/regress` 检查。只有遇到确实修不了的不兼容才加上限，并写明原因。我们的 fork 同样去掉了版本上限。
+
+**开发用 `.venv-dev`**：新模型在部署前先在它自己的 `<模型目录>/.venv-dev` 里开发和测试，避免影响线上环境；上线时把依赖并进统一的 `pyproject.toml`／`uv.lock`，改模板入口，跑回归，然后删掉开发环境。
 
 不要把临时评测、训练和模型转换工具任意装入部署环境。若未来出现真正的版本冲突，应先解决依赖约束；确实无法兼容的工具可另设非运行时环境。
 
-唯一的例外是 CosyVoice3：它的运行时 mlx-audio-plus 与主环境的 mlx-audio 安装成同一个模块 `mlx_audio`，且要求 transformers < 5，因此在 `tts/cosyvoice/.venv`（Python 3.12，`tools/cosyvoice_env.sh`）按固定的完整包列表单独安装。
+真正的冲突在 fork 里解决，不留常设例外（例如曾经需要单独环境的 CosyVoice3 已下线，移植进 mlx-audio 的备用分支另行维护）。
 
 Homebrew 管理 Python、uv 和原生工具，uv 管理项目虚拟环境与 Python 包。Brewfile 是工具清单，**不是永久锁定历史 bottle 的锁文件**；`native.lock.json` 的 `observed_tools` 记录已使用的版本。Homebrew 更新后应重新检查接口兼容性。源码固定 commit 也不代表跨 SDK、编译器的二进制逐字节可复现。
 

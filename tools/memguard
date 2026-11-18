@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Run a command and kill its whole process group before it can starve the machine (2026-11-17).
+
+On 2026-11-17 09:58 a benchmark process grew to 79.7 GB resident while holding the whole gpu-lock pool; the system ran out
+of free pages and the kernel watchdog panicked the Mac. gpu-lock only books memory, it does not stop a process from
+using more. Wrap every agent GPU session with this:
+
+  memguard [--min-level PCT] [--max-gb GB] -- COMMAND [ARGS...]
+
+It polls once a second and kills the command's process group (SIGTERM, then SIGKILL after 5 s) when
+  - kern.memorystatus_level (the % of memory macOS considers available) stays below --min-level (default 12) for 3 polls, or
+  - the summed RSS of the command's process tree exceeds --max-gb (default 70; 0 turns it off).
+Exit code: the command's own, or 137 when memguard killed it (a line starting with "memguard:" says why).
+"""
+import argparse
+import os
+import signal
+import subprocess
+import sys
+import time
+
+
+def level():
+    out = subprocess.run(["sysctl", "-n", "kern.memorystatus_level"], capture_output=True, text=True).stdout
+    return int(out.strip() or 100)
+
+
+def tree_rss_gb(pgid):
+    out = subprocess.run(["ps", "-A", "-o", "pgid=,rss="], capture_output=True, text=True).stdout
+    kb = sum(int(r) for g, r in (line.split() for line in out.splitlines() if line.strip()) if int(g) == pgid)
+    return kb / 1024 / 1024
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--min-level", type=int, default=12)
+    # default 70 GB: the 09:58 panic process sat at 79.7 GB, a W3 test on upstream mflux peaked at 91.9 GB (2026-11-17);
+    # every serving workload measured so far stays under ~35 GB. Pass a larger value explicitly when a test needs it.
+    ap.add_argument("--max-gb", type=float, default=70)
+    ap.add_argument("cmd", nargs=argparse.REMAINDER)
+    args = ap.parse_args()
+    cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
+    if not cmd:
+        ap.error("no command")
+    child = subprocess.Popen(cmd, start_new_session=True)
+
+    def forward(sig, _frame):
+        # killing memguard (kill PID, pkill, Ctrl-C) stops the whole guarded group too
+        try:
+            os.killpg(child.pid, sig)
+        except ProcessLookupError:
+            pass
+
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, forward)
+    low = 0
+    while child.poll() is None:
+        time.sleep(1)
+        lv = level()
+        low = low + 1 if lv < args.min_level else 0
+        rss = tree_rss_gb(child.pid) if args.max_gb else 0
+        why = (f"memory available {lv}% < {args.min_level}% for 3 s" if low >= 3 else
+               f"process tree RSS {rss:.1f} GB > {args.max_gb} GB" if args.max_gb and rss > args.max_gb else None)
+        if why:
+            print(f"memguard: killing {' '.join(cmd)[:120]}: {why}", file=sys.stderr, flush=True)
+            for sig, wait in ((signal.SIGTERM, 5), (signal.SIGKILL, 0)):
+                try:
+                    os.killpg(child.pid, sig)
+                except ProcessLookupError:
+                    break
+                for _ in range(wait * 10):
+                    if child.poll() is not None:
+                        break
+                    time.sleep(0.1)
+            child.wait()
+            return 137
+    return child.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

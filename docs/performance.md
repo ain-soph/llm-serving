@@ -26,8 +26,8 @@
 | 决策 | `mammoth-1` | 同上，27B | 8-bit 权重 + BF16 激活 | 短请求 0.29–0.38 s；16.1K token 13.5 s（1,190 tok/s） | wired 峰值 +30439 MiB（不能与聊天模型共存） | 54.73 GB⁶ |
 | 决策 | `mammoth-1-int8` | 同上 | W8A8（out_proj 用 8-bit） | 短请求 0.20–0.24 s；16.1K token 8.5 s（1,890 tok/s） | wired 峰值 +27817 MiB | 同上⁶ |
 | 语音合成 | `qwen3-tts`／`-clone`／`-design` | mlx-audio fork | BF16 | 首段音频 0.08–0.14 s；实时率 0.22–0.23 | wired +4850／+5603／+5035 MiB | 12.22 GB⁴ |
-| 语音合成 | `cosyvoice3` | mlx-audio-plus（上游 4c9ec6a） | FP16 | 首段 0.48–0.88 s（按句输出）；实时率 0.10–0.12 | wired +4753 MiB（缓存上限 1 GiB） | 2.71 GB |
 | 语音转写 | `qwen3-asr-1.7b`（默认） | mlx-qwen3-asr fork | BF16 文件／FP16 运行 | en100 c1 15.4 s；WER 1.48% | wired +6.6 GB | 6.543 GB |
+| 语音转写 | `qwen3-asr-1.7b-int8` | 同上 | 解码器 + lm_head W8A16（加载时量化） | en100 11.8 s（进程内，默认入口同条件 15.1 s）；WER 1.48% | MLX 峰值 3.78 GB（默认 4.59） | 同上 |
 | 语音转写 | `whisper-large-v3` | mlx-whisper fork | FP16 | en100 c1 22.8 s；WER 2.80% | wired +4.5 GB | 3.084 GB |
 | 语音转写 | `nemotron-3.5-transcribe` | NeMo-Speech.cpp Metal | AD-IQ4_NL + F16 编码器 | en100 c1 29.4 s；WER 1.43% | wired +21.2 GB | 21.35 GB |
 | 语音转写 | `sov-transcribe-1` | mlx-audio fork | 解码器 8-bit（Q8_0 式）+ BF16 编码器 | en100 c1 32.5 s；WER 2.20%；仅英文和 6 种欧洲语言 | wired +32079 MiB | 29.77 GB |
@@ -389,7 +389,9 @@
 - 与 Flash-Next 共存（1449 字中文 + 11.6 万 token 提示词同时跑）：TTS 实时率 0.30（407 s 音频用 120 s），Flash-Next prefill 1968 tok/s；wired 峰值 77575 MiB，压缩区 6666 MiB，交换不变。
 - 未上线：Fish Audio Drama 3（4-bit 23.8 GB，只能独占）。
 
-## 语音合成：CosyVoice3
+## 语音合成：CosyVoice3（已下线）
+
+**2026-11-18 下线**：Qwen3-TTS 已覆盖需要的方言（四川话 `eric`、北京话 `dylan`、粤语用 `qwen3-tts-design`，同样四句 Qwen3-ASR 回写都对），CosyVoice3 依赖停更的第三方 mlx-audio-plus 且要单独环境。以下为下线前的记录；恢复方法见 [tts.md](tts.md)。
 
 **条件**：Fun-CosyVoice3-0.5B，mlx-audio-plus 上游 4c9ec6a，FP16，MLX 缓存上限 1 GiB；独占 GPU；ASR 回写用 Qwen3-ASR 1.7B（T2）。
 
@@ -472,6 +474,28 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | Qwen3-ASR：MLX 缓存上限 512 MiB | 长音频 + c4 | 16.95 → 16.97 s | +0.1%，持平 | wired 10332 → 6776 MiB（−34.4%） |
 
 - Qwen 端到端合计：en100 c1 21.6 → 15.4 s（−29%），long_en 18.7 → 16.5 s（−12%）。
+
+**INT8／W8A16 逐类检查**（AQ；FP16、贪心、自动语言；每个变体一个进程；“相同”指与 FP16 转写逐字相同）
+
+| Qwen3-ASR 层类 | 方式 | en100（基线 15.06 s） | zh100（基线 9.06 s） | 错误率 en／zh | 与 FP16 相同 | 选择 |
+| --- | --- | ---: | ---: | --- | --- | --- |
+| 音频编码器全部 | W8A8 | 15.30 s（+2%） | 9.29 s | 1.48%／3.06% | 99/100、100/100 | 保持 FP16 |
+| 编码器单类（qkv／out／fc1／fc2） | W8A8 | 15.10–15.20 s | 9.09–9.19 s | 不变（out 1.54%） | 99–100 | 保持 FP16 |
+| 解码器全部投影 | W8A8 | 30.19 s（慢 2 倍） | 17.48 s | 不变 | 98/100 | 不用 |
+| 解码器 q/k/v/o | W8A16 | 14.62 s（−3%） | 8.91 s | 1.54%／3.06% | 98/100 | W8A16 |
+| 解码器 gate/up | W8A16 | 13.49 s（−10%） | 8.19 s | 不变 | 100/100 | W8A16 |
+| 解码器 down | W8A16 | 14.61 s（−3%） | 8.98 s | 不变 | 99/100 | W8A16 |
+| lm_head（151936 × 2048） | W8A16 | 14.42 s（−4%） | 8.72 s | 不变 | 100/100 | W8A16 |
+
+| 组合 | en100 | zh100 | mix60 | long_en | long_zh | 错误率 en／zh／mix／long_en／long_zh | MLX 峰值 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- | ---: |
+| FP16（默认入口） | 15.06 s | 9.06 s | 5.90 s | 16.31 s | 8.37 s | 1.48／3.06／11.58／0.76／1.28% | 4.59 GB |
+| **解码器 + lm_head W8A16（`-int8`）** | **11.82 s** | **7.43 s** | **4.77 s** | **12.42 s** | **6.52 s** | 1.48／3.06／11.15／0.76／1.43% | **3.78 GB** |
+| 再加编码器 W8A8 | 12.06 s | 7.68 s | 4.95 s | 12.49 s | 6.58 s | 1.48／3.06／11.47／0.76／1.43% | 3.48 GB |
+
+- 提速 1.22–1.31 倍，短文件逐字相同 98–99/100；mix 与 long_zh 的差别是单条长文件／少数句子，一升一降，属噪声级。
+- 解码器 W8A8 都慢一倍（每个 token 只有一行激活，量化开销大于 INT8 矩阵乘省下的时间）；Whisper 编码器和解码器换 INT8 只快 0–8%，不改。
+- 这个入口没有任何层做激活量化，所以“其他层 W8A8 时 down_proj 要保持原精度”不适用。未测：`-int8` 的 wired 峰值、与聊天模型满载共存。
 - 正确性：WAV 直读 262 个评测文件与 ffmpeg 输出逐位相同；Qwen 流水线 101/101、SOV 100/100 文本相同；Whisper 融合注意力 261/262 相同、另一条 WER 相同，时间戳 logits 逐位相同。缓存上限前后错误率相同；Whisper 导入修改后普通／词级输出及 JSON、verbose JSON、SRT、VTT 一致（[专项测试](whisper-startup.md)）。
 - Nemotron 长中文自动模式曾输出英文翻译，低英文 WER 不代表中文可靠。
 - Whisper.cpp 与 MLX 的历史解码设置未完全对齐，换后端的差异不算作修改收益；Qwen3-ASR 请求期 RSS 1053 MiB 漏掉了加载峰值，不代表模型大小。
@@ -833,7 +857,21 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 - DiT：全 INT8 激活的 latent 误差 0.00105，任一类单独 0.0008–0.0011，没有哪类主导。文本编码器 down_proj 改 W8A16 试做（短提示词误差 0.0106 → 0.0044），但普通 MLX 实现文本阶段 1.09 → 2.12 s（约 1500 token 时 1.06 → 3.14 s），未上线。
 - `common/mlx_w8a8.py` 的 128×64 分块与 64×128 只差 ±5%，不改；MLX 自带 8-bit qmm 作 W8A16 多数类比 BF16 还慢（0.67–0.96×）。
 
-## 磁盘明细
+## 遗漏检查的完成情况（2026-11-18）
+
+2026-11-17 的遗漏检查（GA）列出的项目，目前状态：
+
+| 项目 | 状态 |
+| --- | --- |
+| 回归测试（一键对比每个入口的黄金输出） | **完成**：`tools/regress`，统一环境切换时 46 个用例与切换前一致（[operations.md](operations.md)） |
+| 健康检查 | **完成**：`tools/health-check` 每 10 分钟一轮，只写日志（磁盘、内存、进程、网关、重启／panic） |
+| 新入口接入客户端／MCP | **完成**：MCP 新增 `speak`／`rerank`／`decide`；Open WebUI 朗读用 `qwen3-tts`、出图默认 `qwen-image-2.1-turbo`；LobeChat、OpenClaw 同步（[clients.md](clients.md)） |
+| 统一 Python 环境 | **完成**（UE），CosyVoice3 随之下线 |
+| H3 图片尺寸规则（官方 4–20 MP、生成面积下限 2048²）与官方 PE | 进行中，未上线 |
+| Qwen-Image 官方 PE、Qwen-Image-Bench 评判 | 进行中，未上线 |
+| H3 视频社区 Turbo LoRA、Qwen-Image ControlNet／LoRA、Nemotron 说话人分离核实 | 未做 |
+| 报告补 TTS／Whisper／Nemotron 的 decode tok/s | 未做 |
+
 
 2026-11-16 统计（2026-11-17 起新增的模型为当天统计），排除 `.cache`，按 `(device, inode)` 去重硬链接；字节数见 [model-storage.json](model-storage.json)。
 
@@ -849,7 +887,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | elephant-1 | 18.842 GB | 18.842 GB | 官方 BF16，两个入口加载时量化 |
 | mammoth-1 | 54.734 GB | 54.734 GB | 官方 BF16 两个分片，两个入口加载时量化 |
 | Qwen3-TTS（3 个变体） | 12.220 GB | — | 编解码器硬链接成一份 |
-| CosyVoice3 | 2.711 GB | — | MLX FP16 模型 + S3TokenizerV3；官方 PyTorch 检查点已删，做对照时再下载 |
+| CosyVoice3（已下线） | 0 | — | 权重已删（原 2.711 GB），恢复时重新下载 |
 | SOV-Transcribe-1 | 29.770 GB | — | 8-bit；官方 BF16（53.3 GB）已删，重新转换时再下载 |
 | Nemotron | 21.349 GB | 21.349 GB | decoder 19.679 + encoder 1.670 |
 | Whisper MLX | 3.084 GB | 3.084 GB | FP16 |
@@ -873,7 +911,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 - **耗时**：不含首次下载和权重准备；图片阶段计时含子进程启动；Strata 热 shader 数据不含首次编译。
 - **样本**：大多是单次测量，没有方差或置信区间。
 - **收益计算**：倍数 = 旧耗时 ÷ 新耗时；吞吐增幅 = 新 ÷ 旧 − 1；耗时变化 = 新 ÷ 旧 − 1。没有同口径基线的项不计算收益；“原版”指各行写明的本机基线，没有同口径实测就不写“比官方快”。
-- **环境**：数据来自各组件当时的环境（Strata／ASR 为 Python 3.12，图片、视频包装器为 3.15）；公开仓库的统一 3.15 环境只在重排上复测过，其余只做了导入检查，依赖验证不等于性能验收。
+- **环境**：2026-11-17 及以前的数据来自各组件当时的环境（Strata／ASR 为 Python 3.12，图片、视频包装器为 3.15）。2026-11-18 起参照部署的所有 Python 入口运行在同一个统一环境（Python 3.15.2，本仓库的 `uv.lock`，只写下限），切换前后 `tools/regress` 全部用例一致（UE），所以旧数字仍然适用。
 - **错误率**：英文 WER（Whisper EnglishTextNormalizer），中文 CER（转简体、数字转汉字、去标点），混合 MER；按语料整体计算。TTS 用 Qwen3-ASR 回写后算错误率。
 - **W8A8 原则**：INT8 权重与激活只用在实测能提速的层或模型；不提速、只省内存的部分保持 BF16／FP16（例如撤下的 Qwen-Image INT8 文本编码器，以及不做 W8A8 的 0.6B 重排、0.6B 嵌入、voyage）。
 - **W8A8 GEMM 边缘分块**：2026-11-17 修了最后一个不满分块的越界读（`common/`、mflux `4c740d3`、h3-image-mlx `02a645c`），输出逐字节不变，本报告的数字不受影响。
@@ -914,6 +952,9 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | IA | 11-17，INT8 逐类复查 `evals/int8-principle/u3`～`u6` | 重排／嵌入 4B 与 8B、elephant、Qwen-Image、H3 图片与视频 |
 | BS | 11-17，H3 视频按 block 释放 `bench/streamw/s1-1117-1612`，上线 `h3-video-streamw-deploy-1117-1629` | 512² 56 帧、768p 124 帧，standard |
 | EP | 11-17，EmbeddingGemma 精度 `deploy/embedding-dtype-1117/` | 短查询、8000 token、64 × 400、4 × 8000、SciFact 全库 |
+| AQ | 11-17，ASR 逐类检查 `asr/w8a8/results/whisper-1117-2105`、`qwen-1117-2128`，上线 `deploy-1117-2150` | en100／zh100／mix60／long_en／long_zh |
+| UE | 11-18，统一 Python 环境切换（`tools/regress` 完整一套） | 46 个用例 |
+| GA | 11-17，遗漏检查（只读调研） | 官方配套资产、功能、接入、运维、报告 |
 | WX | 11-17，W8A16 `qwen-image/bench/results/sq8-1117-1655`、`eval/runs/turbo-q8-off`、`evals/int8-principle/x3-1117-1734`，上线 `qwen-image-teq8-deploy-1117-1747` | Qwen-Image 文本编码器、Decider／重排／嵌入 down_proj |
 | HI | 11-17，H3 图片 `h3-image-mlx/opt/k1-1117-0617`、`k2-1117-0621`，上线 `k-deploy-1117-0627` | 6 步、seed 42、预算 8000 |
 | HV | 11-17，H3 视频 `bench/repro/*`，上线 `h3-video-racefix-deploy-1117-0631` | 512×288、25 帧、standard、seed 42／7 |

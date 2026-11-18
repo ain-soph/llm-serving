@@ -297,18 +297,6 @@
       "allocated_bytes": 18841886720,
       "note": "Both entries (8-bit, W8A8) quantize the official BF16 file at load."
     },
-    "cosyvoice3": {
-      "relative_paths": [
-        "cosyvoice3/mlx-fp16",
-        "cosyvoice3/s3tokenizer-v3"
-      ],
-      "measured_on": "2026-11-17",
-      "files": 10,
-      "bytes": 2710993945,
-      "GB": 2.710994,
-      "allocated_bytes": 2711023616,
-      "note": "Plus the two prompt voices (about 0.5 MB, not in the model directory)."
-    },
     "mammoth-1": {
       "relative_paths": [
         "mammoth-1"

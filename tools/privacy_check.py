@@ -18,11 +18,17 @@ FORBIDDEN = {".env", ".api_key", "api_key", "AGENTS.md", "WORKLOG.md"}
 EXTENSIONS = {".py", ".md", ".json", ".toml", ".lock", ".sh", ".yaml", ".yml", ".txt", ".metal", ".jsonl"}
 
 
+# The MCP server code is published (neutral defaults, configured by environment); its deployment files are not.
+PUBLIC_IN_PRIVATE_DIRS = {"mcp/server.py", "mcp/requirements.txt", "mcp/Dockerfile", "mcp/mcp_call.py"}
+
+
 def inspect_file(path, data, extra_literals=()):
     problems = []
-    if path.name in FORBIDDEN or any(p in {".venv", ".local", "logs", "outputs", "media", "models", "reports", "clients", "mcp"} for p in path.parts):
+    public = path.as_posix() in PUBLIC_IN_PRIVATE_DIRS
+    if path.name in FORBIDDEN or (not public and any(p in {".venv", ".local", "logs", "outputs", "media", "models", "reports", "clients", "mcp"} for p in path.parts)):
         problems.append("private/runtime file")
-    if path.suffix not in EXTENSIONS and path.name not in {"Brewfile", "LICENSE", ".gitignore", ".python-version"}:
+    if path.suffix not in EXTENSIONS and path.name not in {"Brewfile", "LICENSE", ".gitignore", ".python-version", "Dockerfile"} \
+            and not (path.parent.name == "tools" and data.startswith(b"#!")):
         problems.append("unexpected file type")
     if len(data) > 2_000_000 or b"\x00" in data:
         problems.append("binary or oversized file")

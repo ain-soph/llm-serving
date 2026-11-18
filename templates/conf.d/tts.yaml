@@ -50,26 +50,3 @@ models:
     capacities:
       gpu: 6500             # wired peak +5035 MiB
     evict_cost: 10
-
-  # Fun-CosyVoice3-0.5B (Apache-2.0), FP16, via mlx-audio-plus at upstream 4c9ec6a in its own environment
-  # (tools/cosyvoice_env.sh: it installs the module mlx_audio too and needs transformers < 5). Same server.py.
-  # voice "zh" / "en" (tts/cosyvoice/voices, see docs/tts.md), or ref_audio (<= 30 s) + ref_text (zero-shot) /
-  # without ref_text (cross-lingual); `instructions` = dialect / emotion / speed. MLX cache capped at 1 GiB
-  # (uncapped it grew to 85 GB on long input).
-  "cosyvoice3":
-    name: "Fun-CosyVoice3 0.5B"
-    description: "Chinese dialects / emotion via instructions; voices zh, en or ref_audio clone; ~10x real time"
-    cmd: >
-      @ROOT@/tts/cosyvoice/.venv/bin/python @ROOT@/tts/server.py
-      --port ${PORT} --model @MODELS@/cosyvoice3/mlx-fp16 --model-id cosyvoice3 --cache-mb 1024
-      --voices @ROOT@/tts/cosyvoice/voices/voices.json
-      --s3tokenizer @MODELS@/cosyvoice3/s3tokenizer-v3
-    capabilities:
-      in: [text]
-      out: [audio]
-      disableAuto: true
-    checkEndpoint: /health
-    ttl: 600
-    capacities:
-      gpu: 6500             # wired peak +4753 MiB (16 sentences, 4 dialects, 1449/3621-char inputs)
-    evict_cost: 10

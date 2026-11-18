@@ -22,12 +22,11 @@
 | 决策 | `pplx-decider-flash`、`-multimodal`、`-int8` | MLX 移植 | SystemOne `/v1/systemone`：判断／选择／打分概率 |
 | 决策 | `elephant-1`、`-int8` | MLX 移植 + 官方 OneJev | 9B，文本，最长 16K token；8-bit 权重，与聊天模型共存 |
 | 决策 | `mammoth-1`、`-int8` | 同上 | 27B；加载时卸下聊天模型 |
-| 语音转写 | `qwen3-asr-1.7b` | [mlx-qwen3-asr fork](https://github.com/ain-soph/mlx-qwen3-asr/tree/serving) | 默认；中文、中英混合；强制对齐器给词级时间戳 |
+| 语音转写 | `qwen3-asr-1.7b`、`-int8` | [mlx-qwen3-asr fork](https://github.com/ain-soph/mlx-qwen3-asr/tree/serving) | 默认；中文、中英混合；强制对齐器给词级时间戳；`-int8` 解码器 W8A16，快 1.27–1.31× |
 | 语音转写 | `whisper-large-v3` | [mlx-whisper fork](https://github.com/ain-soph/mlx-examples/tree/serving/whisper) | 多语种 |
 | 语音转写 | `nemotron-3.5-transcribe` | NeMo-Speech.cpp | 英文、说话人分离 |
 | 语音转写 | `sov-transcribe-1` | [mlx-audio fork](https://github.com/ain-soph/mlx-audio/tree/serving) | 仅英文和 6 种欧洲语言；不能与聊天模型共存 |
-| 语音合成 | `qwen3-tts`、`-clone`、`-design` | mlx-audio fork | `/v1/audio/speech`：预设音色、声音克隆、声音设计；边生成边输出 |
-| 语音合成 | `cosyvoice3` | mlx-audio-plus（单独环境） | 中文方言、情感指令、零样本／跨语言克隆 |
+| 语音合成 | `qwen3-tts`、`-clone`、`-design` | mlx-audio fork | `/v1/audio/speech`：预设音色（含四川话、北京话）、声音克隆、声音设计；边生成边输出 |
 | 图片生成／编辑 | `minimax-h3-image` | [h3-image-mlx fork](https://github.com/ain-soph/h3-image-mlx/tree/serving) | W8A8，零拷贝，融合内核；各尺寸与聊天模型共存 |
 | 图片生成／编辑 | `qwen-image-2.1-turbo`、`qwen-image-2.1-turbo-pe`、`qwen-image-2.1` | [mflux fork](https://github.com/ain-soph/mflux/tree/serving) | W8A8 DiT + W8A16 文本编码器；8／40 步；最多 10 张参考图、遮罩、透明 PNG、提示词增强；非商用许可 |
 | 视频＋音频 | `minimax-h3-video` | [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving) | `best`／`standard`／`fast` 三档，最长 15 s；INT8 DiT 零拷贝、按 block 释放 |
@@ -61,10 +60,9 @@ git clone https://github.com/ain-soph/llm-serving.git
 cd llm-serving
 ./tools/bootstrap.sh
 .venv/bin/python tools/native.py all
-tools/cosyvoice_env.sh        # CosyVoice3 的单独环境（见 docs/tts.md）
 ```
 
-`Brewfile` 统一安装 **Homebrew Python 3.15**、uv、Caddy、llama-swap、llama.cpp、FFmpeg、CMake、Ninja。uv 使用 Homebrew 的 Python 3.15 创建项目唯一的 `.venv`；所有 Python 服务使用同一个解释器。`uv.lock` 固定 Python 依赖，包括图片引擎 fork 的完整 commit。
+`Brewfile` 统一安装 **Homebrew Python 3.15**、uv、Caddy、llama-swap、llama.cpp、FFmpeg、CMake、Ninja。uv 使用 Homebrew 的 Python 3.15 创建项目唯一的 `.venv`：**线上只有这一个环境**，所有 Python 服务使用同一个解释器；开发新模型时用它自己的 `.venv-dev`，上线时并进来。`pyproject.toml` 只写版本下限，`uv.lock` 精确锁定全部依赖，包括各 fork 的完整 commit。
 
 原生引擎从 `native.lock.json` 的完整 commit 构建到 `.local/src/`。编译后的可执行文件、动态库、Metal shader 和构建信息留在同一个本地构建树，不能只搬一个可执行文件。
 
@@ -98,8 +96,8 @@ tools/cosyvoice_env.sh        # CosyVoice3 的单独环境（见 docs/tts.md）
 
 ## 验证范围
 
-已在开发机器使用 Python **3.15.2** 完成统一依赖安装与导入，以及 Numba JIT、PyTorch/SciPy CPU 和日语对齐 tokenizer 基础调用检查；同时完成配置生成、llama-swap/Caddy 配置校验、FFmpeg 编码器检查，以及安装路径和隐私扫描测试。重排的 Python 3.15 真实模型/API 检查见[专项说明](docs/rerank.md)。Qwen-Image、TTS、SOV、Qwen3 嵌入、Decider、elephant-1 在统一 3.15 环境（CosyVoice3 在它自己的 3.12 环境）只做了导入与参数解析检查（生产各用独立环境运行，见[性能报告](docs/performance.md)）。当前生产服务仍使用原来的目录和环境。
+已在开发机器使用 Python **3.15.2** 完成统一依赖安装与导入，以及 Numba JIT、PyTorch/SciPy CPU 和日语对齐 tokenizer 基础调用检查；同时完成配置生成、llama-swap/Caddy 配置校验、FFmpeg 编码器检查，以及安装路径和隐私扫描测试。重排的 Python 3.15 真实模型/API 检查见[专项说明](docs/rerank.md)。参照部署 2026-11-18 起所有 Python 入口都运行在这个统一环境里（同一份 `uv.lock`），切换前后 `tools/regress` 全部用例一致；公开仓库本身的生成配置仍只做了静态检查。
 
 尚未在干净系统完成全套原生重编译和端到端推理恢复演练。本仓库提供可审查的迁移工具和当前配置，首次切换前仍需运行真实 API 冒烟检查。`doctor.py` 不加载模型，不替代正确性/性能验证。
 
-更多说明：[设计与硬件优化](docs/design.md)、[发布与隐私](docs/privacy.md)。
+更多说明：[设计与硬件优化](docs/design.md)、[运维：回归测试与健康检查](docs/operations.md)、[客户端接入与 MCP](docs/clients.md)、[发布与隐私](docs/privacy.md)。

@@ -31,6 +31,8 @@ def command(service, c):
                 "-listen", "127.0.0.1:8081"]
     if service == "gateway":
         return [b["caddy"], "run", "--config", str(config / "Caddyfile"), "--adapter", "caddyfile"]
+    if service == "health":
+        return [c["python"], str(Path(c["root"]) / "tools/health-check")]
     return [c["python"], str(Path(c["root"]) / "h3-video/server.py"), "--host", "127.0.0.1", "--port", "8090",
             "--models", str(Path(c["models"]) / "minimax-h3"), "--model-id", "minimax-h3-video", "--files-only",
             "--out-dir", str(Path(c["state"]) / "media/videos")]
@@ -38,7 +40,7 @@ def command(service, c):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("service", choices=["router", "gateway", "files"])
+    p.add_argument("service", choices=["router", "gateway", "files", "health"])
     p.add_argument("--config", type=Path, required=True)
     a = p.parse_args()
     c = json.loads(a.config.read_text())

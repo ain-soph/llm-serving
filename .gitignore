@@ -23,4 +23,3 @@ qwen-image/prompt_rewrite/
 decisions/OneJev/
 qwen-image/eval/src/
 qwen-image/eval/runs/
-tts/cosyvoice/voices/*.wav

@@ -15,7 +15,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-LABELS = {name: f"app.llm-serving.{name}" for name in ("router", "gateway", "files")}
+LABELS = {name: f"app.llm-serving.{name}" for name in ("router", "gateway", "files", "health")}
 
 
 def sysctl(key, default=""):
@@ -135,6 +135,9 @@ def render(config, output):
                "ThrottleInterval": 30,
                "StandardOutPath": str(state / "logs" / f"{name}.log"),
                "StandardErrorPath": str(state / "logs" / f"{name}.log")}
+        if name == "health":  # one check round every 10 minutes (tools/health-check), not a long-running service
+            del doc["KeepAlive"], doc["ThrottleInterval"]
+            doc["StartInterval"] = 600
         (output / (label + ".plist")).write_bytes(plistlib.dumps(doc))
     (output / "machine.json").write_text(json.dumps(config, indent=2) + "\n")
 

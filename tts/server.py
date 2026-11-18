@@ -26,7 +26,7 @@ at a time on a single worker thread that owns the MLX model (MLX streams are per
 with ffmpeg atempo (pitch kept).
 
 Usage: .venv/bin/python tts/server.py --port PORT --model DIR --model-id ID [--cache-mb 512] [--max-chars 220]
-       tts/cosyvoice/.venv/bin/python tts/server.py ... --voices tts/cosyvoice/voices/voices.json --s3tokenizer DIR"""
+       (the CosyVoice3 branch, --voices / --s3tokenizer, is kept for a possible return; the entry is retired: docs/tts.md)"""
 import argparse
 import base64
 import concurrent.futures as cf
