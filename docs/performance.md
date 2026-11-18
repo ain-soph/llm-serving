@@ -857,6 +857,29 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 - DiT：全 INT8 激活的 latent 误差 0.00105，任一类单独 0.0008–0.0011，没有哪类主导。文本编码器 down_proj 改 W8A16 试做（短提示词误差 0.0106 → 0.0044），但普通 MLX 实现文本阶段 1.09 → 2.12 s（约 1500 token 时 1.06 → 3.14 s），未上线。
 - `common/mlx_w8a8.py` 的 128×64 分块与 64×128 只差 ±5%，不改；MLX 自带 8-bit qmm 作 W8A16 多数类比 BF16 还慢（0.67–0.96×）。
 
+## 运行时：MLX fork（ain-soph/mlx `serving`）
+
+统一环境从 2026-11-18 起使用 MLX fork 的 wheel（`0.32.4+serving.d49ec3a`，GitHub Release，由 fork 的 CI 在 macOS 26 上构建）。
+fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下游不再各自维护副本（MF）。
+
+| 改动 | 开关 | 结果 |
+| --- | --- | --- |
+| 零拷贝 safetensors 加载 | `mx.load(path, zero_copy=True)` 或 `MLX_ZERO_COPY_LOAD=1`（默认关） | 以页开头的张量直接映射页缓存 |
+| 页对齐保存（保持字典顺序） | `mx.save_safetensors(..., page_align=True)` | 仍是标准 safetensors |
+| GPU 缓存上限 | `MLX_CACHE_LIMIT_MB=<MiB>` | 与代码里 `mx.set_cache_limit` 效果相同 |
+
+| Qwen3-Reranker 4B 加载方式（8.04 GB，399 个张量） | MLX | 加载 | 加载后 footprint | 跑完后 footprint | 打分 |
+| --- | --- | ---: | ---: | ---: | --- |
+| `common/mlx_w8a8.load`（原自写零拷贝） | PyPI 0.32.4 | 0.33 s | 437 MB | 1542 MB | 基准 |
+| 同上 | fork | 0.33 s | 436 MB | 1543 MB | 逐位相同 |
+| `mx.load(zero_copy=True)` | fork | 0.32 s | 435 MB | 1541 MB | 逐位相同 |
+| `MLX_ZERO_COPY_LOAD=1` + `mx.load` | fork | 0.32 s | 432 MB | 1539 MB | 逐位相同 |
+| `mx.load(zero_copy=False)`（拷贝） | fork | 0.62 s | 8114 MB | 9221 MB | 逐位相同 |
+
+- 稳态每次请求 0.40 s，几种方式一样；`MLX_CACHE_LIMIT_MB=256` 时请求后缓存 309 MB（默认 873 MB），打分不变。
+- 切换前后完整 `tools/regress` 都是 52 PASS／1 SKIP；`common/mlx_w8a8.py` 的 `save`／`load` 改调本体接口（241 → 190 行），新旧文件互读逐字节相同。
+- 计划中（未实现）：INT8 W8A8 矩阵乘收进本体（替代 mflux、h3-image-mlx、`common/` 三处副本）、head_dim 256 的融合注意力。
+
 ## 遗漏检查的完成情况（2026-11-18）
 
 2026-11-17 的遗漏检查（GA）列出的项目，目前状态：
@@ -955,6 +978,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | AQ | 11-17，ASR 逐类检查 `asr/w8a8/results/whisper-1117-2105`、`qwen-1117-2128`，上线 `deploy-1117-2150` | en100／zh100／mix60／long_en／long_zh |
 | UE | 11-18，统一 Python 环境切换（`tools/regress` 完整一套） | 46 个用例 |
 | GA | 11-17，遗漏检查（只读调研） | 官方配套资产、功能、接入、运维、报告 |
+| MF | 11-18，MLX fork 验证 `mlx/verify/v1-1118-0036`、`install-1118-0038`、`common-1118-0050` | 重排 4B 加载方式对比、完整 regress |
 | WX | 11-17，W8A16 `qwen-image/bench/results/sq8-1117-1655`、`eval/runs/turbo-q8-off`、`evals/int8-principle/x3-1117-1734`，上线 `qwen-image-teq8-deploy-1117-1747` | Qwen-Image 文本编码器、Decider／重排／嵌入 down_proj |
 | HI | 11-17，H3 图片 `h3-image-mlx/opt/k1-1117-0617`、`k2-1117-0621`，上线 `k-deploy-1117-0627` | 6 步、seed 42、预算 8000 |
 | HV | 11-17，H3 视频 `bench/repro/*`，上线 `h3-video-racefix-deploy-1117-0631` | 512×288、25 帧、standard、seed 42／7 |

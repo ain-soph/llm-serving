@@ -11,10 +11,7 @@ Zero-copy: `save` writes a standard safetensors file whose large tensors start o
 and wraps those tensors as MLX arrays without a copy (the GPU reads the page cache; an idle process holds no
 anonymous memory for them and the kernel may drop the pages under pressure).
 """
-import json
-import mmap
 import os
-import struct
 from functools import cache
 from pathlib import Path
 
@@ -24,7 +21,6 @@ import numpy as np
 
 KERNELS = Path(__file__).resolve().parent / "w8a8_kernels"
 GROUP = 256
-PAGE = os.sysconf("SC_PAGE_SIZE")
 
 _H4 = np.ones((4, 4), dtype=np.float32)
 np.fill_diagonal(_H4[:, ::-1], -1)
@@ -179,63 +175,16 @@ def float_weight(m):
 
 # ---- zero-copy safetensors -------------------------------------------------------------------------------------
 
-_DTYPES = {"BF16": mx.bfloat16, "F16": mx.float16, "F32": mx.float32, "I8": mx.int8, "U8": mx.uint8,
-           "I32": mx.int32, "U32": mx.uint32, "I64": mx.int64, "BOOL": mx.bool_}
-_NAMES = {v: k for k, v in _DTYPES.items()}
-
-
-def _bytes(a):
-    a = mx.contiguous(a)
-    raw = a.view(mx.uint8) if a.dtype != mx.bool_ else a.astype(mx.uint8)
-    return memoryview(np.asarray(raw.reshape(-1)))
-
-
 def save(path, tensors, metadata=None):
-    """Standard safetensors (contiguous, header padded to a page) with the tensors whose size is a whole number of
-    pages first, then the largest other tensor (e.g. an embedding table), all starting on a page; the small rest follows
-(and also covers the last page of that tensor, so it can be mapped whole)."""
-    sizes = {k: v.nbytes for k, v in tensors.items()}
-    paged = [k for k in tensors if sizes[k] % PAGE == 0]
-    rest = sorted((k for k in tensors if sizes[k] % PAGE), key=lambda k: -sizes[k])
-    order = paged + rest
-    header, offset = {}, 0
-    for k in order:
-        v = tensors[k]
-        header[k] = {"dtype": _NAMES[v.dtype], "shape": list(v.shape), "data_offsets": [offset, offset + sizes[k]]}
-        offset += sizes[k]
-    if metadata:
-        header = {"__metadata__": metadata, **header}
-    blob = json.dumps(header, separators=(",", ":")).encode()
-    blob += b" " * ((-(8 + len(blob))) % PAGE)
-    tmp = Path(str(path) + ".partial")
-    with open(tmp, "wb") as f:
-        f.write(struct.pack("<Q", len(blob)) + blob)
-        for k in order:
-            f.write(_bytes(tensors[k]))
+    """Standard safetensors written page-aligned by MLX (ain-soph/mlx `serving`: save_safetensors(page_align=True)):
+    header padded to a page, the tensors whose size is a whole number of pages first, then the largest other tensor
+    (e.g. an embedding table), so each of them starts on a page and `load` maps it; the small rest follows."""
+    tmp = f"{path}.partial.safetensors"
+    mx.save_safetensors(tmp, tensors, metadata, page_align=True)
     os.replace(tmp, path)
 
 
 def load(path, copy=False):
-    """Tensors of a safetensors file; each one that starts on a page (and spans at least one) is a zero-copy view of a
-    read-only mapping, the rest are copied. copy=True: plain mx.load."""
-    if copy:
-        return mx.load(str(path))
-    with open(path, "rb") as f:
-        (length,) = struct.unpack("<Q", f.read(8))
-        header = json.loads(f.read(length))
-        size = os.fstat(f.fileno()).st_size
-        mapping = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
-    start = 8 + length
-    out = {}
-    for key, spec in header.items():
-        if key == "__metadata__":
-            continue
-        a, b = spec["data_offsets"]
-        dtype, offset, nbytes = _DTYPES[spec["dtype"]], start + a, b - a
-        padded = -(-nbytes // PAGE) * PAGE
-        if offset % PAGE or nbytes < PAGE or offset + padded > size:
-            raw = mx.array(np.frombuffer(mapping, np.uint8, nbytes, offset))
-        else:   # Metal wraps host memory without a copy only for whole pages: map them and slice the tail off
-            raw = mx.from_dlpack(np.frombuffer(mapping, np.uint8, padded, offset))[:nbytes]
-        out[key] = (raw.view(dtype) if dtype != mx.uint8 else raw).reshape(spec["shape"])
-    return out
+    """Tensors of a safetensors file; each one that starts on a page is a zero-copy view of a read-only mapping
+    (mx.load(zero_copy=True) of the ain-soph/mlx fork), the rest are read. copy=True: plain mx.load."""
+    return mx.load(str(path), zero_copy=not copy)
