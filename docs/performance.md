@@ -627,6 +627,17 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | BF16 文本编码器 → **INT8** | 47%（30/64） | 54% | 50% | 40% | 42% | 25% | 62% |
 | Turbo → **base**（均不改写） | 37%（23.5/64） | 33% | 40% | 10% | 29% | 75% | 42% |
 
+**官方 Qwen-Image-Bench**（QB；23 条提示词、每个 L2 维度 1 条，评委 Q-Judger W8A16，与官方评委原始分一致率 85.8–87.1%；Turbo 线上配置，seed 42）
+
+| 变体 | 总分 | Quality | Aesthetics | Alignment | Real-world Fidelity | Creative Generation | 改写耗时（单独请求） |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 不改写 | 54.79 | 59.32 | 55.91 | 53.69 | 45.19 | 49.90 | — |
+| `llm`（聊天模型 + 官方系统提示词，`-pe` 默认） | 58.91 | 54.93 | 60.17 | 60.35 | 50.37 | 63.87 | 17–31 s |
+| 官方 PE-T2I（9B BF16，未上线） | 59.31 | 55.41 | 59.04 | 58.41 | 48.27 | 73.76 | 33–34 s，另占约 19 GB |
+
+- 两种改写都比不改写每图平均高约 4 分（14/23 更好）；官方 PE 对 `llm` +0.40（95% CI −4.48..+5.62），打平，所以 `-pe` 默认保持 `llm`。
+- `llm` 改写的思考约 2068–3810 token（中位 3631），`llm_rewrite` 的 `max_tokens` 因此从 4096 提到 8192。
+
 - 改写明显提升提示词遵循，`llm` 最好、比 `mflux` 快；改写每次多 18–36 s，所以默认关，另设入口 `qwen-image-2.1-turbo-pe`（默认 `llm`）给只能选模型、不能传参数的客户端。INT8 文本编码器与 BF16 打平，但不提速，2026-11-17 撤下；base 40 步在这组提示词上不比 Turbo 好。
 - 人工抽查（9 条 × 4 个变体）与评判方向一致；评判可能偏爱细节更丰富的画面，改写本来就会让画面更丰富。评测脚本见 `qwen-image/eval/`。
 - `mflux` 改写和 `auto_mask` 时 Qwen 进程 wired 峰值 4.7–8.0 GB（容量 11000 内）。
@@ -990,6 +1001,7 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 | T | 11-17，TTS `tts/eval/out/s1`、`s2`，上线 `tts-deploy-1117-0229` | 16 句短文本、1449 字中文、3621 字符英文 |
 | T2 | 11-17，CosyVoice3 `tts/cosyvoice/eval/out/m1-1117-0643`，上线 `cosyvoice3-deploy-1117-0649` | 同上 + 方言 4 句 |
 | EG | 11-17，EmbeddingGemma 复查 `embedding-review-1117-0053` | 短查询、64 × 400、4 × 8000 token |
+| QB | 11-18，官方 Qwen-Image-Bench 小规模评测（s23，`evals/qwen-image-bench/`） | 23 条提示词、3 个变体、每变体 94 次评判 |
 | QF | 11-17，Qwen-Image 融合 `bench-fusion/results/f1-1117-0023`、提示词评测 `eval/runs/` | Turbo W8A8，1024²／2048² |
 | EL | 11-17，elephant-1 `decisions/jev/results/s2`～`s4` | `decisions/cases.py` 13 个问题；12.9K／16.1K／31.1K token |
 | EC | 11-17，elephant-1 缓存 `decisions/jev/results/e1-*`、`e2-*` | 16,342 token + 6 个短请求 |

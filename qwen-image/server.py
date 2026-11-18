@@ -189,7 +189,9 @@ def llm_rewrite(prompt, references=()):
         small.save(buf, format="JPEG", quality=90)
         content.append({"type": "image_url",
                         "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}})
-    body = json.dumps({"model": LLM_MODEL, "temperature": 0.7, "max_tokens": 4096,
+    # 8192 (was 4096, 2026-11-18): Flash-Next thinks before the JSON; on the Qwen-Image-Bench s23 prompts the rewrites
+    # took 2068-3810 tokens (median 3631), so 4096 left almost no margin and a longer one would fail with a 400
+    body = json.dumps({"model": LLM_MODEL, "temperature": 0.7, "max_tokens": 8192,
                        "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}]})
     req = urllib.request.Request(LLM_URL, data=body.encode(), headers={
         "Content-Type": "application/json", "Authorization": f"Bearer {LLM_KEY_FILE.read_text().strip()}"})
