@@ -6,24 +6,24 @@ requires-python = ">=3.15,<3.16"
 dependencies = [
   "h3-image-mlx",
   "mflux",
-  "mlx>=0.32.4",
-  "mlx-lm>=0.32.2",
-  "mlx-vlm>=0.8.0",
-  "transformers>=5.23.0",
-  "mlx-whisper>=0.4.3",
+  "mlx==0.32.4",
+  "mlx-lm==0.32.2",
+  "mlx-vlm==0.8.0",
+  "transformers==5.23.0",
+  "mlx-whisper==0.4.3",
   "mlx-qwen3-asr[aligner]",
   "mlx-audio",
   "torchvision",
-  "numpy>=2.5.3",
-  "pillow>=13.0.0",
-  "jinja2>=3.1.6",
-  "regex>=2026.9.10",
-  "pyyaml>=6.0.3",
-  "tqdm>=4.70.1",
-  "requests>=2.34.2",
-  "psutil>=7.2.2",
-  "soundfile>=0.14.0",
-  "pydantic>=2.14.3",
+  "numpy==2.5.3",
+  "pillow==13.0.0",
+  "jinja2==3.1.6",
+  "regex==2026.9.10",
+  "pyyaml==6.0.3",
+  "tqdm==4.70.1",
+  "requests==2.34.2",
+  "psutil==7.2.2",
+  "soundfile==0.14.0",
+  "pydantic==2.14.3",
 ]
 
 [tool.uv]
@@ -31,8 +31,8 @@ package = false
 environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
 
 [tool.uv.sources]
-h3-image-mlx = { git = "https://github.com/ain-soph/h3-image-mlx", rev = "1ac2ffe3af75e4f3e862a89be26fe6f1d6996a42" }
-mflux = { git = "https://github.com/ain-soph/mflux", rev = "533e79dbd633b3b899c219b80f85620b11e6c186" }
-mlx-audio = { git = "https://github.com/ain-soph/mlx-audio", rev = "cd4be996745184e395b8ed47ef93586e6b738e2a" }
+h3-image-mlx = { git = "https://github.com/ain-soph/h3-image-mlx", rev = "02a645c69754f775731831384a9ba3599b5bd855" }
+mflux = { git = "https://github.com/ain-soph/mflux", rev = "79cbd9fd6d4507f2b9e4dfa8605c703e6c5818eb" }
+mlx-audio = { git = "https://github.com/ain-soph/mlx-audio", rev = "ec2105231760ca3895d38711cbca6abfe5b77d89" }
 mlx-qwen3-asr = { git = "https://github.com/ain-soph/mlx-qwen3-asr", rev = "38568173399a013b2856fc480a2dc06604d7a2e5" }
 mlx-whisper = { git = "https://github.com/ain-soph/mlx-examples", rev = "46502543022c044396b44c83dd8848fcf4a1c168", subdirectory = "whisper" }
