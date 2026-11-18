@@ -47,14 +47,15 @@ DOC_TYPES = {"document", "passage", "search_document"}
 
 class Embedder:
     def __init__(self, path, max_batch_tokens, max_tokens, dtype=None, copy=False, w8a8_classes=None,
-                 float_model=None):
+                 float_model=None, q8_classes=()):
         path = Path(path)
         cfg = json.loads((path / "config.json").read_text())
         self.tok = AutoTokenizer.from_pretrained(str(path))
         self.max_batch_tokens, self.max_tokens = max_batch_tokens, max_tokens
         if w8a8_classes is not None or qwen3_w8a8.is_w8a8(path):
             if w8a8_classes is not None:  # per-class precision (INT8 audit 2026-11-17)
-                self.model, extras, _ = qwen3_w8a8.load_mixed(path, float_model, w8a8_classes, copy=copy)
+                self.model, extras, _ = qwen3_w8a8.load_mixed(path, float_model, w8a8_classes, copy=copy,
+                                                                q8_classes=q8_classes)
             else:
                 self.model, extras, _ = qwen3_w8a8.load(path, copy=copy)
             self.proj = extras.get("linear.weight")
@@ -212,12 +213,15 @@ def main():
     ap.add_argument("--w8a8-classes", help="with --float-model: comma-separated projections (q_proj, ..., down_proj) "
                     "taken W8A8 from --model; the rest stay float")
     ap.add_argument("--float-model", help="zero-copy float copy (qwen3_w8a8.py --float) for the other projections")
+    ap.add_argument("--q8-classes", help="with --w8a8-classes: float projections to load as 8-bit weights + float "
+                    "activations (W8A16, common/mlx_q8.py)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="[embed] %(message)s")
     mx.set_cache_limit(args.cache_mb << 20)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.embedder = Embedder(args.model, args.max_batch_tokens, args.max_tokens, args.dtype, args.copy,
-                               args.w8a8_classes.split(",") if args.w8a8_classes else None, args.float_model)
+                               args.w8a8_classes.split(",") if args.w8a8_classes else None, args.float_model,
+                               tuple(args.q8_classes.split(",")) if args.q8_classes else ())
     server.model_id = args.model_id
     log.info("listening on http://%s:%d (%s, %d dims); MLX active %.2f GiB, load peak %.2f GiB", args.host, args.port,
              args.model, server.embedder.dim, mx.get_active_memory() / 2**30, mx.get_peak_memory() / 2**30)

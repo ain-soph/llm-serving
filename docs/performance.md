@@ -32,7 +32,7 @@
 | 语音转写 | `nemotron-3.5-transcribe` | NeMo-Speech.cpp Metal | AD-IQ4_NL + F16 编码器 | en100 c1 29.4 s；WER 1.43% | wired +21.2 GB | 21.35 GB |
 | 语音转写 | `sov-transcribe-1` | mlx-audio fork | 解码器 8-bit（Q8_0 式）+ BF16 编码器 | en100 c1 32.5 s；WER 2.20%；仅英文和 6 种欧洲语言 | wired +32079 MiB | 29.77 GB |
 | 图片 | `minimax-h3-image` | h3-image-mlx fork | INT8 ConvRot（W8A8） | DiT 去噪 1024² 2.00 s；2048² 8.14 s；4096² 56.4 s（6 步） | DiT wired +1733／+2374 MiB | 49.32 GB |
-| 图片 | `qwen-image-2.1-turbo` | mflux fork | W8A8 DiT + BF16 文本编码器 | 1024² 7.8 s（经 API，中位）；2048² 约 43 s（8 步，融合前） | 生成期 wired 6.7–9.0 GB | 33.43 GB¹ |
+| 图片 | `qwen-image-2.1-turbo` | mflux fork | W8A8 DiT + W8A16 文本编码器 | 1024² 7.8 s（经 API，中位）；2048² 约 43 s（8 步，融合前） | 生成期 wired 6.7–9.0 GB | 26.80 GB¹ |
 | 图片 | `qwen-image-2.1` | mflux fork | 同上 | 1024² 约 28 s（40 步） | 同上 | 同上¹ |
 | 图片 | `qwen-image-2.1-turbo-pe` | mflux fork | 同 Turbo | 先由聊天模型改写提示词：文生图 36.3 s、编辑 27.6 s（中位） | 同上 | 同上¹ |
 | 视频＋音频 | `minimax-h3-video`（旧名 `-stream` 为别名） | h3.c fork | INT8 DiT（零拷贝）、BF16 VAE 计算 | fast 768p：5 s 片段 165–170 s；15 s 片段 758 s | standard 768p wired +14.3 GB（按 block 释放）；DiT GPU 峰值 22.20／33.00 GiB（fast） | 125.62 GB² |
@@ -524,9 +524,9 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 
 | 入口 | 步数 | DiT | 文本编码器 | 1024² 耗时 | 其他尺寸 |
 | --- | ---: | --- | --- | ---: | --- |
-| `qwen-image-2.1-turbo` | 8 | W8A8 | BF16 | 约 9 s；经 API 含进程启动 14.0 s | 2048² 约 43 s；透明 8.2 s；编辑 10.5 s；遮罩 12.3 s |
-| `qwen-image-2.1` | 40 | W8A8 | BF16 | 约 28 s；经 API 32 s | — |
-| `qwen-image-2.1-turbo-pe` | 8 | W8A8 | BF16 | 先由聊天模型改写（见下） | — |
+| `qwen-image-2.1-turbo` | 8 | W8A8 | W8A16 | 约 9 s；经 API 含进程启动 14.0 s | 2048² 约 43 s；透明 8.2 s；编辑 10.5 s；遮罩 12.3 s |
+| `qwen-image-2.1` | 40 | W8A8 | W8A16 | 约 28 s；经 API 32 s（W8A16 上线后 28 s） | — |
+| `qwen-image-2.1-turbo-pe` | 8 | W8A8 | W8A16 | 先由聊天模型改写（见下）；经 API 42 s | — |
 
 | 内存与磁盘 | 数值 |
 | --- | --- |
@@ -534,7 +534,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | 生成期 wired 峰值：3／6／10 张参考图 | 5.6–8.4 GB |
 | llama-swap 容量 | 11000 MiB（与 Flash-Next 共存：71000 + 11000 < 83192） |
 | MLX 缓存 | 去噪 6 GB（带参考图 2 GB）；VAE 2 GB |
-| 磁盘 | 33.43 GB（W8A8 DiT 7.26 × 2、BF16 文本编码器 17.53、FP32 VAE 1.35）；撤下的 INT8 文本编码器 9.35 GB 不再需要 |
+| 磁盘 | 26.80 GB（W8A8 DiT 7.26 × 2、W8A16 文本编码器 10.91、FP32 VAE 1.35）；BF16 文本编码器 17.53 GB 只作转换来源与回退 |
 | KV | 无生成 KV；文本／参考图前缀的 K/V 在步间复用，BF16 |
 
 **我们的修改及收益**
@@ -547,6 +547,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | 激活旋转量化改为 Metal 内核 | 16384×12288：7.2 → 2.2 ms | 快速 Hadamard |
 | 去噪缓存 2 → 6 GB | 2048² 每 block 160 → 119 ms | 带参考图时仍用 2 GB |
 | INT8 文本编码器（2026-11-17 撤下） | 页缓存 −8.8 GB，不提速 | embedding 误差 2.6% → 6.2%；W8A8 只用在能提速的地方，所以撤掉 |
+| W8A16 文本编码器（2026-11-17 17:47 上线，默认） | 文件 16.4 → 10.9 GB；MLX 加载 29.4 → 22.8 GB；编码 0.22 → 0.17 s，整图 6.8／6.4 → 6.7／6.6 s（持平） | embedding 2.58% → 3.55%；第一步速度场 Turbo 3.51 → 3.64%、base 4.60 → 4.75%；32 条评判胜率 46%（打平）；API 出图与测试渲染逐像素相同 |
 | 逐元素融合（调制广播、Q/K norm + RoPE 融合内核、门控残差编译） | 每 block 1024² 20.0 → 17.7 ms（−12%），2048² 121.0 → 108.0 ms（−11%）；每步 0.656 → 0.576 s／3.90 → 3.48 s | 输出逐字节相同；`QWEN21_FUSION` 可关 |
 
 **正确性**（同噪声与官方 diffusers 对比，第一步速度场相对 L2；官方自身 BF16 → FP16 为 10.9%）
@@ -555,7 +556,8 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | --- | ---: | ---: |
 | mflux BF16 | 3.0% | 4.0% |
 | + W8A8 DiT | 3.5% | 4.6% |
-| + INT8 文本编码器 | 4.0% | 6.3% |
+| **+ W8A16 文本编码器（线上）** | **3.64%** | **4.75%** |
+| + INT8 文本编码器（已撤下） | 4.0% | 6.3% |
 
 - 终图 PSNR（BF16，官方 vs mflux）：Turbo 28.5 dB、base 26.5 dB；编辑 43.9–44.0 dB。mflux 自带 Q8 在 Turbo 上改变构图（21.5 dB），不用。
 - 共存压测（2752×1536 与 Flash-Next 11.6 万 token 提示词同时计算）：出图 90 s，Flash-Next 首 token 74.4 s，压缩区 10.9 GB，交换 +1.05 GB；日常交替使用不会同时计算。
@@ -781,6 +783,27 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | gate／up | 1.71／1.78／1.83× | 0.0043 |
 | **down_proj** | 1.46／1.49／**0.77×** | **0.0105**（全 INT8 0.0106） |
 
+**W8A16（8 位权重 + 16 位激活）**（WX）
+
+| 对象 | 速度 | 内存／硬盘 | 误差 | 选择 |
+| --- | --- | --- | --- | --- |
+| Qwen-Image 文本编码器（36 层 7 类投影 + lm_head） | 编码 0.22 → 0.17 s；整图持平 | 文件 16.4 → 10.9 GB；MLX 加载 29.4 → 22.8 GB | embedding 2.58 → 3.55%（W8A8 为 6.2%）；评判 46%（打平） | **W8A16，默认** |
+| Decider `-int8` 的 down_proj | 32.6K 5.57 → 5.68 s（更慢） | 计算峰值 7.23 → 6.62 GiB | 0.0009 → 0.0617，1 题翻转 | 保持 FP16 |
+| 重排 4B `-int8` 的 down_proj | 49.1 → 51.8 s（+6%） | 稳态约 −0.8 GB；加载峰值 11.6 → 14.4 GB | 对浮点平均差 0.00743 → 0.00808；nDCG 0.8423 → 0.8396；top-1 同为 96.7% | 保持 BF16 |
+| 嵌入 4B `-int8` 的 down_proj | 22.6 → 24.1 s（+7%） | 同上 | 官方最小余弦 0.99904 → 0.99893；top-10 重合 98.1 → 97.5% | 保持 FP16 |
+
+| Decider：其他层／down_proj | 最大 \|Δp\| | 翻转 | 32.6K | MLX 峰值 |
+| --- | ---: | ---: | ---: | ---: |
+| 全 FP16／FP16（参照） | 0.00048 | 0 | 6.25 s | 9.77 GiB |
+| 全 FP16／W8A16（quantized_matmul） | 0.00102 | 0 | 6.35 s | 9.15 GiB |
+| 全 FP16／同一权重反量化 + FP16 matmul | 0.00244 | 0 | 6.25 s | 9.77 GiB |
+| 其余 9 类 W8A8／FP16（现行 `-int8`） | 0.00090 | 0 | 5.56 s | 7.23 GiB |
+| 其余 9 类 W8A8／W8A16 | 0.0617 | 1 | 5.67 s | 6.62 GiB |
+| 其余 9 类 W8A8／同一权重反量化 + FP16 | 0.0281 | 0 | 5.56 s | 7.64 GiB |
+
+- W8A16 本身没有问题（单独用于 down_proj 时 0.00102，与 FP16 同量级）；大误差来自与其他层 W8A8 叠加。所以在全 W8A8 的模型里 down_proj 保持原精度。
+- MLX 8-bit 的 scale 必须与激活同 dtype（否则走 float32 慢路径）；CPU 上的 quantized_matmul 按 scale 的 dtype 计算，BF16 scale 相对误差 7%，GPU 只多约 0.12%，所以精度只能在 GPU 上测。
+
 - DiT：全 INT8 激活的 latent 误差 0.00105，任一类单独 0.0008–0.0011，没有哪类主导。文本编码器 down_proj 改 W8A16 试做（短提示词误差 0.0106 → 0.0044），但普通 MLX 实现文本阶段 1.09 → 2.12 s（约 1500 token 时 1.06 → 3.14 s），未上线。
 - `common/mlx_w8a8.py` 的 128×64 分块与 64×128 只差 ±5%，不改；MLX 自带 8-bit qmm 作 W8A16 多数类比 BF16 还慢（0.67–0.96×）。
 
@@ -806,7 +829,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | Whisper MLX | 3.084 GB | 3.084 GB | FP16 |
 | Qwen ASR + 对齐器 | 6.543 GB | 6.543 GB | 4.703 + 1.840 |
 | H3 Image | 49.320 GB | 49.320 GB | 只保留页对齐版本 |
-| Qwen-Image-2.1（3 个入口） | 33.426 GB | — | BF16 DiT（2 × 14.23 GB）和撤下的 INT8 文本编码器（9.35 GB）已删；服务只读 DiT 的 `config.json` |
+| Qwen-Image-2.1（3 个入口） | 26.804 GB | — | 文本编码器用 W8A16（10.91 GB）；BF16 文本编码器（17.53 GB）只作转换来源与回退；BF16 DiT 和撤下的 INT8 文本编码器已删 |
 | H3 Video（FL2VA + Ref2VA） | 125.622 GB | 125.622 GB | 共享文本编码器和 VAE |
 
 视频 DiT 原始约 66.280 GB／检查点（当时逐张量报告），现 INT8 每份 23.914 GB（22.27 GiB），约省 42.366 GB（−63.9%）；只针对 DiT，不是整个视频目录。旧报告的“62 → 22 GB”混用了 GiB，以这里为准。
@@ -865,6 +888,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | IA | 11-17，INT8 逐类复查 `evals/int8-principle/u3`～`u6` | 重排／嵌入 4B 与 8B、elephant、Qwen-Image、H3 图片与视频 |
 | BS | 11-17，H3 视频按 block 释放 `bench/streamw/s1-1117-1612`，上线 `h3-video-streamw-deploy-1117-1629` | 512² 56 帧、768p 124 帧，standard |
 | EP | 11-17，EmbeddingGemma 精度 `deploy/embedding-dtype-1117/` | 短查询、8000 token、64 × 400、4 × 8000、SciFact 全库 |
+| WX | 11-17，W8A16 `qwen-image/bench/results/sq8-1117-1655`、`eval/runs/turbo-q8-off`、`evals/int8-principle/x3-1117-1734`，上线 `qwen-image-teq8-deploy-1117-1747` | Qwen-Image 文本编码器、Decider／重排／嵌入 down_proj |
 | HI | 11-17，H3 图片 `h3-image-mlx/opt/k1-1117-0617`、`k2-1117-0621`，上线 `k-deploy-1117-0627` | 6 步、seed 42、预算 8000 |
 | HV | 11-17，H3 视频 `bench/repro/*`，上线 `h3-video-racefix-deploy-1117-0631` | 512×288、25 帧、standard、seed 42／7 |
 | VG | 11-17，`bench/vae-gemm/sweep-2805.txt`、`render-1117-0703`，上线 `h3-video-vaegemm-deploy-1117-0716` | VAE 线性层分块扫描与端到端 |

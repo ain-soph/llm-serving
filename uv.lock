@@ -383,7 +383,7 @@ dependencies = [
 requires-dist = [
     { name = "h3-image-mlx", git = "https://github.com/ain-soph/h3-image-mlx?rev=02a645c69754f775731831384a9ba3599b5bd855" },
     { name = "jinja2", specifier = "==3.1.6" },
-    { name = "mflux", git = "https://github.com/ain-soph/mflux?rev=4c740d377a4ee97ede140b56a75620a54d99b51b" },
+    { name = "mflux", git = "https://github.com/ain-soph/mflux?rev=79cbd9fd6d4507f2b9e4dfa8605c703e6c5818eb" },
     { name = "mlx", specifier = "==0.32.4" },
     { name = "mlx-audio", git = "https://github.com/ain-soph/mlx-audio?rev=ec2105231760ca3895d38711cbca6abfe5b77d89" },
     { name = "mlx-lm", specifier = "==0.32.2" },
@@ -470,7 +470,7 @@ wheels = [
 [[package]]
 name = "mflux"
 version = "0.24.0"
-source = { git = "https://github.com/ain-soph/mflux?rev=4c740d377a4ee97ede140b56a75620a54d99b51b#4c740d377a4ee97ede140b56a75620a54d99b51b" }
+source = { git = "https://github.com/ain-soph/mflux?rev=79cbd9fd6d4507f2b9e4dfa8605c703e6c5818eb#79cbd9fd6d4507f2b9e4dfa8605c703e6c5818eb" }
 dependencies = [
     { name = "anyio" },
     { name = "filelock" },

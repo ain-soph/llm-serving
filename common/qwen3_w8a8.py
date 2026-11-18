@@ -25,6 +25,7 @@ from mlx.utils import tree_flatten
 from mlx_lm.models.qwen3 import ModelArgs, Qwen3Model
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import mlx_q8  # noqa: E402
 import mlx_w8a8  # noqa: E402
 
 PROJECTIONS = ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj")
@@ -55,10 +56,12 @@ def load(path, copy=False):
     return model, extras, model.norm.weight.dtype
 
 
-def load_mixed(w8a8_path, float_path, classes, copy=False):
+def load_mixed(w8a8_path, float_path, classes, copy=False, q8_classes=()):
     """Per-class precision (2026-11-17, W8A8 only where it pays): the W8A8 copy, with the projections whose last name
     is NOT in `classes` swapped back to the float copy's weights (`--float` copy of the same model: plain float, or the
-    exact Q8_0 MLX 8-bit for 8B). Both files are mapped; only the swapped-back float tensors are read from the second."""
+    exact Q8_0 MLX 8-bit for 8B). Both files are mapped; only the swapped-back float tensors are read from the second.
+    q8_classes: swapped-back plain-float projections to quantize to 8-bit weights + float activations (W8A16,
+    mlx_q8.py) while loading, saving half their memory where W8A8 brings no speed."""
     model, extras, dtype = load(w8a8_path, copy=copy)
     back = [p for p in mlx_w8a8.linear_paths_w8a8(model) if p.rsplit(".", 1)[-1] not in set(classes)]
     if back:
@@ -72,6 +75,12 @@ def load_mixed(w8a8_path, float_path, classes, copy=False):
             if q:
                 layer = nn.QuantizedLinear(k, out, bias=False, group_size=q["group_size"], bits=q["bits"])
                 names = ("weight", "scales", "biases")
+            elif p.rsplit(".", 1)[-1] in set(q8_classes):
+                w = f[f"{p}.weight"]
+                packed, scales, biases = mlx_q8.quantize_weight(w, w.dtype)
+                swaps.append((p, mlx_q8.layer(k, out)))
+                params += [(f"{p}.weight", packed), (f"{p}.scales", scales), (f"{p}.biases", biases)]
+                continue
             else:
                 layer, names = nn.Linear(k, out, bias=False), ("weight",)
             swaps.append((p, layer))

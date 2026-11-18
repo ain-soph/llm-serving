@@ -24,6 +24,7 @@ from pplx_decider.protocol import MAX_OPTIONS, MIN_PIXELS, PROTOCOL, Encoder, Re
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common"))
+import mlx_q8  # noqa: E402
 import mlx_w8a8  # noqa: E402
 
 DTYPES = {"bfloat16": mx.bfloat16, "float16": mx.float16, "float32": mx.float32}
@@ -35,8 +36,10 @@ W8A8_NAMES = ("q_proj", "k_proj", "v_proj", "o_proj", "in_proj_qkv", "in_proj_z"
 
 
 class MLXDecider:
-    def __init__(self, checkpoint, dtype="float16", vision=True, max_length=32768, batch_tokens=8192, w8a8=False):
-        """w8a8: False, True (all W8A8_NAMES) or a tuple of projection names."""
+    def __init__(self, checkpoint, dtype="float16", vision=True, max_length=32768, batch_tokens=8192, w8a8=False,
+                 q8=()):
+        """w8a8: False, True (all W8A8_NAMES) or a tuple of projection names.
+        q8: projection names (not W8A8) to load as 8-bit weights + float activations (W8A16, common/mlx_q8.py)."""
         ck = Path(checkpoint)
         if load_json(ck / "joint_config.json") != PROTOCOL:
             raise ValueError("This checkpoint does not declare the chunked joint protocol (version 4)")
@@ -83,11 +86,16 @@ class MLXDecider:
         weights = sanitize_weights(qwen3_5.LanguageModel, weights, mcfg.text_config)
         target = DTYPES[dtype]
         quantized = self.w8a8_targets(W8A8_NAMES if w8a8 is True else tuple(w8a8)) if w8a8 else set()
+        q8_paths = self.q8_targets(tuple(q8), quantized) if q8 else set()
         scales = {}
         for k, v in weights.items():          # one tensor at a time: never both copies of every weight (15.7 GiB)
             if k.endswith(".weight") and k[:-len(".weight")] in quantized:
                 weights[k], scales[k[:-len(".weight")] + ".scale"] = mlx_w8a8.quantize_weight(v)
                 mx.eval(weights[k], scales[k[:-len(".weight")] + ".scale"])
+            elif k.endswith(".weight") and k[:-len(".weight")] in q8_paths:
+                base = k[:-len(".weight")]
+                weights[k], scales[base + ".scales"], scales[base + ".biases"] = mlx_q8.quantize_weight(v, target)
+                mx.eval(weights[k], scales[base + ".scales"], scales[base + ".biases"])
             elif mx.issubdtype(v.dtype, mx.floating) and v.dtype != target:
                 weights[k] = v.astype(target)
                 mx.eval(weights[k])
@@ -102,6 +110,21 @@ class MLXDecider:
         del weights
         mx.clear_cache()
         self.text = self.model.language_model.model
+
+    def q8_targets(self, names, w8a8_paths):
+        """Make the language-model projections named in `names` 8-bit weights + float activations (W8A16); their
+        weights are quantized while loading. Returns the module paths."""
+        if unknown := set(names) - set(W8A8_NAMES):
+            raise ValueError(f"not language-model projections: {sorted(unknown)}")
+        modules = dict(self.model.named_modules())
+        paths = ["language_model." + p for p in mlx_w8a8.linear_paths(self.model.language_model, names)
+                 if "bias" not in modules["language_model." + p]]
+        paths = [p for p in paths if p not in w8a8_paths]
+        from mlx.utils import tree_unflatten
+        swaps = [(p, mlx_q8.layer(modules[p].weight.shape[1], modules[p].weight.shape[0])) for p in paths]
+        del modules
+        self.model.update_modules(tree_unflatten(swaps))
+        return set(paths)
 
     def w8a8_targets(self, names):
         """Make the language-model projections named in `names` (default W8A8_NAMES: attention q/k/v/o, gated-delta

@@ -1,7 +1,8 @@
 # Qwen-Image-2.1 (Qwen Research License: non-commercial) via the mflux fork (github.com/ain-soph/mflux, pinned in
 # uv.lock): POST /v1/images/generations and /v1/images/edits (up to 10 references, OpenAI mask, transparent PNG).
-# DiT W8A8 (Comfy-Org int8_convrot) on the M5 TensorOps INT8 GEMM; text encoder BF16 (an INT8 text encoder was
-# tried and dropped 2026-11-17: no faster, only less page cache; W8A8 only where it speeds things up).
+# DiT W8A8 (Comfy-Org int8_convrot) on the M5 TensorOps INT8 GEMM. Text encoder W8A16 (MFLUX_QWEN21_TE_Q8: 8-bit
+# weights, bf16 activations; 10.9 GB instead of 16.4 GB, embeds 3.55 % vs 2.58 % from diffusers, judged a tie). An
+# int8-activation text encoder was tried and dropped 2026-11-17 (no faster, larger error).
 # Zero-copy page-aligned weights streamed layer by layer; MLX cache 6 GB for the denoiser (2 GB with references),
 # 2 GB for the VAE, which decodes in two-pass row strips. Measured wired peak of a whole generation: 6.7-9.0 GB
 # (text to image up to 2400x1792), 5.6-8.4 GB with 3-10 references -> capacity 11000 fits next to the chat model.
@@ -25,6 +26,7 @@ models:
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
       - "QWEN_IMAGE_CACHE_MB=6144"
       - "QWEN_IMAGE_REF_CACHE_MB=2048"
+      - "MFLUX_QWEN21_TE_Q8=@MODELS@/qwen-image-2.1/te-q8"
     capabilities:
       in: [text, image]
       out: [image]
@@ -47,6 +49,7 @@ models:
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
       - "QWEN_IMAGE_CACHE_MB=6144"
       - "QWEN_IMAGE_REF_CACHE_MB=2048"
+      - "MFLUX_QWEN21_TE_Q8=@MODELS@/qwen-image-2.1/te-q8"
       - "QWEN_IMAGE_DEFAULT_ENHANCE=llm"   # needs the system prompts, see docs/qwen-image.md
     capabilities:
       in: [text, image]
@@ -70,6 +73,7 @@ models:
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
       - "QWEN_IMAGE_CACHE_MB=6144"
       - "QWEN_IMAGE_REF_CACHE_MB=2048"
+      - "MFLUX_QWEN21_TE_Q8=@MODELS@/qwen-image-2.1/te-q8"
     capabilities:
       in: [text, image]
       out: [image]

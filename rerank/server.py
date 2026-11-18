@@ -32,10 +32,11 @@ lock = threading.Lock()
 
 
 class Reranker:
-    def __init__(self, path, max_batch_tokens, copy=False, w8a8_classes=None, float_model=None):
+    def __init__(self, path, max_batch_tokens, copy=False, w8a8_classes=None, float_model=None, q8_classes=()):
         self.max_batch_tokens = max_batch_tokens
         if w8a8_classes is not None:     # per-class precision: W8A8 only for these projections (INT8 audit 2026-11-17)
-            self.inner, extras, _ = qwen3_w8a8.load_mixed(path, float_model, w8a8_classes, copy=copy)
+            self.inner, extras, _ = qwen3_w8a8.load_mixed(path, float_model, w8a8_classes, copy=copy,
+                                                            q8_classes=q8_classes)
             self.tok, self.rows = load_tokenizer(Path(float_model)), extras["score_rows"]
             return
         if qwen3_w8a8.is_w8a8(path):
@@ -133,13 +134,16 @@ def main():
     ap.add_argument("--w8a8-classes", help="with --float-model: comma-separated projections (q_proj, ..., down_proj) "
                     "taken W8A8 from --model; the rest stay float")
     ap.add_argument("--float-model", help="zero-copy float copy (qwen3_w8a8.py --float) for the other projections")
+    ap.add_argument("--q8-classes", help="with --w8a8-classes: float projections to load as 8-bit weights + float "
+                    "activations (W8A16, common/mlx_q8.py)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="[rerank] %(message)s")
     mx.set_cache_limit(args.cache_mb << 20)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.reranker, server.model_id = Reranker(
         args.model, args.max_batch_tokens, args.copy,
-        args.w8a8_classes.split(",") if args.w8a8_classes else None, args.float_model), args.model_id
+        args.w8a8_classes.split(",") if args.w8a8_classes else None, args.float_model,
+        tuple(args.q8_classes.split(",")) if args.q8_classes else ()), args.model_id
     log.info("listening on http://%s:%d (%s)", args.host, args.port, args.model)
     server.serve_forever()
 

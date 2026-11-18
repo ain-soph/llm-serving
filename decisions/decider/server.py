@@ -97,12 +97,15 @@ def main():
     ap.add_argument("--w8a8", action="store_true", help="W8A8 language-model projections (INT8 TensorOps GEMM)")
     ap.add_argument("--w8a8-names", help="with --w8a8: comma list of the projection classes to make W8A8 "
                     "(decider_mlx.W8A8_NAMES; default all)")
+    ap.add_argument("--q8-names", help="comma list of projection classes (not W8A8) to load as 8-bit weights + float "
+                    "activations (W8A16)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="[decider] %(message)s")
     mx.set_cache_limit(args.cache_mb << 20)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.decider = MLXDecider(args.model, dtype=args.dtype, vision=not args.no_vision, max_length=args.max_length,
-                                 w8a8=tuple(args.w8a8_names.split(",")) if args.w8a8 and args.w8a8_names else args.w8a8)
+                                 w8a8=tuple(args.w8a8_names.split(",")) if args.w8a8 and args.w8a8_names else args.w8a8,
+                                 q8=tuple(args.q8_names.split(",")) if args.q8_names else ())
     server.model_id = args.model_id
     log.info("listening on http://%s:%d (%s, %s, %s); MLX active %.2f GiB", args.host, args.port, args.model,
              args.dtype, "text only" if args.no_vision else "text + images", mx.get_active_memory() / 2**30)
