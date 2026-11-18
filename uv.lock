@@ -220,7 +220,7 @@ wheels = [
 [[package]]
 name = "h3-image-mlx"
 version = "0.1.0a9"
-source = { git = "https://github.com/ain-soph/h3-image-mlx?rev=fe67e6412114259329ca7e160a261f3499d8afb7#fe67e6412114259329ca7e160a261f3499d8afb7" }
+source = { git = "https://github.com/ain-soph/h3-image-mlx?rev=c3dc904f466a9d48788f00cc973d71f916da0698#c3dc904f466a9d48788f00cc973d71f916da0698" }
 dependencies = [
     { name = "httpx" },
     { name = "mlx" },
@@ -435,14 +435,14 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "h3-image-mlx", git = "https://github.com/ain-soph/h3-image-mlx?rev=fe67e6412114259329ca7e160a261f3499d8afb7" },
+    { name = "h3-image-mlx", git = "https://github.com/ain-soph/h3-image-mlx?rev=c3dc904f466a9d48788f00cc973d71f916da0698" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "jiwer", specifier = ">=4.0.0" },
-    { name = "mflux", git = "https://github.com/ain-soph/mflux?rev=6373602db37a4ab0cc8a69af035ac53f8139cc9a" },
-    { name = "mlx", url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-655956a/mlx-0.32.4%2Bserving.655956a-cp315-cp315-macosx_26_0_arm64.whl" },
+    { name = "mflux", git = "https://github.com/ain-soph/mflux?rev=80da340abd432ea1ffd4e287b577736b7a605c3c" },
+    { name = "mlx", url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx-0.32.4%2Bserving.005fe7a2-cp315-cp315-macosx_26_0_arm64.whl" },
     { name = "mlx-audio", git = "https://github.com/ain-soph/mlx-audio?rev=cd4be996745184e395b8ed47ef93586e6b738e2a" },
     { name = "mlx-lm", specifier = ">=0.32.2" },
-    { name = "mlx-metal", url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-655956a/mlx_metal-0.32.4%2Bserving.655956a-py3-none-macosx_26_0_arm64.whl" },
+    { name = "mlx-metal", url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx_metal-0.32.4%2Bserving.005fe7a2-py3-none-macosx_26_0_arm64.whl" },
     { name = "mlx-qwen3-asr", extras = ["aligner"], git = "https://github.com/ain-soph/mlx-qwen3-asr?rev=38568173399a013b2856fc480a2dc06604d7a2e5" },
     { name = "mlx-vlm", specifier = ">=0.8.0" },
     { name = "mlx-whisper", git = "https://github.com/ain-soph/mlx-examples?subdirectory=whisper&rev=46502543022c044396b44c83dd8848fcf4a1c168" },
@@ -528,7 +528,7 @@ wheels = [
 [[package]]
 name = "mflux"
 version = "0.24.0"
-source = { git = "https://github.com/ain-soph/mflux?rev=6373602db37a4ab0cc8a69af035ac53f8139cc9a#6373602db37a4ab0cc8a69af035ac53f8139cc9a" }
+source = { git = "https://github.com/ain-soph/mflux?rev=80da340abd432ea1ffd4e287b577736b7a605c3c#80da340abd432ea1ffd4e287b577736b7a605c3c" }
 dependencies = [
     { name = "anyio" },
     { name = "filelock" },
@@ -572,23 +572,23 @@ wheels = [
 
 [[package]]
 name = "mlx"
-version = "0.32.4+serving.655956a"
-source = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-655956a/mlx-0.32.4%2Bserving.655956a-cp315-cp315-macosx_26_0_arm64.whl" }
+version = "0.32.4+serving.005fe7a2"
+source = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx-0.32.4%2Bserving.005fe7a2-cp315-cp315-macosx_26_0_arm64.whl" }
 dependencies = [
     { name = "mlx-metal" },
 ]
 wheels = [
-    { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-655956a/mlx-0.32.4%2Bserving.655956a-cp315-cp315-macosx_26_0_arm64.whl", hash = "sha256:a54b12dff64a2f9dad242283a6287742ddf6646ca926ee8723ac921b55b5f5a4" },
+    { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx-0.32.4%2Bserving.005fe7a2-cp315-cp315-macosx_26_0_arm64.whl", hash = "sha256:637aeaa2f560a7954f3496ec3a251c95cd95f45b796402024fc56871fef58747" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "ml-dtypes", marker = "extra == 'dev'" },
-    { name = "mlx-cpu", marker = "sys_platform == 'linux' and extra == 'cpu'", specifier = "==0.32.4+serving.655956a" },
-    { name = "mlx-cuda-12", marker = "sys_platform == 'linux' and extra == 'cuda'", specifier = "==0.32.4+serving.655956a" },
-    { name = "mlx-cuda-12", marker = "sys_platform == 'linux' and extra == 'cuda12'", specifier = "==0.32.4+serving.655956a" },
-    { name = "mlx-cuda-13", marker = "sys_platform == 'linux' and extra == 'cuda13'", specifier = "==0.32.4+serving.655956a" },
-    { name = "mlx-metal", marker = "sys_platform == 'darwin'", specifier = "==0.32.4+serving.655956a" },
+    { name = "mlx-cpu", marker = "sys_platform == 'linux' and extra == 'cpu'", specifier = "==0.32.4+serving.005fe7a2" },
+    { name = "mlx-cuda-12", marker = "sys_platform == 'linux' and extra == 'cuda'", specifier = "==0.32.4+serving.005fe7a2" },
+    { name = "mlx-cuda-12", marker = "sys_platform == 'linux' and extra == 'cuda12'", specifier = "==0.32.4+serving.005fe7a2" },
+    { name = "mlx-cuda-13", marker = "sys_platform == 'linux' and extra == 'cuda13'", specifier = "==0.32.4+serving.005fe7a2" },
+    { name = "mlx-metal", marker = "sys_platform == 'darwin'", specifier = "==0.32.4+serving.005fe7a2" },
     { name = "numpy", marker = "extra == 'dev'", specifier = ">=2" },
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "torch", marker = "extra == 'dev'", specifier = ">=2.9" },
@@ -639,10 +639,10 @@ wheels = [
 
 [[package]]
 name = "mlx-metal"
-version = "0.32.4+serving.655956a"
-source = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-655956a/mlx_metal-0.32.4%2Bserving.655956a-py3-none-macosx_26_0_arm64.whl" }
+version = "0.32.4+serving.005fe7a2"
+source = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx_metal-0.32.4%2Bserving.005fe7a2-py3-none-macosx_26_0_arm64.whl" }
 wheels = [
-    { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-655956a/mlx_metal-0.32.4%2Bserving.655956a-py3-none-macosx_26_0_arm64.whl", hash = "sha256:cf63c338fd347477eb7b3097dede30691cc03d152e40ba051f4a0b32d0558863" },
+    { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx_metal-0.32.4%2Bserving.005fe7a2-py3-none-macosx_26_0_arm64.whl", hash = "sha256:88ee1465ca29667d0d597ff7b1cdab4a607439552ca5ed9a408346266b55e003" },
 ]
 
 [[package]]
