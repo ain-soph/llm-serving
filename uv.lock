@@ -440,7 +440,7 @@ requires-dist = [
     { name = "jiwer", specifier = ">=4.0.0" },
     { name = "mflux", git = "https://github.com/ain-soph/mflux?rev=80da340abd432ea1ffd4e287b577736b7a605c3c" },
     { name = "mlx", url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx-0.32.4%2Bserving.005fe7a2-cp315-cp315-macosx_26_0_arm64.whl" },
-    { name = "mlx-audio", git = "https://github.com/ain-soph/mlx-audio?rev=cd4be996745184e395b8ed47ef93586e6b738e2a" },
+    { name = "mlx-audio", git = "https://github.com/ain-soph/mlx-audio?rev=4b19e6ef6bc8b616c97c67790a833d161a534f77" },
     { name = "mlx-lm", specifier = ">=0.32.2" },
     { name = "mlx-metal", url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx_metal-0.32.4%2Bserving.005fe7a2-py3-none-macosx_26_0_arm64.whl" },
     { name = "mlx-qwen3-asr", extras = ["aligner"], git = "https://github.com/ain-soph/mlx-qwen3-asr?rev=38568173399a013b2856fc480a2dc06604d7a2e5" },
@@ -599,7 +599,7 @@ provides-extras = ["dev", "cuda", "cuda12", "cuda13", "cpu"]
 [[package]]
 name = "mlx-audio"
 version = "0.6.6"
-source = { git = "https://github.com/ain-soph/mlx-audio?rev=cd4be996745184e395b8ed47ef93586e6b738e2a#cd4be996745184e395b8ed47ef93586e6b738e2a" }
+source = { git = "https://github.com/ain-soph/mlx-audio?rev=4b19e6ef6bc8b616c97c67790a833d161a534f77#4b19e6ef6bc8b616c97c67790a833d161a534f77" }
 dependencies = [
     { name = "anyio" },
     { name = "certifi" },
