@@ -27,11 +27,13 @@ h3.c `70f657e` 起，零拷贝 DiT 默认按 block 建、放 Metal buffer（每 
 
 ```text
 <models>/minimax-h3/
-  FL2VA/    text_encoder/、video_vae/、audio_vae/、processor/、tokenizer/、transformer-int8/（页对齐）
-  Ref2VA/   processor/、tokenizer/、transformer-int8/（页对齐）；text_encoder、video_vae、audio_vae 链接到 ../FL2VA
+  FL2VA/    text_encoder-int8/、video_vae/、audio_vae/、processor/、tokenizer/、transformer-int8/（页对齐）
+  Ref2VA/   processor/、tokenizer/、transformer-int8/（页对齐）；video_vae、audio_vae 链接到 ../FL2VA
 ```
 
-运行时只读 `transformer-int8/`，不需要官方 BF16 `transformer/`（每份约 66 GB）。两个检查点合计约 125.6 GB。
+运行时只读 `transformer-int8/` 和 `text_encoder-int8/`，不需要官方 BF16 `transformer/`（每份约 66 GB）和 BF16 `text_encoder/`（62 GB）。
+`text_encoder-int8/` 里的权重是 H3 图片模型的 INT8 convrot 文本编码器文件（同一份 Qwen3-VL 权重，符号链接，不另占空间），
+h3.c `6c3a53e` 起按 W8A16 运行（8 位权重、BF16 激活）；`H3_TE=bf16` 可强制用 BF16 文本编码器（要先下载）。
 
 ## 准备步骤
 
@@ -43,7 +45,7 @@ H3=".local/src/h3-<commit 前 12 位>"          # tools/native.py h3 构建出�
 hf download MiniMaxAI/MiniMax-H3 --local-dir "$M"
 
 # 2. （可选，省空间）Ref2VA 的 text_encoder、video_vae、audio_vae 与 FL2VA 相同：先比对，再换成符号链接
-for d in text_encoder video_vae audio_vae; do diff -rq "$M/FL2VA/$d" "$M/Ref2VA/$d"; done
+for d in video_vae audio_vae; do diff -rq "$M/FL2VA/$d" "$M/Ref2VA/$d"; done
 #    比对无差异后：mv "$M/Ref2VA/$d" 到别处，再 ln -s "../FL2VA/$d" "$M/Ref2VA/$d"
 
 # 3. DiT 打包为 INT8（逐位校验），然后页对齐（逐字节校验后原子替换）
@@ -52,9 +54,18 @@ for v in FL2VA Ref2VA; do
 done
 python3 "$H3/tools/align_int8_pack.py" "$M/FL2VA/transformer-int8" "$M/Ref2VA/transformer-int8"
 
-# 4. 确认无误后可删除 BF16 transformer（每份约 66 GB）；以后重新打包时再下载：
-#    hf download MiniMaxAI/MiniMax-H3 --include "FL2VA/transformer/*" "Ref2VA/transformer/*" --local-dir "$M"
+# 4. 文本编码器：直接用 H3 图片模型已页对齐的 INT8 文件（见 docs/h3-image.md），配置文件取自官方 text_encoder/
+I="$HOME/models/minimax-h3-image/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.aligned16k.safetensors"
+mkdir -p "$M/FL2VA/text_encoder-int8"
+cp "$M/FL2VA/text_encoder/config.json" "$M/FL2VA/text_encoder-int8/"
+ln -s "$I" "$M/FL2VA/text_encoder-int8/model.safetensors"
+echo '{"source": "minimax-h3-image INT8 convrot text encoder", "precision": "W8A16"}' > "$M/FL2VA/text_encoder-int8/h3-te-int8.json"
+
+# 5. 确认无误后可删除 BF16 transformer（每份约 66 GB）和 BF16 text_encoder（62 GB）；需要时再下载：
+#    hf download MiniMaxAI/MiniMax-H3 --include "FL2VA/transformer/*" "Ref2VA/transformer/*" "FL2VA/text_encoder/*" --local-dir "$M"
 ```
+
+- 有 `text_encoder-int8/h3-te-int8.json` 时默认用 INT8 文件；`H3_QWEN_W8A16` 可按层类改走 W8A8（实测都不更快，不建议）。
 
 - `align_int8_pack.py` 把每个文件改写为普通 safetensors：整页大小的张量排在前面，每个都从 16 KiB 页开始，可以零拷贝；
   每行 scale 等小张量放在后面，加载时照常拷贝。已对齐的文件会跳过。

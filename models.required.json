@@ -87,6 +87,9 @@
     "mammoth-1-mix8/quant.json",
     "mammoth-1-mix8/readout.json",
     "qwen-image-2.1/te-q8/model.safetensors",
-    "qwen-image-2.1/te-q8/config.json"
+    "qwen-image-2.1/te-q8/config.json",
+    "minimax-h3/FL2VA/text_encoder-int8/model.safetensors",
+    "minimax-h3/FL2VA/text_encoder-int8/config.json",
+    "minimax-h3/FL2VA/text_encoder-int8/h3-te-int8.json"
   ]
 }

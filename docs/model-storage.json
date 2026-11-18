@@ -111,15 +111,6 @@
       "GB": 49.320268,
       "allocated_bytes": 49340702720
     },
-    "minimax-h3-video-and-stream-shared": {
-      "relative_paths": [
-        "minimax-h3"
-      ],
-      "files": 192,
-      "bytes": 125621855478,
-      "GB": 125.621855,
-      "allocated_bytes": 125622181888
-    },
     "video-dit-FL2VA": {
       "relative_paths": [
         "minimax-h3/FL2VA/transformer-int8"
@@ -284,6 +275,17 @@
       "bytes": 29689004742,
       "GB": 29.689005,
       "note": "Pre-quantized per-class mix (decisions/jev/save_mix.py); the official BF16 shards are only needed to rebuild it."
+    },
+    "minimax-h3-video": {
+      "relative_paths": [
+        "minimax-h3"
+      ],
+      "measured_on": "2026-11-18",
+      "files": 171,
+      "bytes": 58896929573,
+      "GB": 58.89693,
+      "allocated_bytes": 58897289216,
+      "note": "FL2VA + Ref2VA (shared VAEs). The text encoder is a symlink to the H3 Image INT8 file (counted under minimax-h3-image); the BF16 text encoder (62 GB) and BF16 DiTs are not needed."
     }
   },
   "current_directory_inventory_including_comparison_models": {

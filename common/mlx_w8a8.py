@@ -4,7 +4,7 @@ W8A8 (as ComfyUI "int8_convrot", used by h3-image-mlx and our mflux fork for Qwe
 by a block-diagonal Hadamard matrix (256-wide groups along the input dimension) and quantized to int8 with one float32
 scale per output row. At run time the activations get the same rotation and a per-row int8 quantization, so the
 rotations cancel in the product: y = (q(x H) q(W H)^T) * x_scale * w_scale ~ x W^T. The GEMM runs on the M5
-TensorOps INT8 path (mlx-serve kernel, w8a8_kernels/). Projections that read the same input (q/k/v, gate/up) share
+TensorOps INT8 path (mlx-serve kernel, now in MLX: mx.fast.convrot_*). Projections that read the same input (q/k/v, gate/up) share
 one activation quantization.
 
 Zero-copy: `save` writes a standard safetensors file whose large tensors start on a page; `load` maps it read-only
@@ -12,109 +12,34 @@ and wraps those tensors as MLX arrays without a copy (the GPU reads the page cac
 anonymous memory for them and the kernel may drop the pages under pressure).
 """
 import os
-from functools import cache
-from pathlib import Path
 
 import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 
-KERNELS = Path(__file__).resolve().parent / "w8a8_kernels"
 GROUP = 256
 
 _H4 = np.ones((4, 4), dtype=np.float32)
 np.fill_diagonal(_H4[:, ::-1], -1)
 H256 = mx.array(np.kron(np.kron(_H4, _H4), np.kron(_H4, _H4)) / 16)
 
-# One threadgroup per row, one thread per position in a 256-wide group; H256 = H4 (x) H4 (x) H4 (x) H4 with
-# H4 = ones - 2 * antidiagonal, so each base-4 digit is a 4-point butterfly. Same kernel as the mflux fork.
-_ROTATE_QUANTIZE = """
-    const uint t = thread_position_in_threadgroup.x;
-    const ushort lane = thread_index_in_simdgroup;
-    const uint row = threadgroup_position_in_grid.y;
-    const uint K = x_shape[1];
-    const uint groups = K / 256;
-    threadgroup float buf[256];
-    threadgroup float red[8];
-    float v[MAX_GROUPS];
-    float amax = 0.0f;
-    device const T* xr = x + (size_t)row * K;
-    for (uint g = 0; g < groups; ++g) {
-        float a = float(xr[g * 256 + t]);
-        for (uint s = 1; s < 256; s *= 4) {
-            buf[t] = a;
-            threadgroup_barrier(mem_flags::mem_threadgroup);
-            const uint k = (t / s) % 4, base = t - k * s;
-            a = buf[base] + buf[base + s] + buf[base + 2 * s] + buf[base + 3 * s] - 2.0f * buf[base + (3 - k) * s];
-            threadgroup_barrier(mem_flags::mem_threadgroup);
-        }
-        a *= 0.0625f;
-        v[g] = a;
-        amax = max(amax, fabs(a));
-    }
-    amax = simd_max(amax);
-    if (lane == 0) red[simdgroup_index_in_threadgroup] = amax;
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    amax = red[0];
-    for (uint i = 1; i < 8; ++i) amax = max(amax, red[i]);
-    const float scale = max(amax / 127.0f, 1e-20f);
-    device int8_t* qr = xq + (size_t)row * K;
-    for (uint g = 0; g < groups; ++g) qr[g * 256 + t] = int8_t(clamp(rint(v[g] / scale), -127.0f, 127.0f));
-    if (t == 0) xs[row] = scale;
-"""
-
-
-@cache
-def _gemm_kernel():
-    return mx.fast.metal_kernel(
-        name="msv_w8a8_gemm",
-        input_names=["xq", "wq", "xs", "ws"],
-        output_names=["y"],
-        header=(KERNELS / "mpp_tensor_ops.metal").read_text(),
-        source=(KERNELS / "w8a8_gemm_body.metal").read_text() + "\n" + (KERNELS / "w8a8_epi_plain.metal").read_text(),
-    )
-
-
-@cache
-def _rotate_quantize_kernel():
-    return mx.fast.metal_kernel(name="convrot_rotate_quantize", input_names=["x"], output_names=["xq", "xs"],
-                                source=_ROTATE_QUANTIZE)
+# The kernels live in MLX (ain-soph/mlx `serving`, mx.fast.convrot_*): the fused rotate + quantize kernel and the
+# TensorOps INT8 GEMM (mlx-serve's, MIT) with edge tiles kept inside their tensors; float product elsewhere.
 
 
 def rotate_quantize(x):
-    """Per-row int8 quantization of x H256 (x: rows x K, K a multiple of 256) with float32 scales.
-
-    The int8 rows are allocated up to a multiple of 128 (the largest GEMM tile height) so that the GEMM never
-    reads past them; the extra rows are not written and only feed output rows that are never stored."""
-    rows, k = x.shape
-    groups = k // GROUP
-    return _rotate_quantize_kernel()(
-        inputs=[x], template=[("T", x.dtype), ("MAX_GROUPS", 1 << (groups - 1).bit_length())],
-        grid=(GROUP, rows, 1), threadgroup=(GROUP, 1, 1),
-        output_shapes=[(-(-rows // 128) * 128, k), (rows,)], output_dtypes=[mx.int8, mx.float32])
+    """Per-row int8 quantization of x H256 (x: rows x K, K a multiple of 256) with float32 scales. The int8 rows are
+    allocated up to a multiple of 128 (the largest GEMM tile height); the extra rows only feed rows never stored."""
+    return mx.fast.convrot_quantize(x)
 
 
 def gemm(xq, xs, weight, scale, dtype):
-    rows, n = xs.shape[0], weight.shape[0]
-    bm = 128 if rows < 8192 else 64
-    bn, bk = 8192 // bm, 64
-    if n < bn:
-        # narrower than one column tile, which the kernel cannot place inside the weight: float product
-        acc = xq[:rows].astype(mx.float32) @ weight.astype(mx.float32).T
-        return (acc * xs[:, None] * scale[None, :]).astype(dtype)
-    (y,) = _gemm_kernel()(
-        inputs=[xq, weight, xs, scale], template=[("BM", bm), ("BN", bn), ("BK", bk), ("T", dtype)],
-        grid=((n + bn - 1) // bn * 128, (rows + bm - 1) // bm, 1), threadgroup=(128, 1, 1),
-        output_shapes=[(rows, n)], output_dtypes=[dtype])
-    return y
+    return mx.fast.convrot_matmul_quantized(xq, xs, weight, scale, dtype)
 
 
 def quantize_weight(w):
     """(out, in) float weight -> int8 rows of W H256 and float32 per-row scales (float32 math)."""
-    out, k = w.shape
-    rotated = (w.astype(mx.float32).reshape(-1, GROUP) @ H256).reshape(out, k)
-    scale = mx.maximum(mx.max(mx.abs(rotated), axis=-1) / 127, 1e-20)
-    return mx.clip(mx.round(rotated / scale[:, None]), -127, 127).astype(mx.int8), scale
+    return mx.fast.convrot_quantize_weight(w)
 
 
 # The last input quantized: q/k/v (and gate/up) receive the same array, so it is rotated and quantized once.

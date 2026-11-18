@@ -30,9 +30,9 @@
 | 图片 | `qwen-image-2.1-turbo` | mflux fork | W8A8 DiT + W8A16 文本编码器 | 1024² 7.8 s（经 API，中位）；2048² 约 43 s（8 步，融合前） | 生成期 wired 6.7–9.0 GB | 26.80 GB¹ |
 | 图片 | `qwen-image-2.1` | mflux fork | 同上 | 1024² 约 28 s（40 步） | 同上 | 同上¹ |
 | 图片 | `qwen-image-2.1-turbo-pe` | mflux fork | 同 Turbo | 先由聊天模型改写提示词：文生图 36.3 s、编辑 27.6 s（中位） | 同上 | 同上¹ |
-| 视频＋音频 | `minimax-h3-video`（旧名 `-stream` 为别名） | h3.c fork | INT8 DiT（零拷贝）、BF16 VAE 计算 | fast 768p：5 s 片段 165–170 s；15 s 片段 758 s | standard 768p wired +14.3 GB（按 block 释放）；DiT GPU 峰值 22.20／33.00 GiB（fast） | 125.62 GB² |
+| 视频＋音频 | `minimax-h3-video`（旧名 `-stream` 为别名） | h3.c fork | INT8 DiT（零拷贝）、W8A16 文本编码器、BF16 VAE 计算 | fast 768p：5 s 片段 165–170 s；15 s 片段 758 s | standard 768p wired +14.3 GB（按 block 释放）；DiT GPU 峰值 22.20／33.00 GiB（fast） | 58.90 GB² |
 
-¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享文本编码器和 VAE。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。
+¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享 VAE；文本编码器链接到 H3 图片的 INT8 文件，不另计。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。
 
 ## 文本：Qwen3.8 Flash-Next（Strata）
 
@@ -667,6 +667,20 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 - 三种方式输出逐字节相同（MD5 512² 83c86a26…，768p f47bacea…）。
 - 选零拷贝常驻：速度与流式相同（512² 去噪还快 2.6%，流式每个 block 要等一次命令缓冲区）；流式的 wired 低，但视频渲染独占整个内存池，低 wired 用不上；两者页缓存相同（同一份 INT8 文件）。
 - 因此只保留 `minimax-h3-video` 一个入口，`minimax-h3-video-stream` 作为别名仍可用。
+**2026-11-18：文本编码器与 H3 图片共用 INT8 文件，W8A16**（h3.c `d53d4ab`／`6c3a53e`；HT；M5 Ultra，独占；3 条提示词 30／37／176 token；误差 = 输出对 BF16 的相对 RMS）
+
+| 配置 | 文本编码耗时 | 相对 RMS（p1／p2／p3） | token 余弦最小值 |
+| --- | ---: | --- | ---: |
+| BF16（原） | 3.0–3.7 s | — | — |
+| **全部 W8A16（上线）** | **2.4–2.5 s** | **0.57%／0.38%／0.46%** | **0.9996** |
+| 全部 W8A8 | 2.4–2.9 s | 1.47%／1.46%／1.50% | 0.9948 |
+| 只有 down 用 W8A8 | 2.4–2.6 s | 1.85%／1.79%／1.48% | 0.9971 |
+
+- 同一份权重：视频 BF16 与图片文件的 embed／norm／视觉塔逐位相同，按 convrot 重新量化后 INT8 码 ≥ 99.99998% 相同；两边都只用前 50 层。
+- 这一阶段受权重读取限制（每层 487 MB，token 很少），W8A8 没有任何一类更快，down 还是主要误差源 → 按原则全部 W8A16。其余单类 W8A8 结果都在 0.38–0.93% 之间。
+- 端到端（768p 124 帧 standard，seed 1234）：DiT 256.0 → 256.0 s；文本编码 3.27 → 3.10 s（含加载）；每次渲染读取的文本编码器权重 49 → 24 GB（分配 46.9 → 24.4 GiB）；对 BF16 文本编码器 PSNR 28.0 dB（舍入级改动的参照约 26 dB），构图、动作相同。首帧／Ref2VA 正常出片（PSNR 19.8／24.1 dB，构图一致）。
+- 视频不再需要 62 GB 的 BF16 文本编码器。
+
 **2026-11-17：零拷贝 DiT 按 block 释放**（h3.c `70f657e`，`H3_DIT_STREAM_WEIGHTS`；BS；T2V standard，seed 42）
 
 | 配置 | 去噪 | wired 峰值增量 | MD5 |
@@ -892,7 +906,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 
 ## 运行时：MLX fork（ain-soph/mlx `serving`）
 
-统一环境从 2026-11-18 起使用 MLX fork 的 wheel（现为 `0.32.4+serving.655956a`，GitHub Release，由 fork 的 CI 在 macOS 26 上构建）。
+统一环境从 2026-11-18 起使用 MLX fork 的 wheel（现为 `0.32.4+serving.005fe7a2`，GitHub Release，由 fork 的 CI 在 macOS 26 上构建）。
 fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下游不再各自维护副本（MF）。
 
 | 改动 | 开关 | 结果 |
@@ -912,7 +926,8 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 
 - 稳态每次请求 0.40 s，几种方式一样；`MLX_CACHE_LIMIT_MB=256` 时请求后缓存 309 MB（默认 873 MB），打分不变。
 - 切换前后完整 `tools/regress` 都是 52 PASS／1 SKIP；`common/mlx_w8a8.py` 的 `save`／`load` 改调本体接口（241 → 190 行），新旧文件互读逐字节相同。
-- 计划中（未实现）：INT8 W8A8 矩阵乘收进本体（替代 mflux、h3-image-mlx、`common/` 三处副本）、head_dim 256 的融合注意力。
+- **ConvRot W8A8 进本体**（`mx.fast.convrot_quantize`／`convrot_quantize_weight`／`convrot_matmul`／`convrot_matmul_quantized`，M5 TensorOps INT8，非 M5 浮点回退）：mflux、h3-image-mlx 和本仓库 `common/` 的三份内核副本删除，改调本体。与旧副本对比，量化值、scale、输出逐字节相同，速度相同（例 4096×3072×12288：2.095 → 2.080 ms；16384×12288×3072：9.479 → 9.489 ms）；完整 regress 切换前后都是 55 PASS／1 SKIP。
+- 计划中（未实现）：head_dim 256 的融合注意力。
 
 ## 遗漏检查的完成情况（2026-11-18）
 
@@ -951,7 +966,7 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 | Qwen ASR + 对齐器 | 6.543 GB | 6.543 GB | 4.703 + 1.840 |
 | H3 Image | 49.320 GB | 49.320 GB | 只保留页对齐版本 |
 | Qwen-Image-2.1（3 个入口） | 26.804 GB | — | 文本编码器用 W8A16（10.91 GB）；BF16 文本编码器（17.53 GB）只作转换来源与回退；BF16 DiT 和撤下的 INT8 文本编码器已删 |
-| H3 Video（FL2VA + Ref2VA） | 125.622 GB | 125.622 GB | 共享文本编码器和 VAE |
+| H3 Video（FL2VA + Ref2VA） | 58.897 GB | 58.897 GB | 共享 VAE；文本编码器链接到 H3 图片的 INT8 文件（原 BF16 62 GB 已删） |
 
 视频 DiT 原始约 66.280 GB／检查点（当时逐张量报告），现 INT8 每份 23.914 GB（22.27 GiB），约省 42.366 GB（−63.9%）；只针对 DiT，不是整个视频目录。旧报告的“62 → 22 GB”混用了 GiB，以这里为准。
 
@@ -1012,6 +1027,7 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 | DQ | 11-18，预量化存盘 `decisions/jev/results/dq1-1118-0056` | `decisions/cases.py` + 16.1K 长日志（加载时量化 vs 存盘，逐位比较）；16,342 token 直接服务 |
 | DC | 11-17，Decider 逐类 `evals/w8a8/decider-prof/p1`～`p3`、`deploy-1` | 2K／8K／32.6K token |
 | IA | 11-17，INT8 逐类复查 `evals/int8-principle/u3`～`u6` | 重排／嵌入 4B 与 8B、elephant、Qwen-Image、H3 图片与视频 |
+| HT | 11-18，H3 视频文本编码器 INT8 `h3-video/te-int8/runs/` | 3 条提示词逐层类；768p 124 帧端到端 |
 | BS | 11-17，H3 视频按 block 释放 `bench/streamw/s1-1117-1612`，上线 `h3-video-streamw-deploy-1117-1629` | 512² 56 帧、768p 124 帧，standard |
 | EP | 11-17，EmbeddingGemma 精度 `deploy/embedding-dtype-1117/` | 短查询、8000 token、64 × 400、4 × 8000、SciFact 全库 |
 | AQ | 11-17，ASR 逐类检查 `asr/w8a8/results/whisper-1117-2105`、`qwen-1117-2128`，上线 `deploy-1117-2150` | en100／zh100／mix60／long_en／long_zh |
