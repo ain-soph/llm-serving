@@ -98,8 +98,8 @@ class DeploymentTests(unittest.TestCase):
             health = plistlib.loads((output / "app.llm-serving.health.plist").read_bytes())
             self.assertEqual(health["StartInterval"], 600)
             self.assertNotIn("KeepAlive", health)
-            args = shlex.split(asr["models"]["sov-transcribe-1"]["cmd"])
-            self.assertEqual(args[args.index("--model") + 1], str(models / "sov-transcribe-1/mlx-q8"))
+            self.assertNotIn("sov-transcribe-1", asr["models"])          # retired 2026-11-18
+            self.assertNotIn("nemotron-3.5-transcribe", asr["models"])
             qwen = yaml.safe_load((output / "conf.d/qwen-image.yaml").read_text())
             command = shlex.split(qwen["macros"]["qwen-image-cmd"])
             self.assertEqual(command[:2], [str(root / ".venv/bin/python"), str(root / "qwen-image/server.py")])

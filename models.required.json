@@ -35,7 +35,6 @@
     "qwen3-tts/1.7B-CustomVoice",
     "qwen3-tts/1.7B-Base",
     "qwen3-tts/1.7B-VoiceDesign",
-    "sov-transcribe-1/mlx-q8",
     "elephant-1-mix8",
     "mammoth-1-mix8"
   ],
@@ -43,7 +42,6 @@
     "strata-mtp/mtp-q2_0.gguf",
     "embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf",
     "embeddinggemma-2/ggml-org/mmproj-embeddinggemma-2-BF16.gguf",
-    "nemotron-3.5-transcribe-30b-a4b-gguf/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-AD-IQ4_NL.gguf",
     "qwen-image-2.1/base/model_index.json",
     "qwen-image-2.1/base/transformer/config.json",
     "qwen-image-2.1/turbo/model_index.json",

@@ -1,18 +1,5 @@
+# nemotron-3.5-transcribe and sov-transcribe-1 were retired 2026-11-18 (code kept: asr/sov, tools/nemo.sh, docs/sov.md).
 models:
-  "nemotron-3.5-transcribe":
-    name: "Nemotron 3.5 Transcribe 30B-A4B"
-    capabilities:
-      in: [audio]
-      out: [text]
-      disableAuto: true
-    concurrencyLimit: 4
-    cmd: @ROOT@/tools/nemo.sh ${PORT}
-    checkEndpoint: /ready
-    ttl: 600
-    capacities:
-      gpu: 26000
-    evict_cost: 10
-
   "whisper-large-v3":
     name: "Whisper large-v3"
     capabilities:
@@ -59,24 +46,4 @@ models:
     ttl: 600
     capacities:
       gpu: 10000            # as the exact entry (MLX peak 3.78 vs 4.59 GB)
-    evict_cost: 10
-
-  # Salesforce SOV-Transcribe-1 (Whisper large-v3 encoder + Gemma 4 26B-A4B decoder) via the mlx-audio fork; decoder
-  # 8-bit Q8_0-style (asr/sov/quantize.py), encoder BF16. English + fr/de/es/it/pt/nl only (language=zh -> 400),
-  # up to 30 min per request; srt/vtt/verbose_json via Qwen3-ForcedAligner-0.6B. Wired peak +32079 MiB (16-min audio,
-  # verbose_json): it does not fit next to the chat model, which is unloaded while it runs.
-  "sov-transcribe-1":
-    name: "SOV-Transcribe-1 (English/European)"
-    capabilities:
-      in: [audio]
-      out: [text]
-      disableAuto: true
-    concurrencyLimit: 4
-    cmd: >
-      @PYTHON@
-      @ROOT@/asr/sov/server.py --port ${PORT} --model-id sov-transcribe-1 --model @MODELS@/sov-transcribe-1/mlx-q8 --aligner @MODELS@/qwen3-forcedaligner-0.6b
-    checkEndpoint: /health
-    ttl: 600
-    capacities:
-      gpu: 36000
     evict_cost: 10

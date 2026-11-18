@@ -10,7 +10,7 @@
 | Open WebUI | 语音转文字 | 引擎 OpenAI，模型 `qwen3-asr-1.7b`（或更快的 `qwen3-asr-1.7b-int8`） |
 | Open WebUI | 出图／编辑 | 图片连接 → 网关；默认 `qwen-image-2.1-turbo`，可选 `-turbo-pe`、`qwen-image-2.1`、`minimax-h3-image` |
 | Open WebUI | 检索 | 嵌入 `embeddinggemma-2`；混合检索 + 重排 `qwen3-reranker-4b-int8`（TOP_K 20 → 6） |
-| LobeChat | 对话、出图、TTS、ASR | 自定义 OpenAI 兼容提供方指向网关，按类型添加模型 ID（图片、`qwen3-tts`、`qwen3-tts-design`、`sov-transcribe-1`） |
+| LobeChat | 对话、出图、TTS、ASR | 自定义 OpenAI 兼容提供方指向网关，按类型添加模型 ID（图片、`qwen3-tts`、`qwen3-tts-design`） |
 | OpenClaw | TTS | `tts.provider = openai`，`baseUrl` 网关，`model` `qwen3-tts`，`speakerVoice` `vivian`，`responseFormat` mp3 |
 | 任何 MCP 客户端 | 工具 | `mcp/server.py`（见下） |
 

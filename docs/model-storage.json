@@ -83,15 +83,6 @@
       "GB": 8.529493,
       "allocated_bytes": 8545677312
     },
-    "nemotron-3.5-transcribe": {
-      "relative_paths": [
-        "nemotron-3.5-transcribe-30b-a4b-gguf"
-      ],
-      "files": 4,
-      "bytes": 21349082363,
-      "GB": 21.349082,
-      "allocated_bytes": 21349089280
-    },
     "whisper-large-v3": {
       "relative_paths": [
         "whisper-large-v3-mlx"
@@ -274,17 +265,6 @@
       "allocated_bytes": 12226981888,
       "note": "Three entries; the speech tokenizer is one file hard-linked into each variant."
     },
-    "sov-transcribe-1": {
-      "relative_paths": [
-        "sov-transcribe-1/mlx-q8"
-      ],
-      "measured_on": "2026-11-17",
-      "files": 14,
-      "bytes": 29770403604,
-      "GB": 29.770404,
-      "allocated_bytes": 29770428416,
-      "note": "Plus the shared Qwen3-ForcedAligner-0.6B (counted under qwen3-asr-1.7b)."
-    },
     "elephant-1": {
       "relative_paths": [
         "elephant-1-mix8"
@@ -336,12 +316,6 @@
       "bytes": 18486562252,
       "GB": 18.486562,
       "allocated_bytes": 18492936192
-    },
-    "nemotron-3.5-transcribe-30b-a4b-gguf": {
-      "files": 4,
-      "bytes": 21349082363,
-      "GB": 21.349082,
-      "allocated_bytes": 21349089280
     },
     "whisper-large-v3-mlx": {
       "files": 4,

@@ -1,5 +1,7 @@
 # SOV-Transcribe-1：权重准备与服务
 
+> 2026-11-18 起已下线（不在路由模板里，权重已删）。代码保留；重新上线：按下文下载并转换权重，再把入口加回 `templates/conf.d/asr.yaml`。
+
 服务 `asr/sov/server.py` 用 mlx-audio fork（commit 固定在 `uv.lock`）运行 Salesforce SOV-Transcribe-1（Apache-2.0；
 Whisper large-v3 编码器 + Gemma 4 26B-A4B MoE 解码器），接口与其他语音转写模型相同：`POST /v1/audio/transcriptions`，
 json / text / srt / vtt / verbose_json。路由模板：`templates/conf.d/asr.yaml` 的 `sov-transcribe-1`。

@@ -26,8 +26,6 @@
 | 语音转写 | `qwen3-asr-1.7b`（默认） | mlx-qwen3-asr fork | BF16 文件／FP16 运行 | en100 c1 15.4 s；WER 1.48% | wired +6.6 GB | 6.543 GB |
 | 语音转写 | `qwen3-asr-1.7b-int8` | 同上 | 解码器 + lm_head W8A16（加载时量化） | en100 11.8 s（进程内，默认入口同条件 15.1 s）；WER 1.48% | MLX 峰值 3.78 GB（默认 4.59） | 同上 |
 | 语音转写 | `whisper-large-v3` | mlx-whisper fork | FP16 | en100 c1 22.8 s；WER 2.80% | wired +4.5 GB | 3.084 GB |
-| 语音转写 | `nemotron-3.5-transcribe` | NeMo-Speech.cpp Metal | AD-IQ4_NL + F16 编码器 | en100 c1 29.4 s；WER 1.43% | wired +21.2 GB | 21.35 GB |
-| 语音转写 | `sov-transcribe-1` | mlx-audio fork | 解码器 8-bit（Q8_0 式）+ BF16 编码器 | en100 c1 32.5 s；WER 2.20%；仅英文和 6 种欧洲语言 | wired +32079 MiB | 29.77 GB |
 | 图片 | `minimax-h3-image` | h3-image-mlx fork | INT8 ConvRot（W8A8） | DiT 去噪 1024² 2.00 s；2048² 8.14 s；4096² 56.4 s（6 步） | DiT wired +1733／+2374 MiB | 49.32 GB |
 | 图片 | `qwen-image-2.1-turbo` | mflux fork | W8A8 DiT + W8A16 文本编码器 | 1024² 7.8 s（经 API，中位）；2048² 约 43 s（8 步，融合前） | 生成期 wired 6.7–9.0 GB | 26.80 GB¹ |
 | 图片 | `qwen-image-2.1` | mflux fork | 同上 | 1024² 约 28 s（40 步） | 同上 | 同上¹ |
@@ -446,7 +444,7 @@
 
 ## 语音转写
 
-**2026-11-17 复查与 SOV 上线**（AS；独占 GPU、直连 HTTP、c1 墙钟，含音频解码；不含加载）
+**2026-11-17 复查与 SOV 上线**（Nemotron、SOV 已于 2026-11-18 下线，下表保留作记录）（AS；独占 GPU、直连 HTTP、c1 墙钟，含音频解码；不含加载）
 
 | 入口 | 适用 | en100 WER | zh100 CER | mix60 MER | long_en WER | long_zh CER | en100 c1 | long_en 用时 | wired 峰值 | 磁盘 |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -933,8 +931,8 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 | mammoth-1 | 29.69 GB | 29.69 GB | 按层类预量化（`mammoth-1-mix8`）；官方 BF16 已删，重建见 decisions.md |
 | Qwen3-TTS（3 个变体） | 12.220 GB | — | 编解码器硬链接成一份 |
 | CosyVoice3（已下线） | 0 | — | 权重已删（原 2.711 GB），恢复时重新下载 |
-| SOV-Transcribe-1 | 29.770 GB | — | 8-bit；官方 BF16（53.3 GB）已删，重新转换时再下载 |
-| Nemotron | 21.349 GB | 21.349 GB | decoder 19.679 + encoder 1.670 |
+| SOV-Transcribe-1（已下线） | 0 | — | 2026-11-18 下线，8-bit 权重（29.770 GB）已删；重新上线见 `docs/sov.md` |
+| Nemotron（已下线） | 0 | — | 2026-11-18 下线，GGUF（21.349 GB）已删；重新下载 AtomicChat GGUF，启动脚本 `tools/nemo.sh` |
 | Whisper MLX | 3.084 GB | 3.084 GB | FP16 |
 | Qwen ASR + 对齐器 | 6.543 GB | 6.543 GB | 4.703 + 1.840 |
 | H3 Image | 49.320 GB | 49.320 GB | 只保留页对齐版本 |

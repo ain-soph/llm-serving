@@ -24,8 +24,6 @@
 | 决策 | `mammoth-1` | 同上 | 27B，同样按层类量化；加载时卸下聊天模型 |
 | 语音转写 | `qwen3-asr-1.7b`、`-int8` | [mlx-qwen3-asr fork](https://github.com/ain-soph/mlx-qwen3-asr/tree/serving) | 默认；中文、中英混合；强制对齐器给词级时间戳；`-int8` 解码器 W8A16，快 1.27–1.31× |
 | 语音转写 | `whisper-large-v3` | [mlx-whisper fork](https://github.com/ain-soph/mlx-examples/tree/serving/whisper) | 多语种 |
-| 语音转写 | `nemotron-3.5-transcribe` | NeMo-Speech.cpp | 英文、说话人分离 |
-| 语音转写 | `sov-transcribe-1` | [mlx-audio fork](https://github.com/ain-soph/mlx-audio/tree/serving) | 仅英文和 6 种欧洲语言；不能与聊天模型共存 |
 | 语音合成 | `qwen3-tts`、`-clone`、`-design` | mlx-audio fork | `/v1/audio/speech`：预设音色（含四川话、北京话）、声音克隆、声音设计；边生成边输出 |
 | 图片生成／编辑 | `minimax-h3-image` | [h3-image-mlx fork](https://github.com/ain-soph/h3-image-mlx/tree/serving) | W8A8，零拷贝，融合内核；各尺寸与聊天模型共存 |
 | 图片生成／编辑 | `qwen-image-2.1-turbo`、`qwen-image-2.1-turbo-pe`、`qwen-image-2.1` | [mflux fork](https://github.com/ain-soph/mflux/tree/serving) | W8A8 DiT + W8A16 文本编码器；8／40 步；最多 10 张参考图、遮罩、透明 PNG、提示词增强；非商用许可 |
