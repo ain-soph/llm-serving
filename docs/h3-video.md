@@ -7,7 +7,18 @@
 ## 入口
 
 只有一个入口 `minimax-h3-video`（常驻模式，INT8 DiT 零拷贝映射）。请求体的 `model` 可以带预设后缀
-`-best`／`-standard`／`-fast`；旧名 `minimax-h3-video-stream` 仍被接受，作为别名走同一模式。
+`-best`／`-standard`／`-turbo`／`-fast`；旧名 `minimax-h3-video-stream` 仍被接受，作为别名走同一模式。
+
+| 预设 | 计算 | 1344×768 5 s |
+| --- | --- | ---: |
+| `best` | 50 层、每步完整、密集注意力，精确 | 约 12 分钟 |
+| `standard`（默认） | 45 层、reuse 2、放宽块稀疏注意力（`t0=1,r0=12,rmin=2,sink=1`） | 约 4.5–5 分钟 |
+| `turbo`（可选，需另备权重） | Turbo 蒸馏 LoRA 折进 DiT，6 步、50 层、reuse 1、放宽块稀疏 | 约 3.3–3.6 分钟 |
+| `fast` | 45 层、reuse 2、紧块稀疏 + token 削减 | 约 3 分钟 |
+
+`turbo` 只用于纯文本和首尾帧请求、最长 8 s；带参考（Ref2VA）、续写或更长的请求自动改用 `standard`，
+任务的 `settings` 里写明 `requested_preset: "turbo"` 和 `fallback` 原因。权重放在 `--models` 旁边的
+`minimax-h3-turbo/`（或 `H3_VIDEO_TURBO_MODELS`），不存在时同样退回 `standard`。准备方法见下文“Turbo 权重”。
 
 2026-11-17 起合并为一个入口：页对齐后的 INT8 DiT 用 `newBufferWithBytesNoCopy` 直接映射，常驻模式的 DiT 加载
 2.29 → 0.33 s，速度与原 SSD 流式相同，三种方式输出逐字节相同。
@@ -71,3 +82,26 @@ echo '{"source": "minimax-h3-image INT8 convrot text encoder", "precision": "W8A
   每行 scale 等小张量放在后面，加载时照常拷贝。已对齐的文件会跳过。
 - 未对齐的 `transformer-int8` 也能运行（自动回退到拷贝），只是加载慢一些。
 - 打包和对齐后 doctor 只检查目录是否存在（`models.required.json` 的 `minimax-h3`），不校验内容。
+
+## Turbo 权重（可选，`turbo` 预设）
+
+[larryvrh/MiniMax-H3-Turbo-Lora](https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora)（Apache-2.0）的
+`minimax_h3_turbo_v4_step600_ema.safetensors` 离线折进 FL2VA 的 BF16 DiT，再照常打包成 INT8。它的视频/音频 shift（12/3）
+与 h3.c 的采样调度一致，引擎不需要改。只训练了 FL2VA，所以没有 Ref2VA 版本。
+
+```sh
+M="$HOME/models/minimax-h3"; T="$HOME/models/minimax-h3-turbo"
+mkdir -p "$T/src" "$T/FL2VA"
+hf download larryvrh/MiniMax-H3-Turbo-Lora minimax_h3_turbo_v4_step600_ema.safetensors --local-dir "$T/src/lora"
+hf download MiniMaxAI/MiniMax-H3 --include "FL2VA/transformer/*" --local-dir "$T/src"     # 约 62 GB，折完即删
+python3 "$H3/tools/fold_lora.py" "$T/src/FL2VA/transformer" "$T/src/lora/minimax_h3_turbo_v4_step600_ema.safetensors"
+"$H3/h3_pack_int8" "$T/src/FL2VA/transformer" "$T/FL2VA/transformer-int8" --max-steps 20
+python3 "$H3/tools/align_int8_pack.py" "$T/FL2VA/transformer-int8"
+for f in audio_vae processor text_encoder-int8 tokenizer video_vae model_index.json; do ln -s "$M/FL2VA/$f" "$T/FL2VA/$f"; done
+rm -rf "$T/src/FL2VA"                                                                       # 删 BF16 中间文件
+```
+
+- `fold_lora.py` 原地改写 BF16 分片，所以要折进一份单独下载的副本。它处理两处容易出错的地方：
+  - 官方分片的 QKV 行按 head 交错存放，LoRA 是在 `[q;k;v]` 布局上训练的，折叠前先把增量交错回去；
+  - LoRA 增量比半个 BF16 最小精度单位还小，四舍五入会把大部分增量舍掉（实测只剩 10–55%），默认改用按张量设种子的随机舍入（保留约 100%）。
+- 磁盘：INT8 包约 22 GB，其余部件是符号链接。

@@ -18,15 +18,21 @@ Endpoints:
 POST /v1/videos fields (JSON values or multipart form fields):
   prompt            required. Describe scene, action, camera, look and the desired sound.
   seconds | frames  duration; default 5 s, at most 15 s (362 frames) at any size. H3 rounds frames up to 5+17n at
-                    24 fps (5 s -> 124 frames). 1344x768: standard 5 s ~6 min, 15 s ~43 min; fast 5 s ~3 min,
-                    15 s ~13 min; best ~2x standard.
+                    24 fps (5 s -> 124 frames). 1344x768: standard 5 s ~4.5 min (15 s not measured with the wide
+                    sparse layout; dense was ~43 min); fast 5 s ~3 min, 15 s ~13 min; best 5 s ~12 min.
   size              "WxH", multiples of 32, W*H <= 768*1344 (default 1344x768; 768x1344 portrait).
   seed              integer (default random)
-  preset            three tiers, fastest first (1344x768, 5 s): "fast" (~3 min; sparse attention + token reduction,
-                    composition may drift), "standard" (default, ~6 min), "best" (all 50 blocks, every pass, dense attention,
-                    ~12 min). Old names: "quality" = best, "draft" = fast. Knobs override
-                    it: steps, reuse, layers, core_reuse, token_reduction (bool), sparse (bool: block-sparse
-                    attention), render_size ("WxH", lower internal canvas, same aspect).
+  preset            four tiers, fastest first (1344x768, 5 s): "fast" (~3 min; tight block-sparse attention + token
+                    reduction, composition may drift), "turbo" (~3.3 min; the community Turbo distillation LoRA folded
+                    into the DiT, 6 passes: sharp, close to best in look, but a different take of the prompt; text and
+                    first/last-frame renders up to 8 s only, anything else falls back to standard and the job says
+                    so in settings.fallback), "standard" (default, ~4.5 min; wide block-sparse attention: no
+                    visible defect in the hard-case study, the picture differs slightly from the exact one), "best"
+                    (exact: all 50 blocks, every pass, dense attention, ~12 min). Old names: "quality" = best,
+                    "draft" = fast. Knobs override it: steps, reuse, layers, core_reuse, token_reduction (bool),
+                    sparse (false / "dense": exact attention; "relaxed": the standard layout; "fast": the tight layout;
+                    true: the preset's own layout, "relaxed" for best), render_size ("WxH", lower internal canvas,
+                    same aspect).
   first_frame, last_frame, input_reference (= first_frame)   FL2VA keyframe images: multipart files, or in
                     JSON a base64 string / data: URL / https URL on an allowed host (H3_VIDEO_FETCH_HOSTS,
                     default empty: clients may explicitly allow their upload host).
@@ -115,7 +121,7 @@ KEEP_BYTES = 2 << 30      # ... and the oldest go first while all outputs exceed
 # entry and the old -stream name is an alias of it (old clients keep working). --mode stream still exists for tests.
 MODE_BY_MODEL = {"minimax-h3-video": "resident", "minimax-h3-video-stream": "resident"}
 MODEL_BY_MODE = {"resident": "minimax-h3-video", "stream": "minimax-h3-video"}
-MODEL_RE = re.compile(r"(minimax-h3-video(?:-stream)?)(?:-(fast|standard|best|quality|draft))?")
+MODEL_RE = re.compile(r"(minimax-h3-video(?:-stream)?)(?:-(fast|turbo|standard|best|quality|draft))?")
 LSW_URL = os.environ.get("H3_VIDEO_LSW_URL", "http://127.0.0.1:8080")       # where the hold request goes
 LSW_KEY_FILE = Path(os.environ.get("H3_VIDEO_LSW_KEY_FILE") or Path(os.environ.get("LLM_STATE_DIR", str(Path.home() / "Library/Application Support/llm-serving"))) / "api_key")
 FETCH_HOSTS = {h for h in os.environ.get("H3_VIDEO_FETCH_HOSTS", "").split(",") if h}
@@ -128,28 +134,58 @@ SHARE_TTL = 30 * 86400    # signed links stay valid 30 days after the render
 DEFAULT_CONTEXT = 3.0     # s of the earlier video an extension re-creates first (H3 Ref2VA): 3 s keeps more of the
                           # original (that part is replaced by the re-creation) and leaves up to 12 s of new content
 HOLD_WAIT_S = 15          # how long an async POST waits for its hold request to arrive
-# Three tiers, each one only removes work from the one above (2026-11-16). Times: 1344x768, 5 s, resident.
-#   best: all 50 DiT blocks, every pass computed, dense attention (MPSGraph SDPA).
-#   standard: 45 blocks, reuse 2, dense attention (the pre-2026-11-16 default).
-#   fast: standard + block-sparse attention (h3.c H3_SPARSE, int8 Q@K^T) + token reduction (pooled video tokens in
-#         blocks 4-30): mathematically approximate attention; clean pictures in tests, composition drifts. Whether
-#         standard may use sparse attention too is open (WORKLOG backlog: hard-case comparison).
+# Tiers. Times: 1344x768, 5 s.
+#   best: exact. All 50 DiT blocks, every pass computed, dense attention (MPSGraph SDPA).
+#   standard: 45 blocks, reuse 2, wide block-sparse attention ("relaxed" layout, BF16). User decision 2026-11-18 after
+#         the hard-case study (reports/h3-optimization.md: whip pan, leave and re-enter, first frame, 15 s shot):
+#         no visible defect, 0.2-3.9 dB below the noise floor of an equivalent dense kernel, ~25% faster than dense
+#         (357 -> 270 s). Before that it was dense (set "sparse": false to get that back).
+#   fast: standard with the tight sparse layout + token reduction (pooled video tokens in blocks 4-30): composition
+#         drifts (2-5 dB below the noise floor), clean pictures.
+#   turbo (user decision 2026-11-18): a separate DiT, ~/models/minimax-h3-turbo (larryvrh MiniMax-H3-Turbo-Lora v4
+#         step600 EMA folded into the FL2VA weights with h3.c tools/fold_lora.py, then INT8-packed), 6 passes, all 50
+#         blocks, reuse 1 (the distilled schedule has no redundancy to reuse), relaxed sparse layout. Measured: 768p 5 s
+#         197-218 s (standard 288-318, best 689-761); sharp, first frame kept as well as best. Not with token reduction
+#         or the tight layout (ghosted double images); 15 s shots drift (light, hair), hence the 8 s cap. The LoRA is
+#         trained on FL2VA only: Ref2VA references and continuations fall back to standard.
 PRESETS = {
-    "fast": {"steps": 20, "layers": 45, "reuse": 2, "sparse": True, "token_reduction": True},      # 5 s ~3 min, 15 s ~13
-    "standard": {"steps": 20, "layers": 45, "reuse": 2},                                            # 5 s ~6 min, 15 s ~43
-    "best": {"steps": 20, "layers": 50, "reuse": 1},                                                # ~2x standard
+    "fast": {"steps": 20, "layers": 45, "reuse": 2, "sparse": "fast", "token_reduction": True},    # 5 s ~3 min, 15 s ~13
+    "turbo": {"steps": 6, "layers": 50, "reuse": 1, "sparse": "relaxed"},                           # 5 s ~3.3 min
+    "standard": {"steps": 20, "layers": 45, "reuse": 2, "sparse": "relaxed"},                       # 5 s ~4.5 min
+    "best": {"steps": 20, "layers": 50, "reuse": 1},                                                # 5 s ~12 min
 }
 PRESET_ALIASES = {"quality": "best", "draft": "fast"}   # names used before 2026-11-16
+TURBO_MODELS = os.environ.get("H3_VIDEO_TURBO_MODELS")   # default: minimax-h3-turbo next to --models
+TURBO_MAX_SECONDS = 8.0
 DEFAULT_PRESET = "standard"
 # Every preset: video VAE in BF16 on TensorOps (H3_VAE_BF16=2, PSNR ~52 dB vs F32, 2.3x faster decode).
 H3_ENV = {"H3_VAE_BF16": "2"}
-# Sparse attention: dense for the first evaluations (layout forms there) and the first/last block; with fewer
-# than 10 passes (a custom "steps") only the first two stay dense.
+# Sparse attention (h3.c H3_SPARSE): a query block keeps the key blocks of the frames within t0 and, further away
+# in time, those within a spatial radius that halves as the distance doubles (r0 >> level, at least rmin); sink=1 also
+# keeps frame 0 for every query. Dense for the first evaluations (layout forms there) and the first/last block; with
+# fewer than 10 passes (a custom "steps") only the first two stay dense.
 # BF16 attention since 2026-11-17 (INT8 audit): int8 Q@K^T saved 5 of 160 s on a 768p 5 s fast render (DiT
 # 128.4 vs 134.2 s) with 14x the attention error (rel. RMS 0.021 vs 0.0015).
-SPARSE_ENV = {"H3_ATTN": "nax",
-              "H3_SPARSE": "t0=1,r0=4,rmin=0,sink=0,dense_head=1,dense_tail=1,dense_steps=4"}
-SPARSE_ENV_FEW_STEPS = dict(SPARSE_ENV, H3_SPARSE=SPARSE_ENV["H3_SPARSE"].replace("dense_steps=4", "dense_steps=2"))
+SPARSE_LAYOUTS = {"fast": "t0=1,r0=4,rmin=0,sink=0", "relaxed": "t0=1,r0=12,rmin=2,sink=1"}
+
+
+def sparse_env(layout, steps):
+    dense_steps = 4 if steps >= 10 else 2
+    return {"H3_ATTN": "nax",
+            "H3_SPARSE": f"{SPARSE_LAYOUTS[layout]},dense_head=1,dense_tail=1,dense_steps={dense_steps}"}
+
+
+def parse_sparse(value, preset_layout):
+    """The "sparse" knob: false / "dense" / "off" -> None (exact attention); a layout name; true -> the preset's own
+    layout, or "relaxed" where the preset is dense."""
+    text = str(value).strip().lower()
+    if text in SPARSE_LAYOUTS:
+        return text
+    if text in ("dense", "off", "none") or (not isinstance(value, bool) and text in ("0", "false", "no")):
+        return None
+    if isinstance(value, bool) or text in ("1", "true", "yes", "on"):
+        return (preset_layout or "relaxed") if parse_bool(value) else None
+    raise BadRequest(f"sparse must be true, false or one of {', '.join(SPARSE_LAYOUTS)}")
 
 log = logging.getLogger("h3-video-server")
 generate_lock = threading.Lock()
@@ -784,6 +820,19 @@ class Handler(BaseHTTPRequestHandler):
         preset_name = PRESET_ALIASES.get(preset_name, preset_name)
         if preset_name not in PRESETS:
             raise BadRequest(f"preset must be one of {', '.join(PRESETS)}")
+        requested_preset, fallback = preset_name, None
+        turbo_dir = Path(TURBO_MODELS or Path(self.server.models).parent / "minimax-h3-turbo")
+        if preset_name == "turbo":
+            if prev or any(files.get(k) for k in ("reference_images", "reference_videos", "reference_audio")):
+                fallback = ("turbo covers text and first/last-frame videos only (its LoRA is trained on FL2VA); "
+                            "references and continuations use standard")
+            elif frames > legal_frames(math.ceil(TURBO_MAX_SECONDS * FPS - 1e-9)):
+                fallback = f"turbo is limited to {TURBO_MAX_SECONDS:g} s; longer videos use standard"
+            elif not (turbo_dir / "FL2VA/transformer-int8/h3-int8-pack.json").is_file():
+                fallback = "the turbo weights are not installed; standard is used"
+            if fallback:
+                preset_name = "standard"
+        models_dir = str(turbo_dir) if preset_name == "turbo" else self.server.models
         p = dict(PRESETS[preset_name])
         p["steps"] = parse_num(fields.get("steps"), "steps", p["steps"], 1, MAX_STEPS)
         if fields.get("steps") not in (None, "") and p["steps"] < 8 and fields.get("reuse") in (None, ""):
@@ -796,7 +845,7 @@ class Handler(BaseHTTPRequestHandler):
         if fields.get("token_reduction") not in (None, ""):
             p["token_reduction"] = parse_bool(fields.get("token_reduction"))
         if fields.get("sparse") not in (None, ""):
-            p["sparse"] = parse_bool(fields.get("sparse"))
+            p["sparse"] = parse_sparse(fields.get("sparse"), p.get("sparse"))
         render = None
         if fields.get("render_size"):
             render = parse_size(fields.get("render_size"), "render_size")
@@ -830,7 +879,7 @@ class Handler(BaseHTTPRequestHandler):
         if d is None:
             d = self.server.out_dir / job_id
             d.mkdir(parents=True)
-        argv = [str(H3_BIN), "--profile", "-d", self.server.models, "-p", prompt,
+        argv = [str(H3_BIN), "--profile", "-d", models_dir, "-p", prompt,
                 "--width", str(width), "--height", str(height), "--frames", str(frames),
                 "--steps", str(p["steps"]), "--layers", str(p["layers"]), "--seed", str(seed),
                 "-o", str(d / ("segment.mp4" if prev else "video.mp4"))]
@@ -886,11 +935,12 @@ class Handler(BaseHTTPRequestHandler):
             argv += ["--ref-audio", str(f)]
         env = dict(os.environ, **H3_ENV)
         if p.get("sparse"):
-            env.update(SPARSE_ENV if p["steps"] >= 10 else SPARSE_ENV_FEW_STEPS)
+            env.update(sparse_env(p["sparse"], p["steps"]))
         job = {"id": job_id, "object": "video", "model": model_name or self.server.model_id, "status": "queued", "progress": 0,
                "created_at": int(time.time()), "seconds": round(frames / FPS, 3), "frames": frames,
                "size": f"{width}x{height}", "seed": seed,
                "settings": dict(p, preset=preset_name, mode=mode,
+                                **({"requested_preset": requested_preset, "fallback": fallback} if fallback else {}),
                                 conditioning="extension" if prev else "ref2va" if ref2va else
                                 ("fl2va" if first or last else "t2va")),
                "dir": str(d), "content_path": f"/v1/videos/{job_id}/content"}
