@@ -229,6 +229,10 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=32768, help="mlx: longest input, BOS/EOS included")
     ap.add_argument("--max-batch-tokens", type=int, default=8192, help="mlx: tokens packed into one forward pass")
     ap.add_argument("--cache-mb", type=int, default=256, help="mlx: MLX buffer cache kept between requests")
+    ap.add_argument("--mlx-dtype", choices=("float32", "bfloat16"), default="float32",
+                    help="mlx: activation dtype (float32 matches the official model to cosine 1.000000)")
+    ap.add_argument("--mlx-w8a8", nargs="?", const="all", help="mlx: int8 convrot projections, BF16 activations "
+                    "(all, or comma-separated classes of gemma2_mlx.W8A8_CLASSES)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="[embedding] %(message)s")
     if args.backend == "mlx":
@@ -285,7 +289,8 @@ def serve_mlx(args):
         from gemma2_mlx import Gemma2Embedder
         mx.set_cache_limit(args.cache_mb << 20)
         tokenizer = args.tokenizer or os.path.join(os.path.dirname(args.model), "tokenizer.json")
-        state["model"], state["mx"] = Gemma2Embedder(args.model, tokenizer), mx
+        state["model"], state["mx"] = Gemma2Embedder(args.model, tokenizer, getattr(mx, args.mlx_dtype),
+            True if args.mlx_w8a8 == "all" else tuple(args.mlx_w8a8.split(",")) if args.mlx_w8a8 else False), mx
         state["model"].forward([[2, 1]])
 
     def embed(texts):

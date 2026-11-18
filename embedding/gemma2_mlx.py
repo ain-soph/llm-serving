@@ -6,7 +6,10 @@ cosine 1.00000): bidirectional attention, symmetric sliding window (|i - j| <= 5
 feed-forward, per-layer inputs projected from the scaled token embedding, a per-layer output scale, mean pooling over
 all tokens (BOS and EOS included), the 512 -> 768 projection and L2 normalization.
 
-Weights stay BF16; activations are float32 (each weight is cast when used: the model is small, the cast is cheap).
+Weights stay BF16; activations are float32 by default (each weight is cast when used: the model is small, the cast is
+cheap). dtype=mx.bfloat16 keeps the activations in BF16 (weights used as stored; norms, RoPE and the residual scale in
+BF16, pooling and the output projection in float32); w8a8=True additionally runs every projection on int8 convrot
+weights with per-row int8 activations (common/mlx_w8a8.py), or only the classes named in w8a8 (W8A8_CLASSES). Both are measured in reports/embedding.md (2026-11-17).
 Several inputs are packed into one token stream with positions restarting per input and attention kept inside each
 input, so a batch gives the same vectors as one input at a time up to rounding. Attention runs in query chunks, so the
 largest score block is 1024 x (1024 + window) for sliding layers and ~8M scores per head for full ones; the per-layer
@@ -81,15 +84,36 @@ def read_gguf(path):
     return meta, tensors
 
 
+# projection classes for W8A8 (one class can be turned on at a time to measure its own speedup and error)
+W8A8_CLASSES = {"qkv": ("attn_q.weight", "attn_k.weight", "attn_v.weight"), "attn_out": ("attn_output.weight",),
+                "gate_up": ("ffn_gate.weight", "ffn_up.weight"), "down": ("ffn_down.weight",),
+                "ple": ("inp_gate.weight", "proj.weight")}
+
+
 class Gemma2Embedder:
-    def __init__(self, gguf_path, tokenizer_path):
+    def __init__(self, gguf_path, tokenizer_path, dtype=mx.float32, w8a8=False):
         from tokenizers import Tokenizer
         meta, w = read_gguf(gguf_path)
         a = meta["general.architecture"]
         if a != "gemma-embedding2":
             raise ValueError(f"{gguf_path}: architecture {a}, expected gemma-embedding2")
+        self.dtype = mx.bfloat16 if w8a8 else dtype
+        if self.dtype != mx.float32:
+            w = {k: v.astype(self.dtype) if v.dtype == mx.float32 else v for k, v in w.items()}
+        self.q8 = {}
+        if w8a8:
+            import sys
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "common"))
+            import mlx_w8a8
+            self._w8 = mlx_w8a8
+            classes = W8A8_CLASSES if w8a8 is True else {c: W8A8_CLASSES[c] for c in w8a8}
+            suffixes = tuple(x for v in classes.values() for x in v)
+            for k in list(w):
+                if k.startswith("blk.") and k.endswith(suffixes):
+                    self.q8[k] = mlx_w8a8.quantize_weight(w.pop(k))
+        self._xq = (None, None, None)
         self.w = w
-        mx.eval(list(w.values()))
+        mx.eval(list(w.values()), list(self.q8.values()))
         self.n_layer = meta[f"{a}.block_count"]
         self.n_embd = meta[f"{a}.embedding_length"]
         self.n_head = meta[f"{a}.attention.head_count"]
@@ -110,7 +134,13 @@ class Gemma2Embedder:
         return [e.ids for e in self.tok.encode_batch(texts, add_special_tokens=True)]
 
     def _mm(self, x, name):
-        return x @ self.w[name].astype(mx.float32).T
+        if name in self.q8:
+            wq, scale = self.q8[name]
+            if self._xq[0] is not x:      # q/k/v and gate/up read the same input: quantize it once
+                self._xq = (x, *self._w8.rotate_quantize(x.reshape(-1, x.shape[-1])))
+            _, xq, xs = self._xq
+            return self._w8.gemm(xq, xs, wq, scale, x.dtype).reshape(*x.shape[:-1], wq.shape[0])
+        return x @ self.w[name].astype(self.dtype).T
 
     def _norm(self, x, name=None):
         return mx.fast.rms_norm(x, self.w[name] if name else None, self.eps)
@@ -154,18 +184,28 @@ class Gemma2Embedder:
         o = self._mm(o.transpose(1, 0, 2).reshape(T, -1), p + "attn_output.weight")
         a = self._norm(o, p + "post_attention_norm.weight") + x
         f = self._norm(a, p + "ffn_norm.weight")
-        f = self._mm(_gelu(self._mm(f, p + "ffn_gate.weight")) * self._mm(f, p + "ffn_up.weight"), p + "ffn_down.weight")
+        f = self._mm(self._gelu(self._mm(f, p + "ffn_gate.weight")) * self._mm(f, p + "ffn_up.weight"), p + "ffn_down.weight")
         c = self._norm(f, p + "post_ffw_norm.weight") + a
-        g = _gelu(self._mm(c, p + "inp_gate.weight")) * ple
+        g = self._gelu(self._mm(c, p + "inp_gate.weight")) * ple
         c = c + self._norm(self._mm(g, p + "proj.weight"), p + "post_norm.weight")
         return c * self.w[p + "layer_output_scale.weight"]
+
+    def _gelu(self, x):
+        if self.dtype == mx.float32:
+            return _gelu(x)
+        c = self._c
+        return c(0.5) * x * (c(1.0) + mx.tanh(c(np.sqrt(2 / np.pi)) * (x + c(0.044715) * x * x * x)))
 
     def _per_layer_input(self, x0, il):
         """Layer il's slice of the per-layer inputs: RMS norm of (x0 W_il^T) / sqrt(n_embd), as llama.cpp computes
         for all layers at once (the norm is per 512-vector, so one slice at a time is the same and needs 1/24 the memory)."""
         n = self.n_per_layer
         w = self.w["per_layer_model_proj.weight"][il * n:(il + 1) * n]
-        return self._norm((x0 @ w.astype(mx.float32).T) * np.float32(1 / np.sqrt(self.n_embd)), "per_layer_proj_norm.weight")
+        return self._norm((x0 @ w.astype(self.dtype).T) * self._c(1 / np.sqrt(self.n_embd)), "per_layer_proj_norm.weight")
+
+    def _c(self, v):
+        """A constant in the activation dtype (an np.float32 scalar would promote BF16 activations to float32)."""
+        return np.float32(v) if self.dtype == mx.float32 else mx.array(v, dtype=self.dtype)
 
     def _rope_tables(self, pos, D, base):
         key = (D, base)
@@ -173,7 +213,7 @@ class Gemma2Embedder:
             inv = base ** (-np.arange(0, D, 2, dtype=np.float64) / D)
             self._tables[key] = mx.array(inv.astype(np.float32))
         ang = pos.astype(mx.float32)[:, None] * self._tables[key][None]
-        return mx.cos(ang), mx.sin(ang)
+        return mx.cos(ang).astype(self.dtype), mx.sin(ang).astype(self.dtype)
 
     def forward(self, ids_list):
         """Token id lists -> (len, dim) float32 L2-normalized embeddings, all inputs in one packed pass."""
@@ -181,17 +221,18 @@ class Gemma2Embedder:
         ids = mx.array(np.concatenate([np.asarray(i, dtype=np.int32) for i in ids_list]))
         pos = mx.array(np.concatenate([np.arange(n, dtype=np.int32) for n in lens]))
         seg = mx.array(np.repeat(np.arange(len(lens), dtype=np.int32), lens))
-        x = self.w["token_embd.weight"][ids].astype(mx.float32) * np.float32(np.sqrt(self.n_embd))
+        x = self.w["token_embd.weight"][ids].astype(self.dtype) * self._c(np.sqrt(self.n_embd))
         x0 = x
         for il in range(self.n_layer):
             x = self._layer(il, x, self._per_layer_input(x0, il), pos, seg)
             mx.eval(x)
-        x = self._norm(x, "output_norm.weight")
+        x = self._norm(x, "output_norm.weight").astype(mx.float32)
         onehot = (seg[None, :] == mx.arange(len(lens))[:, None]).astype(mx.float32)
         pooled = (onehot @ x) / mx.array(lens, dtype=mx.float32)[:, None]
-        e = self._mm(pooled, "output.weight")
+        e = pooled @ self.w["output.weight"].astype(mx.float32).T
         e = e / mx.linalg.norm(e, axis=-1, keepdims=True)
         mx.eval(e)
+        self._xq = (None, None, None)
         return e
 
 

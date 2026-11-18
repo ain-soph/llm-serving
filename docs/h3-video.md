@@ -12,6 +12,17 @@
 2026-11-17 起合并为一个入口：页对齐后的 INT8 DiT 用 `newBufferWithBytesNoCopy` 直接映射，常驻模式的 DiT 加载
 2.29 → 0.33 s，速度与原 SSD 流式相同，三种方式输出逐字节相同。
 
+h3.c `70f657e` 起，零拷贝 DiT 默认按 block 建、放 Metal buffer（每 2 个 block 提交一次），只在编码该 block 时持有它的权重：
+768p 生成期 wired 21.9 → 14.3 GB，去噪时间不变，输出逐字节相同。开关：
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `H3_DIT_STREAM_WEIGHTS` | 开 | `0` 恢复常驻（整个 DiT 的 buffer 一直存活） |
+| `H3_DIT_STREAM_BLOCKS` | 2 | 每次提交的 block 数 |
+| `H3_DIT_STREAM_INFLIGHT` | 2 | 最多在途的 command buffer 数 |
+
+权重不是零拷贝（非 M5 或未页对齐）时自动保持常驻。
+
 ## 权重目录
 
 ```text

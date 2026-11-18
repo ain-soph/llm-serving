@@ -81,7 +81,7 @@ $PY -m mflux.models.common.weights.loading.zero_copy "$M/w8a8/base" "$M/w8a8/tur
 
 - 页对齐后仍是普通 safetensors，官方工具可以照常读取。
 - Comfy 的 INT8 DiT 与我们从官方 BF16 自己转换的结果 99.99999% 逐值相同，可以直接使用。
-- 本机目录里还留着官方 BF16 DiT（页对齐），用于正确性对照；服务本身不需要它们。
+- 官方 BF16 DiT 服务不需要（本机已删）；做正确性对照时再下载 `transformer/*.safetensors`。
 
 ## 服务设置（模板里的环境变量）
 

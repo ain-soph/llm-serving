@@ -30,13 +30,13 @@
 | 语音合成 | `cosyvoice3` | mlx-audio-plus（单独环境） | 中文方言、情感指令、零样本／跨语言克隆 |
 | 图片生成／编辑 | `minimax-h3-image` | [h3-image-mlx fork](https://github.com/ain-soph/h3-image-mlx/tree/serving) | W8A8，零拷贝，融合内核；各尺寸与聊天模型共存 |
 | 图片生成／编辑 | `qwen-image-2.1-turbo`、`qwen-image-2.1-turbo-pe`、`qwen-image-2.1` | [mflux fork](https://github.com/ain-soph/mflux/tree/serving) | 8／40 步；最多 10 张参考图、遮罩、透明 PNG、提示词增强；非商用许可 |
-| 视频＋音频 | `minimax-h3-video` | [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving) | `best`／`standard`／`fast` 三档，最长 15 s；INT8 DiT 零拷贝 |
+| 视频＋音频 | `minimax-h3-video` | [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving) | `best`／`standard`／`fast` 三档，最长 15 s；INT8 DiT 零拷贝、按 block 释放 |
 
 完整 commit 固定在 `native.lock.json`（原生引擎）和 `uv.lock`（Python 包）；[原生构建脚本](tools/native.py)、[模型路由模板](templates/conf.d/)、[Strata 配置](templates/strata/) 和自写接口都在本仓库。权重准备与服务说明：[Strata](docs/strata.md)、[重排](docs/rerank.md)、[零拷贝与 W8A8 副本](docs/w8a8.md)、[决策模型](docs/decisions.md)、[SOV 语音转写](docs/sov.md)、[语音合成](docs/tts.md)、[H3 图片](docs/h3-image.md)、[Qwen-Image](docs/qwen-image.md)、[H3 视频](docs/h3-video.md)。
 
 ## 上游贡献
 
-我们在 fork 里做的改动，能独立成立的已向上游提交（均为开放状态，2026-11-17）：
+我们在 fork 里做的改动，能独立成立的已向上游提交（2026-11-17 均为开放状态）：
 
 | 上游 | PR | 内容 |
 | --- | --- | --- |
@@ -46,10 +46,11 @@
 | Anionex/h3-image-mlx | [#21](https://github.com/Anionex/h3-image-mlx/pull/21) | W8A8 GEMM 64×128 分块与 DiT 逐元素融合（输出相同） |
 | mflux-community/mflux | [#998](https://github.com/mflux-community/mflux/pull/998) | Qwen-Image-2.1 文生图也支持 `--enhance-prompt` |
 | mflux-community/mflux | [#999](https://github.com/mflux-community/mflux/pull/999) | Qwen-Image-2.1 W8A8 DiT（ComfyUI int8_convrot，M5 TensorOps） |
+| mflux-community/mflux | [#1000](https://github.com/mflux-community/mflux/pull/1000) | Qwen-Image-2.1 VAE 分条解码（1536² VAE 峰值 35.6 → 8.8 GB） |
 | ml-explore/mlx-examples | [#1464](https://github.com/ml-explore/mlx-examples/pull/1464) | Whisper 融合注意力，词级对齐按需导入 |
 | moona3k/mlx-qwen3-asr | [#32](https://github.com/moona3k/mlx-qwen3-asr/pull/32) | 贪心解码先排下一步再读当前 token |
 | Neywa-Labs/mlx-audio | [#1206](https://github.com/Neywa-Labs/mlx-audio/pull/1206) | SOV-Transcribe-1 解码同样的流水线 |
-| Niko1221/Strata | [#6183](https://github.com/Niko1221/Strata/pull/6183)（issue [#6182](https://github.com/Niko1221/Strata/issues/6182)） | Metal `--prefill auto` 让主机行与 GPU 重叠 |
+| Niko1221/Strata | issue [#6182](https://github.com/Niko1221/Strata/issues/6182) + draft PR [#6183](https://github.com/Niko1221/Strata/pull/6183) | Metal `--prefill auto` 让主机行与 GPU 重叠 |
 
 ## 安装与迁移
 

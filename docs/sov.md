@@ -19,5 +19,5 @@ hf download salesforce-sovereign-intelligence/SOV-Transcribe-1 --local-dir "$M/o
 
 - `quantize.py` 把解码器写成对称 8-bit（每 32 个权重一组，d = max|w|/127，与 llama.cpp Q8_0 同样舍入，scale 用 BF16）；
   音频编码器和投影层保持 BF16，MoE 路由保持 FP32。没用 MLX 默认的 affine 8-bit：它每组有零点偏移，误差大得多。
-- 转换需要约 30 GB 内存。确认 `mlx-q8` 可用后，`official/` 只作重新转换的来源。
+- 转换需要约 30 GB 内存。确认 `mlx-q8` 可用后可以删除 `official/`（本机已删），需要重新转换时再下载。
 - 对齐器 `qwen3-forcedaligner-0.6b` 与 `qwen3-asr-1.7b` 的准备方式相同。
