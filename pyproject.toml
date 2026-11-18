@@ -6,7 +6,9 @@ requires-python = ">=3.15,<3.16"
 dependencies = [
   "h3-image-mlx",
   "mflux",
+  # MLX from the ain-soph fork (branch serving): zero-copy safetensors loading, MLX_CACHE_LIMIT_MB
   "mlx>=0.32.4",
+  "mlx-metal",
   "mlx-lm>=0.32.2",
   "mlx-vlm>=0.8.0",
   "transformers>=5.23.0",
@@ -37,6 +39,8 @@ environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
 [tool.uv.sources]
 h3-image-mlx = { git = "https://github.com/ain-soph/h3-image-mlx", rev = "1ac2ffe3af75e4f3e862a89be26fe6f1d6996a42" }
 mflux = { git = "https://github.com/ain-soph/mflux", rev = "533e79dbd633b3b899c219b80f85620b11e6c186" }
+mlx = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-d49ec3a/mlx-0.32.4%2Bserving.d49ec3a-cp315-cp315-macosx_26_0_arm64.whl" }
+mlx-metal = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-d49ec3a/mlx_metal-0.32.4%2Bserving.d49ec3a-py3-none-macosx_26_0_arm64.whl" }
 mlx-audio = { git = "https://github.com/ain-soph/mlx-audio", rev = "cd4be996745184e395b8ed47ef93586e6b738e2a" }
 mlx-qwen3-asr = { git = "https://github.com/ain-soph/mlx-qwen3-asr", rev = "38568173399a013b2856fc480a2dc06604d7a2e5" }
 mlx-whisper = { git = "https://github.com/ain-soph/mlx-examples", rev = "46502543022c044396b44c83dd8848fcf4a1c168", subdirectory = "whisper" }
