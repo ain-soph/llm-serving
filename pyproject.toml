@@ -24,6 +24,10 @@ dependencies = [
   "psutil>=7.2.2",
   "soundfile>=0.14.0",
   "pydantic>=2.14.3",
+  # ASR evaluation scripts (asr/eval: error rates, text normalisation)
+  "jiwer>=4.0.0",
+  "whisper-normalizer>=1.0.1",
+  "zhconv>=1.4.3",
 ]
 
 [tool.uv]
