@@ -881,7 +881,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 
 ## 运行时：MLX fork（ain-soph/mlx `serving`）
 
-统一环境从 2026-11-18 起使用 MLX fork 的 wheel（`0.32.4+serving.d49ec3a`，GitHub Release，由 fork 的 CI 在 macOS 26 上构建）。
+统一环境从 2026-11-18 起使用 MLX fork 的 wheel（现为 `0.32.4+serving.655956a`，GitHub Release，由 fork 的 CI 在 macOS 26 上构建）。
 fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下游不再各自维护副本（MF）。
 
 | 改动 | 开关 | 结果 |
@@ -889,6 +889,7 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 | 零拷贝 safetensors 加载 | `mx.load(path, zero_copy=True)` 或 `MLX_ZERO_COPY_LOAD=1`（默认关） | 以页开头的张量直接映射页缓存 |
 | 页对齐保存（保持字典顺序） | `mx.save_safetensors(..., page_align=True)` | 仍是标准 safetensors |
 | GPU 缓存上限 | `MLX_CACHE_LIMIT_MB=<MiB>` | 与代码里 `mx.set_cache_limit` 效果相同 |
+| 按需读单个张量：`mx.SafetensorsFile`、`mx.load(path, keys=[...])` | `mx.SafetensorsFile(path, zero_copy=True)` | mflux 与 h3-image-mlx 的逐层流式改用它，删掉各自的映射代码；切换前后 regress 44 PASS／1 SKIP |
 
 | Qwen3-Reranker 4B 加载方式（8.04 GB，399 个张量） | MLX | 加载 | 加载后 footprint | 跑完后 footprint | 打分 |
 | --- | --- | ---: | ---: | ---: | --- |
