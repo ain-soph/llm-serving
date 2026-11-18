@@ -16,7 +16,7 @@ models:
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 3000             # wired peak +2735 MiB
+      gpu: 3500             # wired peak +2660 MiB, one 32K-token document (long documents: MLP in token chunks)
     evict_cost: 0
 
   "qwen3-reranker-4b":
@@ -28,7 +28,7 @@ models:
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 10000            # wired peak +9432 MiB
+      gpu: 10000            # wired peak +9096 MiB, one 32K-token document (long documents: MLP in token chunks)
     evict_cost: 0
 
   "qwen3-reranker-4b-int8":
@@ -42,7 +42,7 @@ models:
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 7500             # wired peak +5833 MiB all-W8A8; down_proj float since 2026-11-17: +~0.9 GB
+      gpu: 8000             # wired peak +7019 MiB, one 32K-token document (long documents: MLP in token chunks)
     evict_cost: 0
 
   "qwen3-reranker-8b":
@@ -54,7 +54,7 @@ models:
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 11000            # wired peak +9829 MiB
+      gpu: 11000            # wired peak +9373 MiB, one 32K-token document (long documents: MLP in token chunks)
     evict_cost: 0
 
   "qwen3-reranker-8b-int8":
@@ -66,5 +66,5 @@ models:
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 10000            # wired peak +9422 MiB
+      gpu: 10000            # wired peak +9225 MiB, one 32K-token document (long documents: MLP in token chunks)
     evict_cost: 0

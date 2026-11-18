@@ -58,6 +58,22 @@ class Reranker:
             del self.model.lm_head
         mx.clear_cache()
 
+    def hidden(self, ids):
+        """Final hidden states. A batch above max_batch_tokens (one long document) runs its MLP (per token, so exact) in
+        token chunks, one layer evaluated at a time, as embedding/qwen3/server.py does (2026-11-18): a 32K-token
+        document no longer needs the whole sequence's MLP intermediates at once (evals/longcache)."""
+        if ids.shape[0] * ids.shape[1] <= self.max_batch_tokens:
+            return self.inner(ids)
+        h = self.inner.embed_tokens(ids)
+        step = max(1, self.max_batch_tokens // ids.shape[0])
+        for layer in self.inner.layers:
+            h = h + layer.self_attn(layer.input_layernorm(h), "causal")
+            h = mx.concatenate([x + layer.mlp(layer.post_attention_layernorm(x))
+                                for x in (h[:, i:i + step] for i in range(0, h.shape[1], step))], axis=1)
+            mx.eval(h)
+            mlx_w8a8.release()
+        return self.inner.norm(h)
+
     def scores(self, query, docs, instruction):
         ids = [self.tok.encode(PREFIX + f"<Instruct>: {instruction}\n<Query>: {query}\n<Document>: {d}" + SUFFIX)
                for d in docs]
@@ -68,7 +84,7 @@ class Reranker:
             while end < len(order) and width * (end - start + 1) <= self.max_batch_tokens:
                 end += 1
             chunk = [ids[i] for i in order[start:end]]
-            hidden = self.inner(mx.array([x + [0] * (width - len(x)) for x in chunk]))
+            hidden = self.hidden(mx.array([x + [0] * (width - len(x)) for x in chunk]))
             last = hidden[mx.arange(len(chunk)), mx.array([len(x) - 1 for x in chunk])]
             logits = (last @ self.rows.T).astype(mx.float32)
             mx.eval(logits)
@@ -76,6 +92,7 @@ class Reranker:
             for i, (a, b) in zip(order[start:end], logits.tolist()):
                 out[i] = 1 / (1 + math.exp(-(a - b)))
             start = end
+        mx.clear_cache()        # the buffer cache (--cache-mb) only serves reuse within a request
         return out, sum(map(len, ids))
 
 

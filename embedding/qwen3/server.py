@@ -132,6 +132,7 @@ class Embedder:
             for i, row in zip(order[start:end], v.tolist()):
                 out[i] = row
             start = end
+        mx.clear_cache()        # the buffer cache (--cache-mb) only serves reuse within a request
         return out, sum(map(len, ids))
 
 
