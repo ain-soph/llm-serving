@@ -1,30 +1,21 @@
 # Perplexity Decider Flash v1.3 (Apache-2.0; Qwen3.5-4B, noncausal attention + 255-code readout) on MLX behind
 # decisions/decider/server.py: SystemOne protocol, POST /v1/systemone (llama-swap routes it by `model`).
-# The official pplx_decider package (prompts, preprocessing, calibration) is read from the checkpoint's source/ folder.
+# The official pplx_decider package (prompts, preprocessing, calibration) is read from the checkpoint's source/ folder
+# (copied into the pre-quantized directory).
 # Not included here: Drex v1.5 (needs nace-ai's llama.cpp branch) and the OpenAI /v1/decisions translator.
 models:
+  # One entry: text and images (base64 data URLs). Precision per projection class: W8A8 (int8 weights + int8
+  # activations) on attention q/k/v/o, linear-attention in_proj_qkv / in_proj_z / out_proj and MLP gate/up; down_proj
+  # FP16 (its W8A8 was most of the error for 2-5% of the time); in_proj_a/b and the vision tower FP16 (no speed-up);
+  # FP16 activations. max |dp| 0.0009 text / 0.0003 images vs the float32 reference. Weights: the pre-quantized copy
+  # written by decisions/decider/save_mix.py (docs/decisions.md), mapped zero-copy; the vision tower is mapped on the
+  # first image request, so text-only use never makes it resident.
   "pplx-decider-flash":
-    name: "Perplexity Decider Flash v1.3 (decisions, text)"
-    description: "Decision model: predicate / choice / score probabilities (text, up to 32K tokens per question)"
+    name: "Perplexity Decider Flash v1.3 (decisions)"
+    description: "Decision model (4B): predicate / choice / score probabilities, text and images, up to 32K tokens per question"
     cmd: >
       @PYTHON@ @ROOT@/decisions/decider/server.py
-      --model @MODELS@/pplx-decider-flash-v1.3 --model-id pplx-decider-flash --no-vision
-      --host 127.0.0.1 --port ${PORT}
-    capabilities:
-      in: [text]
-      out: [decisions]
-    checkEndpoint: /health
-    ttl: 1800
-    capacities:
-      gpu: 11000            # MLX peak 9.77 GiB at 32.6K tokens
-    evict_cost: 0
-
-  "pplx-decider-flash-multimodal":
-    name: "Perplexity Decider Flash v1.3 (decisions, text + images)"
-    description: "Same model with its vision tower: images (base64 data URLs) shared by every question"
-    cmd: >
-      @PYTHON@ @ROOT@/decisions/decider/server.py
-      --model @MODELS@/pplx-decider-flash-v1.3 --model-id pplx-decider-flash-multimodal
+      --model @MODELS@/pplx-decider-flash-mix8 --model-id pplx-decider-flash
       --host 127.0.0.1 --port ${PORT}
     capabilities:
       in: [text, image]
@@ -32,25 +23,5 @@ models:
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 12000            # MLX peak 10.39 GiB at 32.6K tokens
-    evict_cost: 0
-
-  # Language-model projections in W8A8, quantized at load (no extra file); the default entries stay FP16.
-  # down_proj stays FP16: its W8A8 was most of the error (max |dp| 0.0009 -> 0.024) for 2-5% of the time;
-  # in_proj_a/b and the vision tower (no speedup) stay float too.
-  "pplx-decider-flash-int8":
-    name: "Perplexity Decider Flash v1.3 (decisions, text, W8A8)"
-    description: "Text decision model with int8 weights and activations: less memory, ~1.2-1.5x faster, probabilities within ~0.015"
-    cmd: >
-      @PYTHON@ @ROOT@/decisions/decider/server.py
-      --model @MODELS@/pplx-decider-flash-v1.3 --model-id pplx-decider-flash-int8 --no-vision --w8a8
-      --w8a8-names q_proj,k_proj,v_proj,o_proj,in_proj_qkv,in_proj_z,out_proj,gate_proj,up_proj
-      --host 127.0.0.1 --port ${PORT}
-    capabilities:
-      in: [text]
-      out: [decisions]
-    checkEndpoint: /health
-    ttl: 1800
-    capacities:
-      gpu: 9000             # MLX peak 7.64 GiB at 32.6K tokens (down_proj FP16); load peak 4.87 GiB
+      gpu: 10000            # wired peak +8557 MiB: short cases, 32.6K tokens, images
     evict_cost: 0

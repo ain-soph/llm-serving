@@ -69,10 +69,12 @@ class DeploymentTests(unittest.TestCase):
             args = shlex.split(embed["models"]["voyage-4-nano"]["cmd"])
             self.assertEqual(args[args.index("--model") + 1], str(models / "voyage-4-nano/zc-bf16"))
             decide = yaml.safe_load((output / "conf.d/decisions.yaml").read_text())
-            args = shlex.split(decide["models"]["pplx-decider-flash-int8"]["cmd"])
+            self.assertEqual(list(decide["models"]), ["pplx-decider-flash"])   # one entry: stored mix, text + images
+            args = shlex.split(decide["models"]["pplx-decider-flash"]["cmd"])
             self.assertEqual(args[1], str(root / "decisions/decider/server.py"))
-            self.assertEqual(args[args.index("--model") + 1], str(models / "pplx-decider-flash-v1.3"))
-            self.assertIn("--w8a8", args)
+            self.assertEqual(args[args.index("--model") + 1], str(models / "pplx-decider-flash-mix8"))
+            self.assertNotIn("--w8a8", args)
+            self.assertNotIn("--no-vision", args)
             baselabs = yaml.safe_load((output / "conf.d/decisions-baselabs.yaml").read_text())
             self.assertEqual(list(baselabs["models"]), ["elephant-1"])   # one entry: the stored per-class mix
             args = shlex.split(baselabs["models"]["elephant-1"]["cmd"])

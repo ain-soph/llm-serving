@@ -253,14 +253,13 @@
     },
     "pplx-decider-flash": {
       "relative_paths": [
-        "pplx-decider-flash-v1.3"
+        "pplx-decider-flash-mix8"
       ],
-      "measured_on": "2026-11-17",
+      "measured_on": "2026-11-18",
       "files": 33,
-      "bytes": 9626292563,
-      "GB": 9.626293,
-      "allocated_bytes": 9626374144,
-      "note": "All three entries (text, multimodal, -int8) read the same official BF16 checkpoint."
+      "bytes": 6294239339,
+      "GB": 6.294239,
+      "note": "Pre-quantized per-class mix (decisions/decider/save_mix.py), one entry for text and images; the official checkpoint is only needed to rebuild it."
     },
     "qwen3-tts": {
       "relative_paths": [
@@ -288,25 +287,23 @@
     },
     "elephant-1": {
       "relative_paths": [
-        "elephant-1"
+        "elephant-1-mix8"
       ],
-      "measured_on": "2026-11-17",
-      "files": 15,
-      "bytes": 18841850853,
-      "GB": 18.841851,
-      "allocated_bytes": 18841886720,
-      "note": "Both entries (8-bit, W8A8) quantize the official BF16 file at load."
+      "measured_on": "2026-11-18",
+      "files": 16,
+      "bytes": 11073275344,
+      "GB": 11.073275,
+      "note": "Pre-quantized per-class mix (decisions/jev/save_mix.py); the official BF16 file is only needed to rebuild it."
     },
     "mammoth-1": {
       "relative_paths": [
-        "mammoth-1"
+        "mammoth-1-mix8"
       ],
-      "measured_on": "2026-11-17",
-      "files": 17,
-      "bytes": 54734136859,
-      "GB": 54.734137,
-      "allocated_bytes": 54734180352,
-      "note": "Both entries quantize the official BF16 shards at load."
+      "measured_on": "2026-11-18",
+      "files": 16,
+      "bytes": 29689004742,
+      "GB": 29.689005,
+      "note": "Pre-quantized per-class mix (decisions/jev/save_mix.py); the official BF16 shards are only needed to rebuild it."
     }
   },
   "current_directory_inventory_including_comparison_models": {

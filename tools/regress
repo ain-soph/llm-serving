@@ -71,6 +71,19 @@ EN_WAV, EN_REF = "en/1089-134691-0015.wav", "WORDS WAS IT THEIR COLOURS"
 ZH_WAV = "zh/aishell_00050.wav"
 
 
+def decide_image():
+    """A decision about a generated image (blue square on white, PNG data URL): the vision path of pplx-decider-flash."""
+    img = Image.new("RGB", (640, 480), "white")
+    img.paste((30, 60, 220), (200, 120, 440, 360))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return {"state": "A product photo.", "images": ["data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()],
+            "questions": {"shape": {"type": "choice", "instructions": "Which shape is shown?",
+                                    "criteria": {"circle": None, "square": None, "triangle": None}},
+                          "color": {"type": "choice", "instructions": "What is the colour of the main shape?",
+                                    "criteria": {"red": None, "green": None, "blue": None}}}}
+
+
 def case(cid, kind, model, body, quick=True, order=1, **extra):
     return {"id": cid, "kind": kind, "model": model, "body": body, "quick": quick, "order": order, **extra}
 
@@ -91,10 +104,10 @@ def cases():
     for m in ("qwen3-reranker-0.6b", "qwen3-reranker-4b", "qwen3-reranker-4b-int8", "qwen3-reranker-8b",
               "qwen3-reranker-8b-int8"):
         out.append(case(f"rerank-{m}", "rerank", m, {"query": "What is the capital of France?", "documents": DOCS}))
-    for m, order in (("pplx-decider-flash", 1), ("pplx-decider-flash-int8", 1), ("pplx-decider-flash-multimodal", 1),
-                     ("elephant-1", 1), ("drex-v1.5", 1), ("mammoth-1", 3)):
+    for m, order in (("pplx-decider-flash", 1), ("elephant-1", 1), ("drex-v1.5", 1), ("mammoth-1", 3)):
         out.append(case(f"decide-{m}", "decide", m, DECIDE, order=order))
         out.append(case(f"decide2-{m}", "decide", m, DECIDE2, quick=False, order=order))
+    out.append(case("decide-img-pplx-decider-flash", "decide", "pplx-decider-flash", decide_image(), quick=False))
     for m, order in (("qwen3-asr-1.7b", 1), ("qwen3-asr-1.7b-int8", 1), ("whisper-large-v3", 1),
                      ("nemotron-3.5-transcribe", 2), ("sov-transcribe-1", 3)):
         out.append(case(f"asr-{m}", "asr", m, {"file": EN_WAV}, order=order))

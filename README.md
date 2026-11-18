@@ -19,7 +19,7 @@
 | 嵌入 | `embeddinggemma-2`、`-multimodal` | llama.cpp | 文本常驻；多模态支持图片、音频、视频 |
 | 嵌入 | `qwen3-embedding-0.6b`／`4b`／`8b`（`4b`、`8b` 各有 `-int8`）、`voyage-4-nano` | MLX，自写服务 | 32K 输入；零拷贝；`-int8` 为 W8A8，快 1.5–1.7× |
 | 重排 | `qwen3-reranker-0.6b`／`4b`／`8b`（`4b`、`8b` 各有 `-int8`） | MLX，自写服务 | `/v1/rerank`，按长度排序批量计算；零拷贝；RAG 推荐 `4b-int8` |
-| 决策 | `pplx-decider-flash`、`-multimodal`、`-int8` | MLX 移植 | SystemOne `/v1/systemone`：判断／选择／打分概率 |
+| 决策 | `pplx-decider-flash` | MLX 移植 | SystemOne `/v1/systemone`：判断／选择／打分概率；文本与图片同一入口，按层类 W8A8，预量化存盘 |
 | 决策 | `elephant-1` | MLX 移植 + 官方 OneJev | 9B，文本，最长 16K token；按层类 W8A8 / 8-bit，预量化存盘，与聊天模型共存 |
 | 决策 | `mammoth-1` | 同上 | 27B，同样按层类量化；加载时卸下聊天模型 |
 | 语音转写 | `qwen3-asr-1.7b`、`-int8` | [mlx-qwen3-asr fork](https://github.com/ain-soph/mlx-qwen3-asr/tree/serving) | 默认；中文、中英混合；强制对齐器给词级时间戳；`-int8` 解码器 W8A16，快 1.27–1.31× |

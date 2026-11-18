@@ -33,6 +33,10 @@ TOKEN_BLOCK = 4096     # tokens per linear-attention / MLP block on one long seq
 # Language-model projections that can run W8A8 (MLXDecider(w8a8=True) takes all; a tuple of names takes those).
 W8A8_NAMES = ("q_proj", "k_proj", "v_proj", "o_proj", "in_proj_qkv", "in_proj_z", "out_proj",
               "gate_proj", "up_proj", "down_proj")
+# Pre-quantized checkpoint (save_mix.py): MIX describes the scheme, LAYERS holds the language model as quantized at load
+# (page-aligned, mapped zero-copy), VISION the vision tower (mapped on the first image request, so text-only use never
+# makes it resident), READOUT the official readout table.
+MIX, LAYERS, VISION, READOUT = "quant.json", "layers.safetensors", "vision.safetensors", "readout.safetensors"
 
 
 class MLXDecider:
@@ -48,7 +52,7 @@ class MLXDecider:
             raise ValueError("Expected a noncausal checkpoint with per-position readouts")
         self.temperature = float(config["temperature"])
         self.codes = list(config["codes"])
-        self.vision = vision
+        self.vision, self.dtype_name = vision, dtype
         self.max_length, self.batch_tokens = max_length, batch_tokens
         self.lock = threading.Lock()
         self.release = lambda: None        # to_w8a8: drops the cached activation quantization after each group
@@ -73,6 +77,77 @@ class MLXDecider:
         cfg.setdefault("vision_config", {})
         mcfg = update_module_configs(qwen3_5.ModelConfig.from_dict(cfg), qwen3_5, cfg, ["text", "vision"])
         self.model = qwen3_5.Model(mcfg)
+        target = DTYPES[dtype]
+        self.mix = load_json(ck / MIX) if (ck / MIX).exists() else None
+        self.vision_file = None
+        if self.mix:
+            if w8a8 or q8 or dtype != self.mix["dtype"]:
+                raise ValueError(f"{ck} is pre-quantized ({self.mix}): no --w8a8 / --q8-names, --dtype {self.mix['dtype']}")
+            self._load_mix(ck, target)
+        else:
+            self._load_checkpoint(ck, mcfg, target, w8a8, q8)
+        self.model.eval()      # training mode makes the gated-delta layers use the slow per-token ops path
+        self.readout = mx.load(str(ck / READOUT))["weight"].astype(mx.float32)   # [255, hidden]
+        mx.eval(self.model.language_model.parameters() if self.vision_file else self.model.parameters(), self.readout)
+        mx.clear_cache()
+        self.text = self.model.language_model.model
+
+    def _load_mix(self, ck, target):
+        """Language model from LAYERS with each linear layer swapped for the type its stored tensors belong to
+        (`.scale` = W8A8Linear, `.scales` = 8-bit W8A16); the vision tower waits for the first image (vision_weights)."""
+        weights = mlx_w8a8.load(ck / LAYERS)
+        w8a8 = [k[:-len(".scale")] for k in weights if k.endswith(".scale")]
+        q8 = {k[:-len(".scales")] for k in weights if k.endswith(".scales")}
+        if w8a8:
+            mlx_w8a8.replace(self.model, w8a8)
+            self.release = mlx_w8a8.release
+        if q8:
+            from mlx.utils import tree_unflatten
+            modules = dict(self.model.named_modules())
+            self.model.update_modules(tree_unflatten(
+                [(p, mlx_q8.layer(modules[p].weight.shape[1], modules[p].weight.shape[0])) for p in q8]))
+        if self.vision:
+            self.vision_file = ck / VISION
+        else:
+            del self.model.vision_tower
+        self.model.set_dtype(target)
+        self.model.language_model.load_weights([(k[len("language_model."):], v) for k, v in weights.items()],
+                                               strict=True)
+
+    def vision_weights(self):
+        """Map the stored vision tower on first use (zero-copy; resident from then on)."""
+        if self.vision_file:
+            self.model.vision_tower.load_weights(list(mlx_w8a8.load(self.vision_file).items()), strict=True)
+            mx.eval(self.model.vision_tower.parameters())
+            self.vision_file = None
+
+    def save_mix(self, out, source, revision=None):
+        """Write this decider (loaded from the official checkpoint, vision=True) as a pre-quantized checkpoint: the
+        language model as it is now (LAYERS), the vision tower (VISION), the readout table and the checkpoint's small
+        files and source/ (the official pplx_decider package the server imports), and MIX."""
+        import json, shutil, time
+        from mlx.utils import tree_flatten
+        out, source = Path(out), Path(source)
+        out.mkdir(parents=True, exist_ok=True)
+        for f in source.iterdir():
+            # locate-span/ is the official span-locating head, not served here ("locate" questions are rejected)
+            if f.name.startswith(".") or f.name.startswith("model") or f.name == "locate-span":
+                continue
+            (shutil.copytree if f.is_dir() else shutil.copy2)(f, out / f.name)
+        lm = self.model.language_model.parameters()
+        mlx_w8a8.save(out / LAYERS, {"language_model." + k: v for k, v in tree_flatten(lm)}, {"format": "mlx"})
+        mlx_w8a8.save(out / VISION, dict(tree_flatten(self.model.vision_tower.parameters())), {"format": "mlx"})
+        names = sorted({k.rsplit(".", 2)[-2] for k, _ in tree_flatten(lm) if k.endswith(".scale")})
+        (out / MIX).write_text(json.dumps({"w8a8": names, "dtype": self.dtype_name, "source": revision or str(source),
+                                           "written_by": "decisions/decider/save_mix.py",
+                                           "date": time.strftime("%Y-%m-%d")}, indent=1) + "\n")
+        return out
+
+    def _load_checkpoint(self, ck, mcfg, target, w8a8, q8):
+        """The official bfloat16 checkpoint, cast to `target`, with the requested projections quantized while loading."""
+        from mlx_vlm.models import qwen3_5
+        from mlx_vlm.utils import sanitize_weights
+        vision = self.vision
         weights = {}
         for f in sorted(ck.glob("model-*.safetensors")) or [ck / "model.safetensors"]:
             weights.update(mx.load(str(f)))
@@ -84,7 +159,6 @@ class MLXDecider:
         else:
             del self.model.vision_tower
         weights = sanitize_weights(qwen3_5.LanguageModel, weights, mcfg.text_config)
-        target = DTYPES[dtype]
         quantized = self.w8a8_targets(W8A8_NAMES if w8a8 is True else tuple(w8a8)) if w8a8 else set()
         q8_paths = self.q8_targets(tuple(q8), quantized) if q8 else set()
         scales = {}
@@ -104,12 +178,6 @@ class MLXDecider:
         # (the W8A8 scales stay float32).
         self.model.set_dtype(target)
         self.model.load_weights(list(weights.items()), strict=True)
-        self.model.eval()      # training mode makes the gated-delta layers use the slow per-token ops path
-        self.readout = mx.load(str(ck / "readout.safetensors"))["weight"].astype(mx.float32)   # [255, hidden]
-        mx.eval(self.model.parameters(), self.readout)
-        del weights
-        mx.clear_cache()
-        self.text = self.model.language_model.model
 
     def q8_targets(self, names, w8a8_paths):
         """Make the language-model projections named in `names` 8-bit weights + float activations (W8A16); their
@@ -213,6 +281,7 @@ class MLXDecider:
         return self.layers(self.text.embed_tokens(ids), positions, None if len(group) == 1 else lengths)
 
     def hidden_images(self, c):
+        self.vision_weights()
         ids = mx.array([c.input_ids.tolist()])
         feats = self.model.get_input_embeddings(ids, pixel_values=mx.array(c.pixel_values.float().numpy()),
                                                 image_grid_thw=mx.array(c.image_grid_thw.numpy()))
@@ -246,7 +315,7 @@ class MLXDecider:
     def decide(self, request, temperature=None):
         """The official Decider.decide() answer for one request (decision questions)."""
         if request.get("images") and not self.vision:
-            raise RequestError("this model entry is text only; use the multimodal entry for images")
+            raise RequestError("this server was started text only (--no-vision)")
         if any(isinstance(q, dict) and q.get("type") == "locate" for q in (request.get("questions") or {}).values()):
             raise RequestError("'locate' questions are not supported by this server")
         scale = self.temperature if temperature is None else float(temperature)

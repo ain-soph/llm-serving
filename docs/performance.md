@@ -19,9 +19,8 @@
 | 重排 | `qwen3-reranker-4b-int8` | 同上 | W8A8（down_proj 用 BF16） | 比精确 4B 快 1.33× | wired +5758 MiB | 4.426 GB |
 | 重排 | `qwen3-reranker-8b` | 同上 | Q8_0 等价 MLX 8-bit | 20 篇 1.80 s | wired +9829 MiB | 8.529 GB |
 | 重排 | `qwen3-reranker-8b-int8` | 同上 | W8A8 | 20 篇 1.07 s | wired +9422 MiB | 8.210 GB |
-| 决策 | `pplx-decider-flash`（`-multimodal`） | MLX 移植 | FP16（官方 BF16 转换） | 短请求 33–48 ms；32.6K token 6.3 s | MLX 峰值 9.77（10.39）GiB | 9.63 GB³ |
-| 决策 | `pplx-decider-flash-int8` | 同上 | W8A8（加载时量化；down_proj 用 FP16） | 2K／8K／32.6K token 0.175／0.783／5.560 s | MLX 峰值 7.64 GiB | 同上³ |
-| 决策 | `elephant-1` | MLX 移植 + 官方 OneJev | 按层类：W8A8，in_proj_z 用 8-bit 只量化权重；预量化存盘、零拷贝 | 短请求 0.078–0.084 s；16.3K token 3.16 s | wired 峰值 +8730 MiB | 11.09 GB⁵ |
+| 决策 | `pplx-decider-flash` | MLX 移植 | 按层类：W8A8，down_proj／视觉塔 FP16；预量化存盘、零拷贝 | 短请求 22–37 ms；图片 0.15–0.55 s；2K／8K／32.6K token 0.30／1.80／14.6 s⁷ | wired 峰值 +8557 MiB；只发文本时视觉塔不驻留 | 6.29 GB³ |
+| 决策 | `elephant-1` | MLX 移植 + 官方 OneJev | 按层类：W8A8，in_proj_z 用 8-bit 只量化权重；预量化存盘、零拷贝 | 短请求 0.078–0.084 s；16.3K token 3.16 s | wired 峰值 +8730 MiB | 11.07 GB⁵ |
 | 决策 | `mammoth-1` | 同上，27B | 按层类：W8A8，out_proj 用 8-bit 只量化权重；预量化存盘、零拷贝 | 短请求 0.20–0.21 s；16.3K token 8.9 s | wired 峰值 +27458 MiB（不能与聊天模型共存） | 29.69 GB⁵ |
 | 语音合成 | `qwen3-tts`／`-clone`／`-design` | mlx-audio fork | BF16 | 首段音频 0.08–0.14 s；实时率 0.22–0.23 | wired +4850／+5603／+5035 MiB | 12.22 GB⁴ |
 | 语音转写 | `qwen3-asr-1.7b`（默认） | mlx-qwen3-asr fork | BF16 文件／FP16 运行 | en100 c1 15.4 s；WER 1.48% | wired +6.6 GB | 6.543 GB |
@@ -35,7 +34,7 @@
 | 图片 | `qwen-image-2.1-turbo-pe` | mflux fork | 同 Turbo | 先由聊天模型改写提示词：文生图 36.3 s、编辑 27.6 s（中位） | 同上 | 同上¹ |
 | 视频＋音频 | `minimax-h3-video`（旧名 `-stream` 为别名） | h3.c fork | INT8 DiT（零拷贝）、BF16 VAE 计算 | fast 768p：5 s 片段 165–170 s；15 s 片段 758 s | standard 768p wired +14.3 GB（按 block 释放）；DiT GPU 峰值 22.20／33.00 GiB（fast） | 125.62 GB² |
 
-¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享文本编码器和 VAE。³ 三个 Decider 入口读同一个官方检查点。⁴ 三个变体合计，语音编解码器硬链接成一份。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。
+¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享文本编码器和 VAE。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份。⁷ 同一次会话里原 FP16 入口 32.6K 也要 12.7 s，比 11-17 测得的 6.3 s 慢一倍，原因待查（见决策一节）。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。
 
 ## 文本：Qwen3.8 Flash-Next（Strata）
 
@@ -210,13 +209,30 @@
 
 ## 决策：Perplexity Decider Flash
 
+**2026-11-18 现状**：只保留一个入口 `pplx-decider-flash` = 原 `-int8` 的按层类混合，加上 FP16 视觉塔（原 FP16 文本、`-multimodal`、`-int8` 三个名字合并，后两个名字不再存在）。
+量化结果预先存盘（`~/models/pplx-decider-flash-mix8`，6.29 GB，原官方检查点 9.63 GB 已删），零拷贝映射；视觉塔在第一个图片请求时才映射。
+与加载时量化逐位相同（文本 + 图片，DQ2）。同一次会话、同一环境的对比（进程内，256 MB 缓存）：
+
+| | 原 FP16（文本／`-multimodal`） | 原 `-int8`（加载时量化） | 现 `pplx-decider-flash`（存盘） |
+| --- | ---: | ---: | ---: |
+| 加载 | 1.2 s | 2.3 s | 0.5 s |
+| 短请求 | 32–48 ms | 21–30 ms | 22–37 ms |
+| 2K／8K／32.6K token | 0.32／1.77／12.70 s | 0.25／2.01／14.12 s | 0.31／2.08／15.43 s（经 HTTP 0.30／1.80／14.6 s） |
+| 图片（757／1102／3439 token） | 0.17／0.23／0.67 s | 0.14／0.19／0.53 s | 0.15／0.20／0.55 s |
+| MLX 常驻：只发文本／有图片后 | 8.46 GiB | 5.85 GiB | 5.22／5.85 GiB |
+| 与官方 float32 最大概率差：文本／图片 | 0.00048／0.00011 | 0.0009／0.00028 | 0.0009／0.00028 |
+| 容量 | 11000／12000 | 9000（仅文本） | 10000（wired 峰值 +8557 MiB） |
+
+- 注意：这次所有变体的长输入都比 11-17 慢约一倍（FP16 32.6K 6.25 → 12.7 s），而且 8K 以上 W8A8 比 FP16 慢 10–20%，与 11-17 的逐类结论相反。
+  11-17 之后换过统一环境（mlx-vlm 0.8.0）和 MLX fork（0.32.4+serving），原因未查；查清前按 11-17 的逐类结论保留混合精度。以下为 11-17 的测量。
+
 **条件**：MLX 移植（Qwen3.5-4B 骨干，非因果注意力），官方 `pplx_decider` 处理提示与校准；对照官方 float32（MPS）参考；无 decode、无 KV 复用。
 
 | 入口 | 精度 | 文本／图片最大概率差 | 短请求 | 2K／8K／32.6K token | 计算峰值 |
 | --- | --- | --- | ---: | --- | ---: |
-| `pplx-decider-flash` | FP16 | 0.00048／0.00011 | 32–56 ms | 0.227／0.953／6.253 s | 10.11 GiB |
-| `pplx-decider-flash-multimodal` | FP16 + 视觉塔 | 同上 | 图片 150–600 ms | 同上 | 10.39 GiB（32.6K） |
-| `pplx-decider-flash-int8` | W8A8 | 0.0139（从原始 BF16 量化时 0.024）／0.00025 | 21–35 ms | 0.166／0.764／5.442 s | 6.98 GiB |
+| FP16（原文本入口） | FP16 | 0.00048／0.00011 | 32–56 ms | 0.227／0.953／6.253 s | 10.11 GiB |
+| 原多模态入口 | FP16 + 视觉塔 | 同上 | 图片 150–600 ms | 同上 | 10.39 GiB（32.6K） |
+| 全部 W8A8（原 int8 入口首版） | W8A8 | 0.0139（从原始 BF16 量化时 0.024）／0.00025 | 21–35 ms | 0.166／0.764／5.442 s | 6.98 GiB |
 
 - 其他基线（2026-11-16）：12.8K token × 2 题 3.3 s，28K 4.9 s；官方 MPS 实现短请求 0.4–1.9 s、12.8K 两题 65 s（占用 30.7 GiB）。
 - 激活精度：FP16 0.00048、BF16 0.003、FP32 0.0005（与官方 FP32 的最大概率差），都没有答案变化 → 用 FP16。
@@ -269,7 +285,7 @@
 ## 决策：Base Labs elephant-1
 
 **2026-11-18 现状**：只保留一个入口 `elephant-1` = 下表的按层类混合（原 `elephant-1-int8`；全部 8-bit 只量化权重的旧默认入口已撤，`-int8` 名字不再存在）。
-量化结果预先存盘（`~/models/elephant-1-mix8`，11.09 GB，原官方 BF16 18.84 GB 已删），服务零拷贝映射：加载 2.2 s → 0.4 s，16K wired 峰值 +9151 → +8730 MiB（容量 10500 → 10000），
+量化结果预先存盘（`~/models/elephant-1-mix8`，11.07 GB，原官方 BF16 18.84 GB 已删），服务零拷贝映射：加载 2.2 s → 0.4 s，16K wired 峰值 +9151 → +8730 MiB（容量 10500 → 10000），
 答案与加载时量化逐位相同（DQ）；与官方 FP32 最大概率差 0.0077（全部 8-bit 0.0023–0.0048，全部 W8A8 0.0193），无答案变化。以下为 11-17 的测量。
 
 **条件**：MLX 移植（Qwen3.5-9B 骨干，块内双向注意力；mlx-vlm qwen3_5），官方 OneJev `qev`（@81ce62f + serve.patch）做提示词、答案槽和校准；参照官方 qev FP32（CPU）；`decisions/cases.py` 7 个请求、13 个问题（含 12.9K token 长日志）；独占 GPU，预热后。
@@ -761,7 +777,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 | `qwen3-reranker-4b-int8` | down_proj → BF16 | down 只占提速的 7%，平均分数误差降 29%，top-1 95% → 96.7% | 1.42× → 1.33× |
 | `qwen3-embedding-4b-int8` | down_proj → FP16 | down 占提速 9%，向量误差的 58% 来自它；top-10 重合 96.5% → 98.1% | 1.45× → 1.32× |
 | `elephant-1`（原 `-int8`） | in_proj_z → 8-bit 只量化权重 | 只占 1% 时间，平均概率误差减半 | 16K 慢约 1%；13 题，置信度低 |
-| `pplx-decider-flash-int8`、`mammoth-1`（原 `-int8`） | down_proj → FP16；out_proj → 8-bit | 见各自小节 | — |
+| `pplx-decider-flash`、`mammoth-1`（原 `-int8`） | down_proj → FP16；out_proj → 8-bit | 见各自小节 | — |
 | H3 图片文本编码器 | 未改（应改 down_proj 用浮点激活） | 误差几乎全来自 down_proj（0.0105／全 INT8 0.0106），2048 行以上 W8A8 反而更慢 | 普通 MLX 实现每张图多 1–2 s，需要 W8A16 内核，未做 |
 | 重排／嵌入 8B、Qwen-Image DiT、H3 图片与视频 DiT 线性层 | 不变 | 每类都提速，误差分散 | — |
 
@@ -912,8 +928,8 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 | EmbeddingGemma 全部模态 | 1.540 GB | 1.540 GB | 文本 0.558 + 投影 0.982 |
 | 重排（3 个零拷贝 + 2 个 W8A8） | 30.424 GB | — | 零拷贝 1.203 + 8.055 + 8.529，W8A8 4.426 + 8.210；`mlx-*` 源目录服务不再读取，多数已删，需要时重新下载转换 |
 | Qwen3 嵌入 + voyage（4 个零拷贝 + 2 个 W8A8） | 31.146 GB | — | 1.208 + 8.059 + 8.529 + 0.709 + 4.431 + 8.210 |
-| Perplexity Decider | 9.626 GB | 9.626 GB | 官方检查点，三个入口共用 |
-| elephant-1 | 11.09 GB | 11.09 GB | 按层类预量化（`elephant-1-mix8`）；官方 BF16 已删，重建见 decisions.md |
+| Perplexity Decider | 6.294 GB | 6.294 GB | 按层类预量化（`pplx-decider-flash-mix8`，含 `source/`）；官方检查点已删，重建见 decisions.md |
+| elephant-1 | 11.07 GB | 11.07 GB | 按层类预量化（`elephant-1-mix8`）；官方 BF16 已删，重建见 decisions.md |
 | mammoth-1 | 29.69 GB | 29.69 GB | 按层类预量化（`mammoth-1-mix8`）；官方 BF16 已删，重建见 decisions.md |
 | Qwen3-TTS（3 个变体） | 12.220 GB | — | 编解码器硬链接成一份 |
 | CosyVoice3（已下线） | 0 | — | 权重已删（原 2.711 GB），恢复时重新下载 |
@@ -977,6 +993,7 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 | EL | 11-17，elephant-1 `decisions/jev/results/s2`～`s4` | `decisions/cases.py` 13 个问题；12.9K／16.1K／31.1K token |
 | EC | 11-17，elephant-1 缓存 `decisions/jev/results/e1-*`、`e2-*` | 16,342 token + 6 个短请求 |
 | MM | 11-17，mammoth-1 `decisions/jev/results/p1`～`p8` | `decisions/cases.py` + 16.1K 长日志 |
+| DQ2 | 11-18，Decider 预量化存盘 `decisions/decider/results/dq2-1118-0116` | 7 个文本用例 + 2K／8K／32.6K + 3 个图片用例（加载时量化 vs 存盘逐位比较；FP16 对照） |
 | DQ | 11-18，预量化存盘 `decisions/jev/results/dq1-1118-0056` | `decisions/cases.py` + 16.1K 长日志（加载时量化 vs 存盘，逐位比较）；16,342 token 直接服务 |
 | DC | 11-17，Decider 逐类 `evals/w8a8/decider-prof/p1`～`p3`、`deploy-1` | 2K／8K／32.6K token |
 | IA | 11-17，INT8 逐类复查 `evals/int8-principle/u3`～`u6` | 重排／嵌入 4B 与 8B、elephant、Qwen-Image、H3 图片与视频 |

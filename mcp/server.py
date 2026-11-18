@@ -847,7 +847,7 @@ async def decide(input: str, questions: list[dict], model: str = "", images: lis
     classification, routing, moderation, triage, grading.
 
     Models: elephant-1 (default, 9B, fits next to the chat model), mammoth-1 (27B, most
-    accurate; unloads the chat model while it runs), pplx-decider-flash (fast 4B; -multimodal also reads images),
+    accurate; unloads the chat model while it runs), pplx-decider-flash (fast 4B; also reads images),
     drex-v1.5.
 
     Args:
@@ -859,7 +859,7 @@ async def decide(input: str, questions: list[dict], model: str = "", images: lis
             {"type": "score", "name": "urgency", "instructions": "...", "levels": [{"label": "low"},
              {"label": "medium"}, {"label": "high"}]} (lowest first)
         model: a decision model id from list_models; empty = elephant-1
-        images: pplx-decider-flash-multimodal only: images about the input ("att:N", ids, URLs)
+        images: pplx-decider-flash only: images about the input ("att:N", ids, URLs)
     """
     model = await pick_model("decision", model)
     content = [{"type": "input_text", "text": input}]

@@ -5,19 +5,21 @@
 提示词、预处理、概率校准用官方 `pplx_decider` 包，它随检查点发布在 `source/` 目录里；服务从那里导入，不安装
 （它固定的 torch / transformers 版本比本仓库旧）。路由模板：`templates/conf.d/decisions.yaml`。
 
-| 模型 ID | 输入 | 精度 |
-| --- | --- | --- |
-| `pplx-decider-flash` | 文本 | FP16 权重与激活（从官方 BF16 逐张量转换） |
-| `pplx-decider-flash-multimodal` | 文本 + 图片（base64 data URL） | 同上，含视觉塔 |
-| `pplx-decider-flash-int8` | 文本 | 语言模型投影 W8A8，加载时量化；`down_proj` 保持 FP16（`--w8a8-names`，[说明](w8a8.md)） |
+一个入口 `pplx-decider-flash`，文本和图片（base64 data URL）都走它。精度按投影层类选择：注意力 q/k/v/o、线性注意力
+`in_proj_qkv` / `in_proj_z` / `out_proj`、MLP gate/up 用 W8A8；`down_proj`（W8A8 误差的主要来源，只占 2–5% 的提速）、
+`in_proj_a/b` 和视觉塔（W8A8 不提速）保持 FP16；激活 FP16（[说明](w8a8.md)）。量化结果预先存盘，服务零拷贝映射；
+视觉塔在第一个图片请求时才映射，只发文本时不占内存。
 
 ## 准备步骤
 
 ```sh
-hf download perplexity-ai/pplx-decider-flash-v1.3 --local-dir "$HOME/models/pplx-decider-flash-v1.3"
+# 官方检查点只在生成预量化副本时需要，生成后可删
+hf download perplexity-ai/pplx-decider-flash-v1.3 --revision d06fb3f2d97e0a52325a0d463c450cf0338f44fe --local-dir /tmp/pplx-decider-flash-v1.3
+.venv/bin/python decisions/decider/save_mix.py /tmp/pplx-decider-flash-v1.3 "$HOME/models/pplx-decider-flash-mix8"
+rm -rf /tmp/pplx-decider-flash-v1.3
 ```
 
-权重原样使用，不需要转换（9.6 GB，含 `source/`）。
+预量化副本 6.29 GB（含 `source/`；官方的 `locate-span/` 不复制，本服务不支持 locate 问题），与加载时量化逐位相同。
 
 
 ## Base Labs elephant-1 与 mammoth-1
