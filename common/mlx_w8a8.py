@@ -86,19 +86,26 @@ def _rotate_quantize_kernel():
 
 
 def rotate_quantize(x):
-    """Per-row int8 quantization of x H256 (x: rows x K, K a multiple of 256) with float32 scales."""
+    """Per-row int8 quantization of x H256 (x: rows x K, K a multiple of 256) with float32 scales.
+
+    The int8 rows are allocated up to a multiple of 128 (the largest GEMM tile height) so that the GEMM never
+    reads past them; the extra rows are not written and only feed output rows that are never stored."""
     rows, k = x.shape
     groups = k // GROUP
     return _rotate_quantize_kernel()(
         inputs=[x], template=[("T", x.dtype), ("MAX_GROUPS", 1 << (groups - 1).bit_length())],
         grid=(GROUP, rows, 1), threadgroup=(GROUP, 1, 1),
-        output_shapes=[(rows, k), (rows,)], output_dtypes=[mx.int8, mx.float32])
+        output_shapes=[(-(-rows // 128) * 128, k), (rows,)], output_dtypes=[mx.int8, mx.float32])
 
 
 def gemm(xq, xs, weight, scale, dtype):
-    rows, n = xq.shape[0], weight.shape[0]
+    rows, n = xs.shape[0], weight.shape[0]
     bm = 128 if rows < 8192 else 64
     bn, bk = 8192 // bm, 64
+    if n < bn:
+        # narrower than one column tile, which the kernel cannot place inside the weight: float product
+        acc = xq[:rows].astype(mx.float32) @ weight.astype(mx.float32).T
+        return (acc * xs[:, None] * scale[None, :]).astype(dtype)
     (y,) = _gemm_kernel()(
         inputs=[xq, weight, xs, scale], template=[("BM", bm), ("BN", bn), ("BK", bk), ("T", dtype)],
         grid=((n + bn - 1) // bn * 128, (rows + bm - 1) // bm, 1), threadgroup=(128, 1, 1),

@@ -827,6 +827,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 - **环境**：数据来自各组件当时的环境（Strata／ASR 为 Python 3.12，图片、视频包装器为 3.15）；公开仓库的统一 3.15 环境只在重排上复测过，其余只做了导入检查，依赖验证不等于性能验收。
 - **错误率**：英文 WER（Whisper EnglishTextNormalizer），中文 CER（转简体、数字转汉字、去标点），混合 MER；按语料整体计算。TTS 用 Qwen3-ASR 回写后算错误率。
 - **W8A8 原则**：INT8 权重与激活只用在实测能提速的层或模型；不提速、只省内存的部分保持 BF16／FP16（例如撤下的 Qwen-Image INT8 文本编码器，以及不做 W8A8 的 0.6B 重排、0.6B 嵌入、voyage）。
+- **W8A8 GEMM 边缘分块**：2026-11-17 修了最后一个不满分块的越界读（`common/`、mflux `4c740d3`、h3-image-mlx `02a645c`），输出逐字节不变，本报告的数字不受影响。
 - **检索质量**：SciFact（BEIR，300 个问题、5,183 篇摘要）nDCG@10；W8A8 与原版同时与官方用例比较，以原版误差为参照。
 - **磁盘**：`stat().st_size` 逻辑大小；`model-storage.json` 另记 `st_blocks × 512`，APFS 共享 extent 未去重，不能用来精确计算可回收空间。不含源码、venv、Homebrew、uv 缓存和生成的媒体。
 
