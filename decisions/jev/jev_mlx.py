@@ -14,6 +14,7 @@ suffix token to the whole prefix and its whole suffix, so the full-attention lay
 the cache is cut at the block boundary (qev checks that boundary in `_split`); the gated-delta layers carry their
 conv / recurrent state from the prefix into each branch. Right-padded suffix keys are masked.
 """
+import json
 import os
 import sys
 import threading
@@ -24,6 +25,7 @@ import mlx.core as mx
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "OneJev"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common"))
 from qev import readout as ro                                      # noqa: E402
 from qev.calibrate import Calibration                              # noqa: E402
 from qev.engine import BranchResult, DecisionEngine, EngineInfo    # noqa: E402
@@ -38,6 +40,9 @@ def tree_map_cast(params, dtype):
 
 
 EMBED = "model.language_model.embed_tokens.weight"
+# pre-quantized checkpoint (save_mix.py): MIX describes the scheme, LAYERS holds the decoder layers in MLX form,
+# EMBEDS the unchanged bfloat16 embedding (and LM head when untied)
+MIX, LAYERS, EMBEDS = "quant.json", "layers.safetensors", "embeds.safetensors"
 
 
 def mapped_tensor(checkpoint, key):
@@ -75,7 +80,8 @@ class MLXJev(DecisionEngine):
         self.max_branch_tokens, self.max_request_tokens = max_branch_tokens, max_request_tokens
         self.batch_tokens = batch_tokens
         self.lock = threading.Lock()
-        self.dtype = DTYPES[dtype]
+        self.dtype, self.dtype_name = DTYPES[dtype], dtype
+        self.w8a8_skip = set(w8a8_skip or [])
         self.release = lambda: None        # w8a8: drops the cached activation quantization after each forward
         t0 = time.perf_counter()
 
@@ -99,18 +105,25 @@ class MLXJev(DecisionEngine):
         # mapped bfloat16 file (page cache, exact values).
         tied = mcfg.text_config.tie_word_embeddings
         self.embedding = mapped_tensor(ck, EMBED)
-        head = self.embedding if tied else mapped_tensor(ck, "lm_head.weight")
+        self.head = head = self.embedding if tied else mapped_tensor(ck, "lm_head.weight")
         del self.model.language_model.model.embed_tokens
         if hasattr(self.model.language_model, "lm_head"):
             del self.model.language_model.lm_head
-        files = sorted(ck.glob("model-*.safetensors")) or [ck / "model.safetensors"]
-        weights = {}
-        for f in files:
-            weights.update({k: v for k, v in mx.load(str(f)).items()
-                            if not k.startswith("model.visual.") and k not in (EMBED, "lm_head.weight")})
-        weights = sanitize_weights(self.model, weights)
-        weights = sanitize_weights(qwen3_5.LanguageModel, weights, mcfg.text_config)
-        if quant is None:
+        mix = json.loads((ck / MIX).read_text()) if (ck / MIX).exists() else None
+        if mix:
+            # pre-quantized checkpoint (save_mix.py): decoder layers exactly as _quantize left them, mapped zero-copy
+            if quant is not None or dtype != mix["dtype"]:
+                raise ValueError(f"{ck} is pre-quantized ({mix['quant']}, {mix['dtype']}): no --quant, --dtype {mix['dtype']}")
+            weights = self._mix_modules(ck)
+        else:
+            files = sorted(ck.glob("model-*.safetensors")) or [ck / "model.safetensors"]
+            weights = {}
+            for f in files:
+                weights.update({k: v for k, v in mx.load(str(f)).items()
+                                if not k.startswith("model.visual.") and k not in (EMBED, "lm_head.weight")})
+            weights = sanitize_weights(self.model, weights)
+            weights = sanitize_weights(qwen3_5.LanguageModel, weights, mcfg.text_config)
+        if quant is None and not mix:
             for k, v in weights.items():          # one tensor at a time: never two copies of every weight
                 if mx.issubdtype(v.dtype, mx.floating) and v.dtype != self.dtype:
                     weights[k] = v.astype(self.dtype)
@@ -124,11 +137,50 @@ class MLXJev(DecisionEngine):
             self._quantize(quant, w8a8_skip)
         mx.eval(self.model.parameters())
         mx.clear_cache()
+        self.quant = mix["quant"] if mix else quant
         self.info = EngineInfo(model_path=str(ck), model_type="qwen3_5", dtype=dtype, device="mlx", fork_mode="batched",
                                fork_max_abs_diff=None, transformers_version=transformers.__version__,
                                torch_version="", extra={"attention": rcfg.attention, "readout": rcfg.readout,
                                                         "calibration": self.calibration.source})
         self.load_seconds = time.perf_counter() - t0
+
+    def _mix_modules(self, ck):
+        """Tensors of a pre-quantized checkpoint (zero-copy where page-aligned), with each linear layer swapped for
+        the type its stored tensors belong to: `.scale` = W8A8Linear, `.scales` = MLX 8-bit (group 32)."""
+        import mlx.nn as nn
+        import mlx_w8a8
+        weights = mlx_w8a8.load(ck / LAYERS)
+        w8a8 = [k[:-len(".scale")] for k in weights if k.endswith(".scale")]
+        q8 = {k[:-len(".scales")] for k in weights if k.endswith(".scales")}
+        mlx_w8a8.replace(self.model, w8a8)
+        nn.quantize(self.model, group_size=32, bits=8, class_predicate=lambda p, m: p in q8)
+        if w8a8:
+            self.release = mlx_w8a8.release
+        return weights
+
+    def save_mix(self, out, source):
+        """Write this engine (loaded with --quant) as a pre-quantized checkpoint: the decoder layers as they are now
+        (LAYERS, page-aligned for zero-copy loading), the bfloat16 embedding and LM head copied unchanged (EMBEDS,
+        read through mapped_tensor as before), the small files of `source`, and MIX describing the scheme."""
+        import shutil
+        from mlx.utils import tree_flatten
+        import mlx_w8a8
+        out, source = Path(out), Path(source)
+        out.mkdir(parents=True, exist_ok=True)
+        for f in source.iterdir():
+            if f.name.startswith(".") or f.suffix == ".safetensors" or f.name == "model.safetensors.index.json":
+                continue
+            (shutil.copytree if f.is_dir() else shutil.copy2)(f, out / f.name)
+        mlx_w8a8.save(out / LAYERS, dict(tree_flatten(self.model.parameters())), {"format": "mlx"})
+        tables = {EMBED: self.embedding}
+        if self.head is not self.embedding:
+            tables["lm_head.weight"] = self.head
+        mlx_w8a8.save(out / EMBEDS, {k: mx.array(np.ascontiguousarray(v)).view(mx.bfloat16) for k, v in tables.items()},
+                      {"format": "pt"})
+        (out / MIX).write_text(json.dumps({"quant": self.quant, "w8a8_skip": sorted(self.w8a8_skip), "dtype": self.dtype_name,
+                                           "source": str(source), "written_by": "decisions/jev/save_mix.py",
+                                           "date": time.strftime("%Y-%m-%d")}, indent=1) + "\n")
+        return out
 
     def _quantize(self, quant, w8a8_skip=None):
         """8-bit weights at load, one decoder layer at a time from the lazily mapped bfloat16 file, so the bfloat16
@@ -145,7 +197,6 @@ class MLXJev(DecisionEngine):
                 mx.eval(layer.parameters())
             self.text.norm.update(tree_map_cast(self.text.norm.parameters(), self.dtype))
         elif quant == "w8a8":
-            sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common"))
             import mlx_w8a8
             names = ("q_proj", "k_proj", "v_proj", "o_proj", "in_proj_qkv", "in_proj_z", "out_proj",
                      "gate_proj", "up_proj", "down_proj")
@@ -155,6 +206,7 @@ class MLXJev(DecisionEngine):
             skip = set(w8a8_skip if w8a8_skip is not None else
                        [n for n in os.environ.get("JEV_W8A8_SKIP", "").split(",") if n])
             names = tuple(n for n in names if n not in skip)
+            self.w8a8_skip = skip
 
             def q8_pred(path, m):
                 return (isinstance(m, nn.Linear) and path.rpartition(".")[2] in skip

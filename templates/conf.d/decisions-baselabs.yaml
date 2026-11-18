@@ -5,13 +5,16 @@
 # in the mapped bf16 file, so only the 32 decoder layers are in GPU memory. Text only; state + one question
 # <= 16,384 tokens. Capacities = measured wired peak + margin.
 models:
-  # Default: 8-bit weights (MLX affine, group 32), bf16 activations; max |dp| 0.0023 vs the float32 reference.
+  # Precision per projection class: W8A8 (int8 weights + int8 activations) on every class that gets faster, the
+  # linear-attention in_proj_z at 8-bit weight-only (1% of the time, halves the mean error), in_proj_a/b bf16.
+  # max |dp| 0.0077 vs the float32 reference, no answer flips; ~1.4x the all-8-bit-weight-only speed.
+  # Weights: the pre-quantized copy written by decisions/jev/save_mix.py (docs/decisions.md), mapped zero-copy.
   "elephant-1":
     name: "Base Labs elephant-1 (decisions)"
     description: "Decision model (9B): predicate / choice / score probabilities, text, up to 16K tokens"
     cmd: >
       @PYTHON@ @ROOT@/decisions/jev/server.py
-      --model @MODELS@/elephant-1 --model-id elephant-1 --dtype bfloat16 --quant q8 --cache-mb 1024
+      --model @MODELS@/elephant-1-mix8 --model-id elephant-1 --dtype bfloat16 --cache-mb 1024
       --host 127.0.0.1 --port ${PORT}
     capabilities:
       in: [text]
@@ -19,23 +22,5 @@ models:
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 11000            # wired peak +9730 MiB at the 16,384-token limit, 1024 MB cache
-    evict_cost: 0
-
-  # W8A8 (int8 weights and activations) on the projection classes that get faster; the linear-attention in_proj_z
-  # stays 8-bit weight-only (accuracy for no speed). The default stays 8-bit weight-only.
-  "elephant-1-int8":
-    name: "Base Labs elephant-1 (decisions, W8A8)"
-    description: "Same decision model with int8 weights and activations: ~1.4x faster, probabilities within ~0.02"
-    cmd: >
-      @PYTHON@ @ROOT@/decisions/jev/server.py
-      --model @MODELS@/elephant-1 --model-id elephant-1-int8 --dtype bfloat16 --quant w8a8 --w8a8-skip in_proj_z --cache-mb 1024
-      --host 127.0.0.1 --port ${PORT}
-    capabilities:
-      in: [text]
-      out: [decisions]
-    checkEndpoint: /health
-    ttl: 1800
-    capacities:
-      gpu: 10500            # wired peak +9151 MiB, same test
+      gpu: 10000            # wired peak +8730 MiB at the 16,384-token limit, 1024 MB cache
     evict_cost: 0

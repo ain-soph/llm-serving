@@ -109,7 +109,7 @@ def main():
                                          w8a8_skip=[n for n in args.w8a8_skip.split(",") if n]).result()
     server.model_id = args.model_id
     log.info("listening on http://%s:%d (%s, %s, %s, loaded in %.1f s); MLX active %.2f GiB", args.host, args.port,
-             args.model, args.dtype, args.quant or "no quantization", server.engine.load_seconds,
+             args.model, args.dtype, server.engine.quant or "no quantization", server.engine.load_seconds,
              mx.get_active_memory() / 2**30)
     server.serve_forever()
 

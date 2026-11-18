@@ -92,8 +92,7 @@ def cases():
               "qwen3-reranker-8b-int8"):
         out.append(case(f"rerank-{m}", "rerank", m, {"query": "What is the capital of France?", "documents": DOCS}))
     for m, order in (("pplx-decider-flash", 1), ("pplx-decider-flash-int8", 1), ("pplx-decider-flash-multimodal", 1),
-                     ("elephant-1", 1), ("elephant-1-int8", 1), ("drex-v1.5", 1), ("mammoth-1", 3),
-                     ("mammoth-1-int8", 3)):
+                     ("elephant-1", 1), ("drex-v1.5", 1), ("mammoth-1", 3)):
         out.append(case(f"decide-{m}", "decide", m, DECIDE, order=order))
         out.append(case(f"decide2-{m}", "decide", m, DECIDE2, quick=False, order=order))
     for m, order in (("qwen3-asr-1.7b", 1), ("qwen3-asr-1.7b-int8", 1), ("whisper-large-v3", 1),

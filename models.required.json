@@ -36,8 +36,8 @@
     "qwen3-tts/1.7B-Base",
     "qwen3-tts/1.7B-VoiceDesign",
     "sov-transcribe-1/mlx-q8",
-    "elephant-1",
-    "mammoth-1"
+    "elephant-1-mix8",
+    "mammoth-1-mix8"
   ],
   "files": [
     "strata-mtp/mtp-q2_0.gguf",
@@ -75,11 +75,15 @@
     "qwen3-tts/1.7B-CustomVoice/model.safetensors",
     "qwen3-tts/1.7B-Base/model.safetensors",
     "qwen3-tts/1.7B-VoiceDesign/model.safetensors",
-    "elephant-1/model.safetensors",
-    "elephant-1/serve.patch",
-    "elephant-1/readout.json",
-    "mammoth-1/model.safetensors.index.json",
-    "mammoth-1/readout.json",
+    "elephant-1-mix8/layers.safetensors",
+    "elephant-1-mix8/embeds.safetensors",
+    "elephant-1-mix8/quant.json",
+    "elephant-1-mix8/serve.patch",
+    "elephant-1-mix8/readout.json",
+    "mammoth-1-mix8/layers.safetensors",
+    "mammoth-1-mix8/embeds.safetensors",
+    "mammoth-1-mix8/quant.json",
+    "mammoth-1-mix8/readout.json",
     "qwen-image-2.1/te-q8/model.safetensors",
     "qwen-image-2.1/te-q8/config.json"
   ]

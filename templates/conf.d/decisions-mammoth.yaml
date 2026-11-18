@@ -1,16 +1,19 @@
 # Base Labs mammoth-1 (MIT; Qwen3.5-27B post-trained for calibrated decisions; same architecture, readout and
 # serve.patch as elephant-1), SystemOne protocol (POST /v1/systemone). Same MLX port as elephant-1
-# (decisions/jev/jev_mlx.py, OneJev checkout: docs/decisions.md), 8-bit at load from the bfloat16 checkpoint.
+# (decisions/jev/jev_mlx.py, OneJev checkout: docs/decisions.md).
 # Text only; state + one question <= 16,384 tokens. MLX cache 4096 MB (a 16K request: 13.9 s instead of 20.0 s
 # with 256 MB). It does not fit next to the chat model, which is unloaded while it runs.
 models:
-  # Default: 8-bit weights (MLX affine, group 32), bf16 activations; max |dp| 0.0062 vs the official bf16 reference.
+  # Precision per projection class: W8A8 on every class that gets faster, except the linear-attention out_proj
+  # (2-5% of the speedup, most of the error) at 8-bit weight-only; in_proj_a/b bf16. max |dp| 0.0066 vs the official
+  # bf16 reference (all-W8A8 0.021, all-8-bit 0.0062); 1.45x short / 1.59x at 16K over all-8-bit.
+  # Weights: the pre-quantized copy written by decisions/jev/save_mix.py (docs/decisions.md), mapped zero-copy.
   "mammoth-1":
     name: "Base Labs mammoth-1 (decisions, 27B)"
     description: "Decision model (27B): predicate / choice / score probabilities, text, up to 16K tokens; unloads the chat model"
     cmd: >
       @PYTHON@ @ROOT@/decisions/jev/server.py
-      --model @MODELS@/mammoth-1 --model-id mammoth-1 --dtype bfloat16 --quant q8 --cache-mb 4096
+      --model @MODELS@/mammoth-1-mix8 --model-id mammoth-1 --dtype bfloat16 --cache-mb 4096
       --host 127.0.0.1 --port ${PORT}
     capabilities:
       in: [text]
@@ -18,23 +21,5 @@ models:
     checkEndpoint: /health
     ttl: 600
     capacities:
-      gpu: 31500            # wired peak +30439 MiB at the 16,384-token limit
-    evict_cost: 0
-
-  # W8A8 on every projection class that gets faster, except the linear-attention out_proj (2-5% of the speedup,
-  # most of the error): max |dp| 0.0066 (all-W8A8 0.021, 8-bit 0.0062); 1.45x short / 1.59x at 16K.
-  "mammoth-1-int8":
-    name: "Base Labs mammoth-1 (decisions, 27B, W8A8)"
-    description: "Same 27B decision model with int8 weights and activations: ~1.5x faster, probabilities within ~0.01"
-    cmd: >
-      @PYTHON@ @ROOT@/decisions/jev/server.py
-      --model @MODELS@/mammoth-1 --model-id mammoth-1-int8 --dtype bfloat16 --quant w8a8 --w8a8-skip out_proj --cache-mb 4096
-      --host 127.0.0.1 --port ${PORT}
-    capabilities:
-      in: [text]
-      out: [decisions]
-    checkEndpoint: /health
-    ttl: 600
-    capacities:
-      gpu: 29000            # wired peak +27817 MiB
+      gpu: 28500            # wired peak +27458 MiB at the 16,384-token limit
     evict_cost: 0

@@ -846,7 +846,7 @@ async def decide(input: str, questions: list[dict], model: str = "", images: lis
     API on local decision models). Much faster and better calibrated than asking a chat model; use it for
     classification, routing, moderation, triage, grading.
 
-    Models: elephant-1 (default, 9B, fits next to the chat model), elephant-1-int8 (faster), mammoth-1 (27B, most
+    Models: elephant-1 (default, 9B, fits next to the chat model), mammoth-1 (27B, most
     accurate; unloads the chat model while it runs), pplx-decider-flash (fast 4B; -multimodal also reads images),
     drex-v1.5.
 
