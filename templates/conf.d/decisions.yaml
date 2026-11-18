@@ -9,13 +9,14 @@ models:
   # FP16 (its W8A8 was most of the error for 2-5% of the time); in_proj_a/b and the vision tower FP16 (no speed-up);
   # FP16 activations. max |dp| 0.0009 text / 0.0003 images vs the float32 reference. Weights: the pre-quantized copy
   # written by decisions/decider/save_mix.py (docs/decisions.md), mapped zero-copy; the vision tower is mapped on the
-  # first image request, so text-only use never makes it resident.
+  # first image request, so text-only use never makes it resident. MLX cache 4096 MB during a request (cleared after
+  # it): with 256 MB every layer of a long input re-allocates its buffers (32.6K tokens 14.1 s instead of 5.6 s).
   "pplx-decider-flash":
     name: "Perplexity Decider Flash v1.3 (decisions)"
     description: "Decision model (4B): predicate / choice / score probabilities, text and images, up to 32K tokens per question"
     cmd: >
       @PYTHON@ @ROOT@/decisions/decider/server.py
-      --model @MODELS@/pplx-decider-flash-mix8 --model-id pplx-decider-flash
+      --model @MODELS@/pplx-decider-flash-mix8 --model-id pplx-decider-flash --cache-mb 4096
       --host 127.0.0.1 --port ${PORT}
     capabilities:
       in: [text, image]
@@ -23,5 +24,5 @@ models:
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 10000            # wired peak +8557 MiB: short cases, 32.6K tokens, images
+      gpu: 10000            # wired peak +8783 MiB: short cases, 25.6K / 32.6K tokens, images, 4096 MB cache
     evict_cost: 0

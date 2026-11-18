@@ -322,8 +322,12 @@ class MLXDecider:
         if not math.isfinite(scale) or scale <= 0:
             raise RequestError("temperature must be positive and finite")
         with self.lock:
-            chunks = self.encoder.plan(request, self.max_length, "separate")
-            per_chunk = self.logits(chunks)
+            try:
+                chunks = self.encoder.plan(request, self.max_length, "separate")
+                per_chunk = self.logits(chunks)
+            finally:
+                # the buffer cache (server --cache-mb) only serves reuse within a request: return it when idle
+                mx.clear_cache()
         logits = {k: v for c, rows in zip(chunks, per_chunk) for k, v in zip(c.keys, rows)}
         answers = {}
         for key, question in request["questions"].items():

@@ -93,7 +93,9 @@ def main():
     ap.add_argument("--dtype", default="float16", choices=["float16", "bfloat16", "float32"])
     ap.add_argument("--no-vision", action="store_true", help="text-only: do not load the vision tower")
     ap.add_argument("--max-length", type=int, default=32768, help="tokens per sequence (state + one question)")
-    ap.add_argument("--cache-mb", type=int, default=256, help="MLX buffer cache kept between requests")
+    ap.add_argument("--cache-mb", type=int, default=256,
+                    help="MLX buffer cache during a request (cleared after each one). Long inputs need it: at 32.6K "
+                         "tokens 256 MB makes every layer re-allocate its buffers (2.3-3.5x slower)")
     ap.add_argument("--w8a8", action="store_true", help="W8A8 language-model projections (INT8 TensorOps GEMM)")
     ap.add_argument("--w8a8-names", help="with --w8a8: comma list of the projection classes to make W8A8 "
                     "(decider_mlx.W8A8_NAMES; default all)")
