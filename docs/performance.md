@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- | --- | ---: |
 | 文本／视觉 | `qwen3.8-flash-next` | Strata Metal fork | AD-4.27 混合（3.57 bpw 主体） | prefill 2,730–2,758 tok/s（约 35K）；decode 142.4（单路）／151.2（双路合计）tok/s | wired +67,695 MiB（262K × 2 槽） | 96.94 GB |
 | 文本／视觉 | `qwen3.8-flash-next-uncensored` | Strata Metal fork | 同上 | prefill 2,522–2,544 tok/s（约 257K–260K）；续问 TTFT 0.25–0.49 s | wired +66,162 MiB（262K × 2 槽） | 96.95 GB |
-| 文本嵌入 | `embeddinggemma-2` | MLX，M5 TensorOps | BF16 权重，FP32 激活 | 16-token 查询 5.7 ms，64 × 400 token 达 54,660–55,162 tok/s（独占 GPU 内核验收） | 服务 wired 峰值增量 2741 MiB，常驻预留 3160 MiB | 0.558 GB + 32 MB 分词器 |
+| 文本嵌入 | `embeddinggemma-2` | MLX，M5 TensorOps | BF16 权重，FP32 激活 | 16-token 查询 5.6 ms，64 × 400 token 达 57,814–58,226 tok/s（独占 GPU 内核验收） | 服务 wired 峰值增量 2680 MiB，常驻预留 3160 MiB | 0.558 GB + 32 MB 分词器 |
 | 多模态嵌入 | `embeddinggemma-2-multimodal` | llama.cpp + 适配层 | BF16 | 图片 0.04–0.12 s；5 s 音频 0.035 s；4 s 视频 0.34 s | wired +2996 MiB | 1.540 GB |
 | 文本嵌入 | `qwen3-embedding-0.6b`／`-4b`／`-8b` | MLX，自写服务 | FP16／FP16／Q8_0 | 64 × 450 token 0.39／2.50／5.21 s | wired 峰值 +2705／+10323／+11026 MiB（32K 输入） | 1.21／8.06／8.53 GB |
 | 文本嵌入 | `qwen3-embedding-4b-int8`／`-8b-int8` | 同上 | W8A8（4B 的 down_proj 用 FP16） | 比精确入口快 1.32×／1.64× | 容量 8000／11500 MiB | 4.43／8.21 GB |
@@ -86,7 +86,7 @@
 
 ## 嵌入：EmbeddingGemma 2
 
-2026-11-18 起，常驻文本入口使用 MLX（`--backend mlx --mlx-dtype float32 --max-tokens 8192`，`MLX_ENABLE_TF32=0`）。文本与多模态共用 BF16 GGUF。文本服务另需 `google/embeddinggemma-2` 的 `tokenizer.json`，与 GGUF 放在同一目录。M5 Ultra 独占测试中，4 × 8000 token 达 25,503–26,349 tok/s。SciFact 对 FP32 参照的最小余弦为 0.99999636，top-10 重合 2997/3000。编码器无 decode 和 KV cache。下表保留切换前的测量。
+2026-11-18 起，常驻文本入口使用 MLX（`--backend mlx --mlx-dtype float32 --max-tokens 8192`，`MLX_ENABLE_TF32=1`）。文本与多模态共用 BF16 GGUF。文本服务另需 `google/embeddinggemma-2` 的 `tokenizer.json`，与 GGUF 放在同一目录。M5 Ultra 独占测试中，4 × 8000 token 达 35,326–35,370 tok/s。自定义 TensorOps 核保持 `relaxed_precision=false`。11 种布局，单条与批量最大分量差 4.83e-5。SciFact 对 FP32 参照的最小余弦为 0.99999644，top-10 重合 2997/3000。编码器无 decode 和 KV cache。下表保留切换前的测量。
 
 **条件**：Homebrew llama.cpp，文本 4 槽 × 8192；4 篇共 22036 token；多模态分别测图片、5 s 音频、4 s 视频。
 
