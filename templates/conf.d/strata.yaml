@@ -1,3 +1,4 @@
+# M5 Ultra 260106-token test: measured peak 70963 / 70967 MiB plus 1500 MiB margin.
 models:
   "qwen3.8-flash-next":
     name: "Qwen3.8 Flash-Next"
@@ -11,7 +12,7 @@ models:
     checkEndpoint: /health
     concurrencyLimit: 64
     capacities:
-      gpu: 71000
+      gpu: 72500
     evict_cost: 100
 
   "qwen3.8-flash-next-uncensored":
@@ -26,5 +27,5 @@ models:
     checkEndpoint: /health
     concurrencyLimit: 64
     capacities:
-      gpu: 71000
+      gpu: 72500
     evict_cost: 50

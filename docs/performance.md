@@ -59,6 +59,19 @@
 - 第一遍 26k 输入测得 1230.5 tok/s，含约 7.3 s Metal 内核编译，表中用热 shader 的 2013.8。28123 token 的 2269.5 tok/s 输入不同，不替换同输入对照。
 - 换后端的历史对比（S4，不计入 fork 收益，两边槽位、上下文、KV 精度不同）：llama.cpp → Strata 单流 59.9 → 123.2 tok/s（2.06×），长提示词 1197 → 2058 tok/s（1.72×）。
 
+### 2026-11-19 M5 Ultra 内核与加载更新
+
+AtomicChat 与 Navin AD-4.27，262144 ctx × 2 槽，KV INT8，MTP Q2_0，权重专家 IQ2_S／IQ3_S／IQ4_NL，dense Q8_0。独占 GPU，同配置 A/B，`STRATA_METAL_IQ_DEC_OPT=0`、`STRATA_METAL_W_DOT=0`。Prefill 26K 使用服务端计时，260K 使用 token 数除以 TTFT。单路四类短输入为 36–62 token，各解码 400 token；双路短输入各约 52–53 token。
+
+| 入口 | 26,177 token prefill tok/s | 260,106 token prefill tok/s | c=1 / c=2 合计解码 tok/s | 峰值 wired 增量 / 进程树 RSS |
+| --- | ---: | ---: | ---: | ---: |
+| AtomicChat | 2,285 → 2,759 | 2,149 → 2,547 | 140.0 → 142.2 / 144.8 → 146.6 | 71,024 → 70,963 MiB / 60.50 → 71.77 GiB |
+| Navin | 2,283 → 2,753 | 2,149 → 2,545 | 139.2 → 142.2 / 145.4 → 149.0 | 70,992 → 70,967 MiB / 46.60 → 71.76 GiB |
+
+- AtomicChat 的 HTTP 就绪观测为 8.44 → 4.46 s，Navin 为 22.09 → 4.66 s。A/B 按基线后候选顺序启动，页缓存会影响就绪时间。
+- 两组四类贪心回答逐字节一致，均通过 260K 检索、视觉请求和复用 26,177 个前缀 token。
+- 两档容量均为 72,500 MiB，包含至少 1,500 MiB 余量。按 82,032 MiB GPU 池计算，两个 Flash-Next 入口各占用后都剩 9,532 MiB。
+
 ## 嵌入：EmbeddingGemma 2
 
 **条件**：Homebrew llama.cpp，文本 4 槽 × 8192；4 篇共 22036 token；多模态分别测图片、5 s 音频、4 s 视频。

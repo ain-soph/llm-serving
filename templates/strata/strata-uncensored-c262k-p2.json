@@ -34,7 +34,9 @@
  "port": 18150,
  "backend": "metal",
  "env": {
-  "STRATA_METAL_STREAM": "0"
+  "STRATA_METAL_STREAM": "0",
+  "STRATA_METAL_IQ_DEC_OPT": "0",
+  "STRATA_METAL_W_DOT": "0"
  },
  "vision": {
   "exe": "@VISION_EXE@",
