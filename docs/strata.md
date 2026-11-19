@@ -1,6 +1,6 @@
 # Strata Metal 部署
 
-主要文本模型通过 Strata Metal 运行。当前路由包含 `qwen3.8-flash-next` 和 `qwen3.8-flash-next-uncensored`；两者各使用 262144 token 上下文、2 个引擎槽位、MTP，并声明 71000 MiB 的 GPU 池容量需求。这些参数来自目标 M5 Ultra 96 GiB 部署，不代表所有 Apple Silicon 都适用。
+主要文本模型通过 Strata Metal 运行。当前路由包含 `qwen3.8-flash-next` 和 `qwen3.8-flash-next-uncensored`；两者各使用 262144 token 上下文、1 个引擎槽位和 MTP，GPU 预约分别为 63,900 和 65,200 MiB。这些参数来自目标 M5 Ultra 96 GiB 部署，不代表所有 Apple Silicon 都适用。
 
 ## 源码与优化
 
@@ -17,8 +17,8 @@ Strata 自带 `serve/server.py`，主仓库直接复用它提供 HTTP 接口；�
 | [`native.lock.json`](../native.lock.json) | Strata fork commit、所需 ggml/llama.cpp commit、Metal C++ 头文件校验值 |
 | [`tools/native.py`](../tools/native.py) | 拉取固定源码，构建 Strata Metal 与视觉编码器 |
 | [`templates/conf.d/strata.yaml`](../templates/conf.d/strata.yaml) | llama-swap 的两个文本模型 ID、HTTP 启动命令和路由容量 |
-| [`templates/strata/strata-ad427-c262k-p2.json`](../templates/strata/strata-ad427-c262k-p2.json) | AtomicChat AD-4.27 的引擎参数与视觉配置 |
-| [`templates/strata/strata-uncensored-c262k-p2.json`](../templates/strata/strata-uncensored-c262k-p2.json) | Uncensored AD-4.27 的引擎参数与视觉配置 |
+| [`templates/strata/strata-ad427-c262k-p1.json`](../templates/strata/strata-ad427-c262k-p1.json) | AtomicChat AD-4.27 的引擎参数与视觉配置 |
+| [`templates/strata/strata-uncensored-c262k-p1.json`](../templates/strata/strata-uncensored-c262k-p1.json) | Uncensored AD-4.27 的引擎参数与视觉配置 |
 | [`models.required.json`](../models.required.json) | 需要另行迁移的模型目录与权重布局 |
 | [`tools/configure.py`](../tools/configure.py) | 将机器无关模板渲染成本机配置 |
 

@@ -36,6 +36,19 @@
 
 ## 文本：Qwen3.8 Flash-Next（Strata）
 
+
+**现行单槽，2026-11-19**。M5 Ultra / 96 GiB，262144 ctx，MTP Q2_0，KV INT8。AD-4.27 权重，专家 IQ2_S／IQ3_S／IQ4_NL、dense Q8_0。IQ3_S 解码与 Wsg 点积重排保持关闭。26K 为预热后服务端 prefill，260K 以输入 token 数除以 TTFT。单路负载为 36–62 token 提示、各解码 400 token，双请求各生成 400 token 并按单槽排队。
+
+| 权重 | 26,177 / 260,106 token prefill tok/s | 单路 / 两个排队请求合计解码 tok/s | 峰值 wired 增量 MiB | 进程树 RSS GiB | GPU 预约 MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| AtomicChat | 2,749.0 / 2,545.3 | 141.7 / 118.0 | 62,339 | 63.55 | 63,900 |
+| Navin | 2,747.8 / 2,545.6 | 142.0 / 119.9 | 63,603 | 59.65 | 65,200 |
+
+- 两个入口都通过 260K 检索、视觉和 26,177 token 前缀复用。四类贪心回答与各自基线逐字节一致。
+- 单路 decode 与新版双槽接近。各入口分别与图片或 ASR 共存，Qwen Image 提示词增强可回调仍在内存中的聊天模型。
+
+### 历史双槽对照
+
 **条件**：AD-4.27、262144 上下文 × 2 槽、MTP Q2_0（spec=3）、KV INT8；输入 26,106／115,855 token；热 shader。
 
 | 指标 | `qwen3.8-flash-next` | `-uncensored` |
