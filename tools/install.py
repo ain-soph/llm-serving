@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from configure import LABELS
+from configure import LABELS, SYSTEM_AND_RESIDENT_MB
 
 
 def run(args):
@@ -26,7 +26,7 @@ def main():
         limit = a.wired_limit_mb
         if not 0 < limit <= c["hardware"]["memory_mb"] - 8192:
             parser.error("Wired limit must leave at least 8192 MiB for the system")
-        if c["pool_mb"] + 4872 > limit:
+        if c["pool_mb"] + SYSTEM_AND_RESIDENT_MB > limit:
             parser.error("Configured GPU pool exceeds the requested wired limit; reconfigure the pool first")
     # Validate configs and binaries before writing outside the project.
     for name, value in c["binaries"].items():

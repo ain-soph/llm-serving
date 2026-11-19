@@ -15,6 +15,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+SYSTEM_AND_RESIDENT_MB = 2872 + 3160  # macOS and the always-loaded MLX text embedding service
 LABELS = {name: f"app.llm-serving.{name}" for name in ("router", "gateway", "files", "health")}
 
 
@@ -151,7 +152,7 @@ def main():
     p.add_argument("--public-base", default="http://127.0.0.1:8080")
     p.add_argument("--fetch-host", action="append", default=[])
     p.add_argument("--trusted-proxy", action="append", default=[])
-    p.add_argument("--pool-mb", type=int, help="Measured pool; otherwise use current wired limit minus 4872 MiB")
+    p.add_argument("--pool-mb", type=int, help=f"Measured pool; otherwise use current wired limit minus {SYSTEM_AND_RESIDENT_MB} MiB")
     p.add_argument("--preload", action="store_true")
     p.add_argument("--strata-source", type=Path)
     p.add_argument("--h3-source", type=Path)
@@ -174,7 +175,7 @@ def main():
     hw = hardware()
     if hw["system"] != "Darwin" or hw["arch"] != "arm64":
         p.error("This deployment supports macOS on Apple Silicon")
-    pool = a.pool_mb if a.pool_mb is not None else hw["wired_limit_mb"] - 4872
+    pool = a.pool_mb if a.pool_mb is not None else hw["wired_limit_mb"] - SYSTEM_AND_RESIDENT_MB
     if pool <= 0:
         p.error("No usable wired limit detected; supply --pool-mb after measuring the machine")
     # Do not silently apply measured 96-GiB-M5 settings to a smaller GPU budget.

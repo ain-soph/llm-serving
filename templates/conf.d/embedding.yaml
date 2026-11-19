@@ -4,7 +4,10 @@ models:
     description: "Text embeddings for RAG / memory search; dimensions up to 768 (Matryoshka) or padded"
     cmd: >
       @PYTHON@ @ROOT@/embedding/server.py
-      --llama-server @LLAMA_SERVER@ --port ${PORT} --model @MODELS@/embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf
+      --backend mlx --mlx-dtype float32 --max-tokens 8192
+      --port ${PORT} --model @MODELS@/embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf
+    env:
+      - "MLX_ENABLE_TF32=0"
     checkEndpoint: /health
     evict_cost: 0
 

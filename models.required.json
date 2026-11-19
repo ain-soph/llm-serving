@@ -41,6 +41,7 @@
   "files": [
     "strata-mtp/mtp-q2_0.gguf",
     "embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf",
+    "embeddinggemma-2/ggml-org/tokenizer.json",
     "embeddinggemma-2/ggml-org/mmproj-embeddinggemma-2-BF16.gguf",
     "qwen-image-2.1/base/model_index.json",
     "qwen-image-2.1/base/transformer/config.json",

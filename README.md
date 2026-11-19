@@ -16,7 +16,7 @@
 | 类别 | 模型 ID | 后端 | 说明 |
 | --- | --- | --- | --- |
 | 文本／视觉 | `qwen3.8-flash-next`、`-uncensored` | [Strata fork](https://github.com/ain-soph/Strata/tree/serving) | 262k 上下文 × 1 路，MTP 投机解码 |
-| 嵌入 | `embeddinggemma-2`、`-multimodal` | llama.cpp | 文本常驻；多模态支持图片、音频、视频 |
+| 嵌入 | `embeddinggemma-2`、`-multimodal` | 文本 MLX，媒体 llama.cpp | 文本常驻；多模态支持图片、音频、视频 |
 | 嵌入 | `qwen3-embedding-0.6b`／`4b`／`8b`（`4b`、`8b` 各有 `-int8`）、`voyage-4-nano` | MLX，自写服务 | 32K 输入；零拷贝；`-int8` 为 W8A8，快 1.5–1.7× |
 | 重排 | `qwen3-reranker-0.6b`／`4b`／`8b`（`4b`、`8b` 各有 `-int8`） | MLX，自写服务 | `/v1/rerank`，按长度排序批量计算；零拷贝；RAG 推荐 `4b-int8` |
 | 决策 | `pplx-decider-flash` | MLX 移植 | SystemOne `/v1/systemone`：判断／选择／打分概率；文本与图片同一入口，按层类 W8A8，预量化存盘 |
@@ -76,12 +76,12 @@ cd llm-serving
 
 `configure.py` 只生成本机文件，不启动服务。默认监听 `127.0.0.1:8080`；提供局域网接口时添加 `--listen 0.0.0.0`。可用 `--state`、`--output` 自定义运行数据和配置目录。代码可以放在任意目录，路径含空格也支持。
 
-当前完整聊天配置要求 GPU 池至少 **65200 MiB**。默认从当前 `iogpu.wired_limit_mb` 减去系统与常驻嵌入预留的 4872 MiB；系统上限为 0 时要求显式给出已验证的 `--pool-mb`。工具不会因为识别出一台 Mac 就自动提高内存上限，也不会把这台机器的上下文/并发参数缩放成未经验证的其他机型参数。
+当前完整聊天配置要求 GPU 池至少 **65200 MiB**。默认从当前 `iogpu.wired_limit_mb` 减去系统与常驻嵌入预留的 6032 MiB；系统上限为 0 时要求显式给出已验证的 `--pool-mb`。工具不会因为识别出一台 Mac 就自动提高内存上限，也不会把这台机器的上下文/并发参数缩放成未经验证的其他机型参数。
 
 若迁移机器需要持久化 GPU 内存上限，可以显式指定，例如针对已经验证过的 96 GiB 机器：
 
 ```sh
-.venv/bin/python tools/configure.py --models "$HOME/models" --pool-mb 83192
+.venv/bin/python tools/configure.py --models "$HOME/models" --pool-mb 82032
 .venv/bin/python tools/install.py --wired-limit-mb 88064 --activate
 ```
 
