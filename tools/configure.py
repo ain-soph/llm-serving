@@ -178,10 +178,8 @@ def main():
     if pool <= 0:
         p.error("No usable wired limit detected; supply --pool-mb after measuring the machine")
     # Do not silently apply measured 96-GiB-M5 settings to a smaller GPU budget.
-    strata = load_template(ROOT / "templates/conf.d/strata.yaml")
-    chat_pool = max(model["capacities"]["gpu"] for model in strata["models"].values())
-    if pool < chat_pool:
-        p.error(f"Current chat configuration needs a pool >={chat_pool} MiB. Use a separately validated smaller-model profile.")
+    if pool < 71000:
+        p.error("Current chat configuration needs a pool >=71000 MiB. Use a separately validated smaller-model profile.")
     state = a.state.expanduser().absolute()
     out = a.output.expanduser().absolute()
     for sub in ("logs", "media/videos", "media/images", "strata", "caddy"):
