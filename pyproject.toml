@@ -37,7 +37,7 @@ package = false
 environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
 
 [tool.uv.sources]
-h3-image-mlx = { git = "https://github.com/ain-soph/h3-image-mlx", rev = "c3dc904f466a9d48788f00cc973d71f916da0698" }
+h3-image-mlx = { git = "https://github.com/ain-soph/h3-image-mlx", rev = "f4da8e7ab84056963da50f1793c1041c74fa8c21" }
 mflux = { git = "https://github.com/ain-soph/mflux", rev = "80da340abd432ea1ffd4e287b577736b7a605c3c" }
 mlx = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx-0.32.4%2Bserving.005fe7a2-cp315-cp315-macosx_26_0_arm64.whl" }
 mlx-metal = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx_metal-0.32.4%2Bserving.005fe7a2-py3-none-macosx_26_0_arm64.whl" }
