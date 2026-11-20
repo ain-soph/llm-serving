@@ -1,31 +1,32 @@
-# M5 Ultra 260106-token single-slot peaks: 62339 / 63603 MiB wired.
+# Compact dual-slot qualification on M5 Ultra peaked at +67695 MiB wired.
+# Both profiles reserve 69500 MiB. See docs/performance.md.
 models:
   "qwen3.8-flash-next":
     name: "Qwen3.8 Flash-Next"
-    description: "AtomicChat AD-4.27 on Strata, 262144 ctx x 1 slot, MTP"
+    description: "AtomicChat AD-4.27 on Strata, 262144 ctx x 2 slots, compact Metal, MTP"
     cmd: >
       @PYTHON@ @STRATA_SOURCE@/serve/server.py
-      --engine strata --config @CONFIG@/strata/strata-ad427-c262k-p1.json
+      --engine strata --config @CONFIG@/strata/strata-ad427-c262k-p2-compact.json
       --host 127.0.0.1 --port ${PORT}
     env:
       - "XDG_CONFIG_HOME=@STATE@/strata"
     checkEndpoint: /health
     concurrencyLimit: 64
     capacities:
-      gpu: 63900
+      gpu: 69500
     evict_cost: 100
 
   "qwen3.8-flash-next-uncensored":
     name: "Qwen3.8 Flash-Next Uncensored"
-    description: "Navin AD-4.27 on Strata, 262144 ctx x 1 slot, MTP"
+    description: "Navin AD-4.27 on Strata, 262144 ctx x 2 slots, compact Metal, MTP"
     cmd: >
       @PYTHON@ @STRATA_SOURCE@/serve/server.py
-      --engine strata --config @CONFIG@/strata/strata-uncensored-c262k-p1.json
+      --engine strata --config @CONFIG@/strata/strata-uncensored-c262k-p2-compact.json
       --host 127.0.0.1 --port ${PORT}
     env:
       - "XDG_CONFIG_HOME=@STATE@/strata"
     checkEndpoint: /health
     concurrencyLimit: 64
     capacities:
-      gpu: 65200
+      gpu: 69500
     evict_cost: 50

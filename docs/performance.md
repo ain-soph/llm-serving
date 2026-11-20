@@ -7,8 +7,8 @@
 
 | 类别 | 模型 ID | 后端 | 权重精度 | 速度（关键数） | 内存（关键数） | 权重磁盘 |
 | --- | --- | --- | --- | --- | --- | ---: |
-| 文本／视觉 | `qwen3.8-flash-next` | Strata Metal fork | AD-4.27 混合（3.57 bpw 主体） | prefill 2014／2225 tok/s（26k／116k）；decode 117.2 tok/s | wired +69868 MiB（262k × 2 槽） | 96.94 GB |
-| 文本／视觉 | `qwen3.8-flash-next-uncensored` | Strata Metal fork | 同上 | decode 118–139 tok/s（历史） | wired +68771 MiB（历史） | 96.95 GB |
+| 文本／视觉 | `qwen3.8-flash-next` | Strata Metal fork | AD-4.27 混合（3.57 bpw 主体） | prefill 2,730–2,758 tok/s（约 35K）；decode 142.4（单路）／151.2（双路合计）tok/s | wired +67,695 MiB（262K × 2 槽） | 96.94 GB |
+| 文本／视觉 | `qwen3.8-flash-next-uncensored` | Strata Metal fork | 同上 | prefill 2,522–2,544 tok/s（约 257K–260K）；续问 TTFT 0.25–0.49 s | wired +66,162 MiB（262K × 2 槽） | 96.95 GB |
 | 文本嵌入 | `embeddinggemma-2` | llama.cpp + 适配层 | BF16 | 短查询 12 ms；64 × 400 token 0.53 s（48,500 tok/s） | wired +1069／1327 MiB（空闲／峰值，常驻） | 0.558 GB |
 | 多模态嵌入 | `embeddinggemma-2-multimodal` | 同上 | BF16 | 图片 0.04–0.12 s；5 s 音频 0.035 s；4 s 视频 0.34 s | wired +2996 MiB | 1.540 GB |
 | 文本嵌入 | `qwen3-embedding-0.6b`／`-4b`／`-8b` | MLX，自写服务 | FP16／FP16／Q8_0 | 64 × 450 token 0.39／2.50／5.21 s | wired 峰值 +2705／+10323／+11026 MiB（32K 输入） | 1.21／8.06／8.53 GB |
@@ -37,7 +37,19 @@
 ## 文本：Qwen3.8 Flash-Next（Strata）
 
 
-**现行单槽，2026-11-19**。M5 Ultra / 96 GiB，262144 ctx，MTP Q2_0，KV INT8。AD-4.27 权重，专家 IQ2_S／IQ3_S／IQ4_NL、dense Q8_0。IQ3_S 解码与 Wsg 点积重排保持关闭。26K 为预热后服务端 prefill，260K 以输入 token 数除以 TTFT。单路负载为 36–62 token 提示、各解码 400 token，双请求各生成 400 token 并按单槽排队。
+**现行省内存双槽，2026-11-20**。M5 Ultra / 96 GiB，262144 ctx × 2，AD-4.27，INT8 KV，单请求保留 Q2_0 MTP。两项会改变精度的实验开关保持关闭。相同 AtomicChat 双槽工作负载下，wired 增量峰值 70,962 → 67,695 MiB。两套权重均按 69,500 MiB 预约。
+
+| 权重 | 冷 prefill 并发 2，各路 tok/s | decode tok/s | 峰值 wired 增量 MiB | 峰值 RSS GiB |
+| --- | ---: | --- | ---: | ---: |
+| AtomicChat | 2,758.0 / 2,730.0（34,782 / 35,023 token） | 短提示单路 142.4，双路合计 151.2 | 67,695 | 67.98 |
+| Navin | 2,544.2 / 2,521.5（259,614 / 256,668 token） | 续问各生成 9 token，30.9 / 70.2 | 66,162 | 59.05 |
+
+- Navin 双长会话反序续问分别复用 259,622 与 256,676 token，各处理 25 个新 token。对应首 token 延迟 0.248 和 0.494 秒，答复均匹配各自标记。
+- AtomicChat 完成与 H3 4K 的双路聊天共存及 Qwen Image 冷启动回调。近限双上下文与出图分别验收。
+
+### 历史单槽对照
+
+**单槽，2026-11-19**。M5 Ultra / 96 GiB，262144 ctx，MTP Q2_0，KV INT8。AD-4.27 权重，专家 IQ2_S／IQ3_S／IQ4_NL、dense Q8_0。IQ3_S 解码与 Wsg 点积重排保持关闭。26K 为预热后服务端 prefill，260K 以输入 token 数除以 TTFT。单路负载为 36–62 token 提示、各解码 400 token，双请求各生成 400 token 并按单槽排队。
 
 | 权重 | 26,177 / 260,106 token prefill tok/s | 单路 / 两个排队请求合计解码 tok/s | 峰值 wired 增量 MiB | 进程树 RSS GiB | GPU 预约 MiB |
 | --- | ---: | ---: | ---: | ---: | ---: |

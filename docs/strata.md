@@ -1,12 +1,12 @@
 # Strata Metal 部署
 
-主要文本模型通过 Strata Metal 运行。当前路由包含 `qwen3.8-flash-next` 和 `qwen3.8-flash-next-uncensored`；两者各使用 262144 token 上下文、1 个引擎槽位和 MTP，GPU 预约分别为 63,900 和 65,200 MiB。这些参数来自目标 M5 Ultra 96 GiB 部署，不代表所有 Apple Silicon 都适用。
+主要文本模型通过 Strata Metal 运行。当前路由包含 `qwen3.8-flash-next` 和 `qwen3.8-flash-next-uncensored`。两个入口均使用 2 个槽位，每槽 262144 token，启用 Metal 省内存双槽，GPU 预约均为 69,500 MiB。这些参数来自目标 M5 Ultra 96 GiB 部署，不代表所有 Apple Silicon 都适用。
 
 ## 源码与优化
 
-源码在自己的 [ain-soph/Strata](https://github.com/ain-soph/Strata/tree/serving) fork 的 `serving` 分支维护。部署实际固定到 [004d0d1197292b7819c9b3ed52c5bb8f29c18514](https://github.com/ain-soph/Strata/commit/004d0d1197292b7819c9b3ed52c5bb8f29c18514)，由主仓库的 `native.lock.json` 记录，不会在每次安装时跟随分支移动。
+源码在自己的 [ain-soph/Strata](https://github.com/ain-soph/Strata/tree/serving) fork 的 `serving` 分支维护。部署实际固定到 [4cf59801f142f6d6e8e6a71a192a69bc63465abe](https://github.com/ain-soph/Strata/commit/4cf59801f142f6d6e8e6a71a192a69bc63465abe)，由主仓库的 `native.lock.json` 记录，不会在每次安装时跟随分支移动。
 
-该快照包含 Metal `--prefill auto` 的修复。后续经过验证的 macOS 性能改动应先提交到引擎 fork，再更新部署锁定的 commit。本仓库不复制第三方引擎代码。
+该快照包含 Metal `--prefill auto` 修复。引擎 JSON 的 `parallel: 2` 生成 `--batch 2`，`STRATA_METAL_COMPACT_BATCH=1` 让预填与解码共用两套序列状态。单请求使用 Q2_0 MTP，KV 为 INT8。后续经过验证的 macOS 性能改动应先提交到引擎 fork，再更新部署锁定的 commit。本仓库不复制第三方引擎代码。
 
 Strata 自带 `serve/server.py`，主仓库直接复用它提供 HTTP 接口；无需再写一个 Python 包装服务器。其 Python 运行依赖纳入主仓库的统一 uv 环境。
 
@@ -17,8 +17,8 @@ Strata 自带 `serve/server.py`，主仓库直接复用它提供 HTTP 接口；�
 | [`native.lock.json`](../native.lock.json) | Strata fork commit、所需 ggml/llama.cpp commit、Metal C++ 头文件校验值 |
 | [`tools/native.py`](../tools/native.py) | 拉取固定源码，构建 Strata Metal 与视觉编码器 |
 | [`templates/conf.d/strata.yaml`](../templates/conf.d/strata.yaml) | llama-swap 的两个文本模型 ID、HTTP 启动命令和路由容量 |
-| [`templates/strata/strata-ad427-c262k-p1.json`](../templates/strata/strata-ad427-c262k-p1.json) | AtomicChat AD-4.27 的引擎参数与视觉配置 |
-| [`templates/strata/strata-uncensored-c262k-p1.json`](../templates/strata/strata-uncensored-c262k-p1.json) | Uncensored AD-4.27 的引擎参数与视觉配置 |
+| [`templates/strata/strata-ad427-c262k-p2-compact.json`](../templates/strata/strata-ad427-c262k-p2-compact.json) | AtomicChat AD-4.27 的引擎参数与视觉配置 |
+| [`templates/strata/strata-uncensored-c262k-p2-compact.json`](../templates/strata/strata-uncensored-c262k-p2-compact.json) | Uncensored AD-4.27 的引擎参数与视觉配置 |
 | [`models.required.json`](../models.required.json) | 需要另行迁移的模型目录与权重布局 |
 | [`tools/configure.py`](../tools/configure.py) | 将机器无关模板渲染成本机配置 |
 
@@ -33,7 +33,7 @@ Strata 自带 `serve/server.py`，主仓库直接复用它提供 HTTP 接口；�
 `tools/native.py all` 也包含这一步。构建脚本准备 Metal C++ 头文件及固定版本的 ggml，再生成：
 
 ```text
-.local/src/strata-004d0d119729/
+.local/src/strata-4cf59801f142/
 ├── serve/server.py
 ├── build-metal-serving/strata
 ├── build-vision/bin/strata-vision

@@ -2,11 +2,11 @@
  "exe": "@STRATA_EXE@",
  "args": [
   "--pack",
-  "@MODELS@/strata-uncensored/packs/ad427",
+  "@MODELS@/strata-ad427/packs/ad427",
   "--native",
-  "@MODELS@/strata-uncensored/metal/uncensored-ad427-metal.gguf",
+  "@MODELS@/strata-ad427/metal/ad427-metal.gguf",
   "--ple-gguf",
-  "@MODELS@/strata-uncensored/metal/uncensored-ad427-ple.gguf",
+  "@MODELS@/strata-ad427/metal/ad427-ple.gguf",
   "--expert-profile",
   "@STRATA_SOURCE@/data/expert-profile.bin",
   "--expert-cache",
@@ -27,29 +27,30 @@
   "1024"
  ],
  "cwd": "@STRATA_SOURCE@",
- "tokenizer": "@MODELS@/strata-uncensored/packs/ad427/tokenizer",
- "model_name": "qwen3.8-flash-next-uncensored-ad427",
- "log": "@STATE@/logs/strata-uncensored-c262k-p1.log",
+ "tokenizer": "@MODELS@/strata-ad427/packs/ad427/tokenizer",
+ "model_name": "qwen3.8-flash-next-ad427",
+ "log": "@STATE@/logs/strata-ad427-c262k-p2-compact.log",
  "lib_dirs": [],
  "port": 18150,
  "backend": "metal",
  "env": {
   "STRATA_METAL_STREAM": "0",
   "STRATA_METAL_IQ_DEC_OPT": "0",
-  "STRATA_METAL_W_DOT": "0"
+  "STRATA_METAL_W_DOT": "0",
+  "STRATA_METAL_COMPACT_BATCH": "1"
  },
  "vision": {
   "exe": "@VISION_EXE@",
-  "mmproj": "@MODELS@/strata-uncensored/mmproj-Qwen3.8-Flash-Next-Uncensored-F16.gguf",
-  "model": "@MODELS@/strata-uncensored/metal/uncensored-ad427-metal.gguf",
+  "mmproj": "@MODELS@/strata-ad427/mmproj-Qwen3.8-Flash-Next-F16.gguf",
+  "model": "@MODELS@/strata-ad427/metal/ad427-metal.gguf",
   "gpu": true,
   "max_tokens": 1024
  },
  "open_browser": false,
- "parallel": 1,
+ "parallel": 2,
  "aliases": [
-  "qwen3.8-flash-next-uncensored",
-  "qwen3.8-flash-next-uncensored-1slot"
+  "qwen3.8-flash-next",
+  "qwen3.8-flash-next-2slot"
  ],
  "allowed_hosts": [
   "*"
