@@ -8,7 +8,7 @@
   "local-agent-bridge": {
     "url": "https://github.com/ain-soph/local-agent-bridge.git",
     "branch": "serving",
-    "commit": "7ceed8f1dfb7293437607ffcb645caf871887166",
+    "commit": "956654add4deb76ebc0de462836239f94e3e5c1a",
     "path": "runtime/upstream"
   }
 }

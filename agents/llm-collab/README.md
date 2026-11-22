@@ -4,7 +4,7 @@ Claude Code、Codex、Antigravity 共用的 MCP 服务 `llm-collab`，由两部�
 
 - [ain-soph/llm-collab](https://github.com/ain-soph/llm-collab)：MCP 协调服务（投票、交接、配额、完全控制等策略）；
 - [ain-soph/local-agent-bridge](https://github.com/ain-soph/local-agent-bridge) 分支 `serving`：Bridge 运行时
-  （agy Orchestrator/xhigh/`--settings`、所有 origin 分支可见的 writer checkout、`BRIDGE_CODEX_MODEL`）。
+  （agy Orchestrator/xhigh/`--settings`、所有 origin 分支可见的 writer checkout、`BRIDGE_CODEX_MODEL`、回合时限跟随 `turnTimeoutSeconds`（上限 14400 s，超时是明确失败而非 indeterminate））。
 
 本目录只放启动器和配置；`tools/install_agents.py` 按 `pins.json` 把两个仓库装到 bridge 目录并注册 MCP。
 
