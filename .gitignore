@@ -15,6 +15,7 @@ outputs/
 media/
 api_key
 .api_key
+serving-values.json
 *.pem
 *.key
 *.safetensors

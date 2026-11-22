@@ -38,6 +38,7 @@
 | --- | --- | --- |
 | 全局 CLAUDE.md 规则 | 本仓库 `agents/claude-code/` | `tools/bootstrap.sh` 或 `tools/install_agents.py` |
 | 本地 worker | 本仓库 `agents/local-worker/` | 同上（建符号链接） |
+| gpu-lock、Strata 路由、llama-swap key | 本仓库 `serving/` | `tools/bootstrap.sh` 或 `tools/install_serving.py` |
 | llm-collab MCP 服务 | [ain-soph/llm-collab](https://github.com/ain-soph/llm-collab)，commit 固定在 `agents/llm-collab/pins.json` | `tools/install_agents.py`（clone、`npm ci`、注册三个客户端） |
 | Bridge 运行时 | [ain-soph/local-agent-bridge](https://github.com/ain-soph/local-agent-bridge)（分支 `serving`），同上固定 | 同上 |
 | 启动器、配置、各 provider 的模型 | 本仓库 `agents/llm-collab/` | 同上（复制到 bridge 目录，旧文件先备份） |
@@ -65,5 +66,6 @@
 | `workspace_status` 读 `../../logs/health/STATUS` | `productionRoot: "../.."`；文件缺失时 llm-collab 返回 `null`（旧版会报错） |
 | 生产切换说明里点名 `gpu-lock`、`memguard`、`lsw-apply` | llm-collab 改为“按该部署自己的操作规程”；这些规程本来就写在生产目录的 `AGENTS.md`，GPU 行也指向它。接受此文字差异 |
 
-本地 worker 依赖的 `gpu-lock`、Strata 服务配置和 llama-swap key 属于本机部署目录 `~/llm-serving`，不在本仓库；
-缺 key 时 worker 以退出码 3 停下，缺 `gpu-lock` 时按 GPU 忙以 75 退出。
+本地 worker 依赖的 `gpu-lock`、Strata 服务配置和 llama-swap key 在本机部署目录 `~/llm-serving`；脚本和配置模板公开在
+`serving/`，由 `tools/install_serving.py`（bootstrap 最后一步）装回，key 在安装时生成，见 [serving-restore.md](serving-restore.md)。
+GPU 锁规则见 [gpu-lock.md](gpu-lock.md)。缺 key 时 worker 以退出码 3 停下，缺 `gpu-lock` 时按 GPU 忙以 75 退出。

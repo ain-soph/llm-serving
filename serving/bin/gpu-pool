@@ -1,0 +1,19 @@
+#!/bin/zsh
+# gpu-pool: the GPU memory pool (MB) shared by llama-swap's capacities.gpu and gpu-lock, derived from the current
+# iogpu.wired_limit_mb, so raising the limit (LaunchDaemon com.local.iogpu-wired-limit) needs no edits elsewhere:
+#   pool      = wired limit - SYSTEM_MB (wired by macOS itself) - RESIDENT_MB (always-loaded models without capacities)
+#   exclusive = pool: what a "whole GPU" model (video render) declares (the read-only files server left llama-swap on
+#               2026-11-16 and needs no GPU memory)
+#   gpu-pool          -> pool
+#   gpu-pool --env    -> export lines LSW_GPU_POOL / LSW_GPU_EXCLUSIVE / GPU_WIRED_LIMIT (eval in serve.sh, lsw-apply)
+# A restart of llama-swap (lsw-apply) picks up a new value; gpu-lock reads it on every call.
+SYSTEM_MB=2872     # 79872 - 77000: the system baseline the pool left since 2026-11-15 (wired with nothing loaded ~2.7 GiB)
+RESIDENT_MB=3160   # Always-loaded MLX embedding, 8192-token limit: +2741 MiB wired plus 419 MiB margin (2026-11-18)
+limit=$(sysctl -n iogpu.wired_limit_mb 2>/dev/null)
+[[ $limit == <-> ]] && (( limit > 0 )) || limit=79872     # 0 = macOS default; fall back to the long-standing value
+pool=$(( limit - SYSTEM_MB - RESIDENT_MB ))
+if [[ ${1:-} == --env ]]; then
+  echo "export GPU_WIRED_LIMIT=$limit LSW_GPU_POOL=$pool LSW_GPU_EXCLUSIVE=$pool"
+else
+  echo $pool
+fi

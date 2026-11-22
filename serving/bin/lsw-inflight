@@ -1,0 +1,66 @@
+#!/usr/bin/python3
+"""Count llama-swap requests in flight that come from outside this machine (2026-11-18).
+
+Prints one number: the requests llama-swap is serving right now whose client (X-Forwarded-For, else remote_ip)
+is not this machine, i.e. people chatting through the Mac mini, not agents and scripts here. Each one is also
+listed on stderr. Exit 0 with the count; exit 2 when llama-swap cannot be asked (then the caller should not wait).
+
+gpu-lock waits for these before it pauses llama-swap, because a pause unloads every model at once and cuts a
+running answer off (the 02:07 chat that ended in "I/O operation on closed file.").
+"""
+import json
+import os
+import socket
+import sys
+
+LOCAL = {"127.0.0.1", "::1", "localhost", ""}
+KEY_FILE = os.path.expanduser("~/llm-serving/platform/llama-swap/.api_key")
+
+
+def snapshot(timeout=5.0):
+    """The first "inflight" snapshot of llama-swap's /api/events stream (a list of requests)."""
+    key = open(KEY_FILE).read().strip()
+    s = socket.create_connection(("127.0.0.1", 8081), timeout=timeout)
+    s.sendall(("GET /api/events HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/event-stream\r\n"
+               f"Authorization: Bearer {key}\r\nConnection: close\r\n\r\n").encode())
+    buf = b""
+    try:
+        while len(buf) < 4_000_000:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+            for line in buf.split(b"\n"):
+                if not line.startswith(b"data:") or b'"inflight"' not in line:
+                    continue
+                msg = json.loads(line[5:])
+                data = json.loads(msg["data"])
+                if data.get("operation") == "snapshot":
+                    return data.get("requests") or []
+    finally:
+        s.close()
+    raise RuntimeError("no inflight snapshot in the event stream")
+
+
+def client(req):
+    headers = req.get("req_headers") or {}
+    xff = headers.get("X-Forwarded-For") or headers.get("X-Real-Ip") or headers.get("X-Real-IP") or ""
+    return xff.split(",")[0].strip() if xff else req.get("remote_ip", "")
+
+
+def main():
+    try:
+        reqs = snapshot()
+    except Exception as e:  # noqa: BLE001 - an unreachable llama-swap means nothing to wait for
+        print(f"lsw-inflight: cannot read llama-swap events: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+    remote = [r for r in reqs if client(r) not in LOCAL]
+    for r in remote:
+        print(f"  {r.get('model')} {r.get('req_path')} from {client(r)}, {r.get('elapsed_ms', 0) / 1000:.0f} s",
+              file=sys.stderr)
+    print(len(remote))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

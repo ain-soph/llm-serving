@@ -9,4 +9,6 @@ uv sync --locked --python "$python_bin"
 # Multi-agent rules -> ~/.claude/CLAUDE.md (marker block, never overwrites), the local worker link, and the
 # llm-collab bridge (pinned checkouts, launcher, MCP registration; agents/llm-collab/README.md).
 [ -n "${LLM_SERVING_SKIP_AGENTS:-}" ] || .venv/bin/python tools/install_agents.py
+# GPU lock scripts, Strata routes and the llama-swap key under ~/llm-serving (creates missing files only).
+[ -n "${LLM_SERVING_SKIP_SERVING:-}" ] || .venv/bin/python tools/install_serving.py
 printf '%s\n' 'Python environment ready. Next: .venv/bin/python tools/native.py --help'

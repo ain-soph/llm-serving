@@ -1,0 +1,351 @@
+#!/bin/zsh
+# Shares the GPU's unified memory between several agents by reservation: each holder declares the peak memory
+# (MB, measured wired peak + margin, as for llama-swap capacities) it will use, and holders run side by side as
+# long as the reservations add up to at most POOL. Needed before loading big models, benchmarks, llama-swap
+# pause/resume/restart and applying llama-swap config changes.
+#
+#   gpu-lock acquire NAME [MB]  join the queue and wait (up to ~9 min per call) until MB fits; exit 1 if still waiting
+#   gpu-lock try NAME [MB]      join/keep your place in the queue; take a share only if MB fits now
+#   gpu-lock heartbeat NAME     refresh your share during long sessions (stale after 60 min without one)
+#   gpu-lock release NAME       give your share back
+#   gpu-lock status             show holders, reserved/free MB and the queue
+# bin/gpu-lock-watchdog can force-release shares idle on the GPU; its LaunchAgent was removed on 2026-11-15 at the
+# user's request (plist kept as bin/com.local.gpu-lock-watchdog.plist.disabled). forced/NAME notices still show if present.
+# A holder calling try/acquire again with a different MB resizes its share: shrinking is immediate; growing
+# (e.g. `acquire NAME all` before a speed measurement) queues and exits 1 until it fits, keeping the old share.
+#
+# MB omitted (or "all") = exclusive: the whole pool, as in the old one-holder lock. Use it for runs that need
+# the GPU to themselves (throughput/latency benchmarks, llama-swap restarts via lsw-apply).
+# Queue: first come, first served, but a later request that fits may pass earlier ones that do not fit
+# ("backfill") until the oldest of those has waited BACKFILL_MAX; then everyone waits behind it.
+# Waiting agents must call try/acquire at least every 15 min or they lose their place. When a waiter's turn comes
+# (it fits and nobody ahead does) and it does not take it within TURN_MAX (5 min), later requests that fit may go
+# first; it keeps its ticket and takes its turn on a later poll.
+# Deadlock check on every try/acquire (exit 4 = refused, nothing queued):
+#   - a holder asking to grow, when the growing holders could not all be served in any order even after every
+#     other holder has released (they would wait for each other forever);
+#   - a request made from inside the script that took another share (the shell that called gpu-lock for that
+#     share is the caller or one of its ancestors), when
+#     the two together exceed POOL (the script waits for itself).
+#   A request from the same agent process as another holder that does not fit now only gets a warning on stderr.
+# Each share records the caller's shell chain and agent process (holders/NAME, lines 2-3) for these checks.
+# llama-swap is paused when the first holder comes in (its models are not part of any reservation) and resumed,
+# with nothing preloaded, when the last holder leaves and nobody is queued.
+set -u
+DIR=${GPU_LOCK_DIR:-$HOME/llm-serving/.locks}   # override only for tests
+HOLDERS=$DIR/holders
+QUEUE=$DIR/queue
+TURNS=$DIR/turns          # turns/NAME: when NAME's turn came (cleared when it polls or takes)
+LEGACY=$DIR/gpu.lock      # the old single-holder lock: kept as a "busy" sentinel for old copies of this script
+POOL=$($HOME/llm-serving/bin/gpu-pool 2>/dev/null)   # MB, the llama-swap capacity pool: iogpu.wired_limit_mb minus the
+[[ $POOL == <-> ]] || POOL=77000                     # system baseline and the always-loaded models (bin/gpu-pool)
+BASE_TOL=6000             # MB: a grant also needs (wired now) <= BASE_TOL + MB reserved by current holders, i.e. no wired
+                          # memory beyond the system baseline (~2.5-4.5 GB) that no reservation explains (e.g. servers of
+                          # a share the watchdog force-released, or a test server started without the lock)
+STALE=3600                # holder without heartbeat
+TICKET_STALE=900          # queued agent that stopped polling
+BACKFILL_MAX=1200         # after this long at the head of the queue, nobody may pass a waiting request
+TURN_MAX=300              # a waiter whose turn has come (it fits, nobody ahead) and that does not take it within
+                          # this many seconds stops holding the room: the next ones may go first (user rule)
+KEY_FILE=$HOME/llm-serving/platform/llama-swap/.api_key
+cmd=${1:-status}; name=${2:-}; want=${3:-all}; explicit=${3:+1}
+mkdir -p $HOLDERS $QUEUE $LEGACY $TURNS
+FORCED=$DIR/forced        # gpu-lock-watchdog writes forced/NAME when it releases an idle share
+# Change notice for agents that started before v2 (Codex, Antigravity, Claude sessions): printed on stderr by every
+# call while $DIR/NOTICE exists. Delete that file once every agent has switched.
+[[ -f $DIR/NOTICE ]] && cat $DIR/NOTICE >&2
+
+# ---- short critical section around every state change (mkdir is atomic)
+unlock_state() { rmdir $DIR/mutex 2>/dev/null; }
+lock_state() {
+  local i
+  for i in $(seq 1 100); do
+    mkdir $DIR/mutex 2>/dev/null && { trap unlock_state EXIT; return 0; }
+    (( $(date +%s) - $(stat -f %m $DIR/mutex 2>/dev/null || date +%s) > 30 )) && rmdir $DIR/mutex 2>/dev/null
+    sleep 0.2
+  done
+  echo "could not get the state mutex ($DIR/mutex)"; exit 3
+}
+
+now() { date +%s; }
+mtime() { stat -f %m $1 2>/dev/null || echo 0; }
+mb_of() { local v; v=$(awk 'NR==1{print $1}' $1 2>/dev/null); [[ $v == <-> ]] && echo $v || echo $POOL; }   # empty/old file = exclusive
+
+# The caller's shell chain (scripts and shells between this tool and the agent) and the agent process itself:
+# sets CHAIN (pids) and AGENT ("pid name"). Wrappers like tee/nohup/env count as part of the chain.
+CHAIN=(); AGENT=
+ancestry() {
+  local p=$PPID c pp
+  while (( p > 1 )); do
+    c=$(ps -o comm= -p $p 2>/dev/null); pp=$(ps -o ppid= -p $p 2>/dev/null | tr -d ' ')
+    [[ -n $c ]] || break
+    case ${c:t} in
+      zsh|-zsh|bash|-bash|sh|dash|fish|env|nohup|timeout|tee|xargs|time) CHAIN+=($p); p=$pp ;;
+      *) AGENT="$p ${c:t}"; break ;;
+    esac
+  done
+}
+chain_of() { sed -n 's/^chain: //p' $1 2>/dev/null; }
+agent_of() { sed -n 's/^agent: //p' $1 2>/dev/null; }
+alive() { kill -0 $1 2>/dev/null; }
+
+# deadlock_check NAME MB: exit 4 when the request can never be granted (see the header); warnings on stderr
+deadlock_check() {
+  local me=$1 mb=$2 t h hmb p own=0 n tk g gmb gcur avail progressed
+  [[ -e $HOLDERS/$me ]] && own=$(mb_of $HOLDERS/$me)
+  ancestry
+  for t in $HOLDERS/*(N); do
+    h=${t:t}; [[ $h == $me ]] && continue
+    hmb=$(mb_of $t)
+    # only the shell that called gpu-lock to take the share counts: the caller runs inside it = it waits for this call
+    p=${${=$(chain_of $t)}[1]:-}
+    if [[ -n $p ]] && alive $p && (( ${CHAIN[(Ie)$p]} )) && (( mb + hmb > POOL )); then
+        echo "REFUSED (deadlock): this request comes from inside the script that holds '$h' ($hmb MB, shell pid $p);"
+        echo "  $mb + $hmb MB > $POOL MB, so it could only be granted after '$h' is released, which waits for this call."
+        echo "  Release '$h' first, or resize it: gpu-lock acquire $h <new MB>."
+        rm -f $(ticket_of $me); exit 4
+    fi
+    if [[ -n $AGENT && $(agent_of $t) == $AGENT ]] && (( mb > POOL - $(used) + own )); then
+      echo "WARNING: your agent process ($AGENT) also holds '$h' ($hmb MB) and this request does not fit now." >&2
+      echo "  If you will wait for it in the foreground while '$h' stays held, release '$h' first." >&2
+    fi
+  done
+  (( own )) && (( mb > own )) || return 0
+  # Growing holders, with this request: can they all be served in some order once everyone else has released?
+  typeset -A want cur
+  want[$me]=$mb; cur[$me]=$own
+  for tk in $QUEUE/*(N); do
+    n=${${tk:t}#*-}; [[ $n == $me || ! -e $HOLDERS/$n ]] && continue
+    gmb=$(mb_of $tk); gcur=$(mb_of $HOLDERS/$n)
+    (( gmb > gcur )) && { want[$n]=$gmb; cur[$n]=$gcur; }
+  done
+  avail=$POOL; for g in ${(k)cur}; do (( avail -= cur[$g] )); done
+  while (( ${#want} )); do
+    progressed=0
+    for g in ${(k)want}; do
+      if (( want[$g] - cur[$g] <= avail )); then (( avail += cur[$g] )); unset "want[$g]"; progressed=1; fi
+    done
+    (( progressed )) || break
+  done
+  if (( ${#want} )); then
+    echo "REFUSED (deadlock): holders waiting to grow would wait for each other forever:"
+    for g in ${(k)want}; do echo "  $g holds ${cur[$g]} MB, wants ${want[$g]} MB"; done
+    echo "  Release your share and queue again, or ask for less."
+    rm -f $(ticket_of $me); exit 4
+  fi
+}
+
+# One-time migration from the old lock: its holder becomes an exclusive share with the same heartbeat time.
+migrate() {
+  local h n t
+  [[ -f $LEGACY/holder ]] || return
+  h=$(<$LEGACY/holder)
+  if [[ $h != v2* ]]; then
+    n=${h%% *}
+    if [[ -n $n && ! -e $HOLDERS/$n ]]; then
+      echo "$POOL since ${h#* since }" > $HOLDERS/$n
+      touch -r $LEGACY/holder $HOLDERS/$n
+    fi
+  fi
+}
+# Old copies of this script (still running an acquire loop) must keep seeing a busy, fresh lock.
+sentinel() { echo "v2 shared lock: see $HOLDERS" > $LEGACY/holder; }
+
+prune() {
+  local t
+  for t in $HOLDERS/*(N); do (( $(now) - $(mtime $t) > STALE )) && { echo "dropping stale holder ${t:t} (no heartbeat for $(( ($(now) - $(mtime $t)) / 60 )) min)"; rm -f $t; }; done
+  for t in $QUEUE/*(N); do (( $(now) - $(mtime $t) > TICKET_STALE )) && rm -f $t; done
+  for t in $TURNS/*(N); do [[ -n $(ticket_of ${t:t}) ]] || rm -f $t; done
+}
+used() { local s=0 t; for t in $HOLDERS/*(N); do (( s += $(mb_of $t) )); done; echo $s; }
+nholders() { local t n=0; for t in $HOLDERS/*(N); do (( n++ )); done; echo $n; }
+ticket_of() { local t; for t in $QUEUE/*-$1(N); do echo $t; return; done }
+join_queue() {  # keeps the original arrival time (in the name); refreshes the poll time and the requested MB
+  local t; t=$(ticket_of $1)
+  [[ -n $t ]] || t=$QUEUE/$(now)-$1
+  echo $2 > $t
+}
+
+# 0 if NAME's request fits now and nobody ahead of it has a better claim.
+# A holder asking to grow goes first: it keeps its share while waiting, so making it wait behind a request that
+# needs that share would deadlock both. Its own current share counts as free room for it.
+may_take() {
+  local me=$1 free=$(( POOL - $(used) )) own=0 t n mb arrived
+  if [[ -e $HOLDERS/$me ]]; then
+    own=$(mb_of $HOLDERS/$me)
+    mb=$(mb_of $(ticket_of $me)); (( mb <= free + own )); return
+  fi
+  for t in $QUEUE/*(Non); do
+    n=${${t:t}#*-}; mb=$(mb_of $t); arrived=${${t:t}%%-*}
+    if [[ $n == $me ]]; then
+      (( mb <= free )); return
+    fi
+    if [[ -e $HOLDERS/$n ]]; then
+      (( mb - $(mb_of $HOLDERS/$n) <= free )) && (( free -= mb - $(mb_of $HOLDERS/$n) ))   # a growing holder: room for its growth
+      continue
+    fi
+    if (( mb <= free )); then
+      # it fits and came first: its turn. Leave room for it, unless it has let the turn pass for TURN_MAX
+      [[ -f $TURNS/$n ]] || now > $TURNS/$n
+      (( $(now) - $(<$TURNS/$n) > TURN_MAX )) && continue
+      (( free -= mb ))
+    elif (( $(now) - arrived > BACKFILL_MAX )); then
+      return 1                                          # it has waited long enough: nobody passes it any more
+    fi
+  done
+  return 1
+}
+
+key() { <$KEY_FILE; }
+wired_mb() { [[ -n ${GPU_LOCK_FAKE_WIRED:-} ]] && { echo $GPU_LOCK_FAKE_WIRED; return; }
+  vm_stat | awk '/Pages wired down/ {gsub(/\./,"",$4); print int($4*16384/1048576)}'; }
+# phys_ok: 0 if no wired memory is unexplained by the baseline and the current reservations. The first holder pauses
+# llama-swap first (its models are no one's reservation) and gives the unload up to 20 s.
+PAUSED=0
+# A pause unloads every model at once and cuts off answers still streaming (2026-11-18 02:07: a user's chat ended in
+# "I/O operation on closed file."). So the first holder waits, up to GPU_LOCK_DRAIN_S (default 120 s, counted from the
+# first time it saw them), for requests from outside this machine (the Mac mini's users) to finish. It returns 1
+# meanwhile like any other wait, so acquire keeps polling and try says "still waiting".
+DRAIN_S=${GPU_LOCK_DRAIN_S:-120}
+users_done() {
+  [[ -n ${GPU_LOCK_NOSWAP:-} && -z ${GPU_LOCK_INFLIGHT_CMD:-} ]] && return 0   # tests set the command to test this
+  local n since now f=$DIR/drain-since
+  n=$(${=GPU_LOCK_INFLIGHT_CMD:-$HOME/llm-serving/bin/lsw-inflight} 2>/dev/null) || return 0   # no answer: nothing to wait for
+  (( n == 0 )) && { rm -f $f; return 0; }
+  now=$(date +%s)
+  [[ -s $f ]] || echo $now > $f
+  since=$(<$f)
+  (( now - since > DRAIN_S + 600 )) && { since=$now; echo $now > $f; }   # left by an acquire that gave up long ago
+  if (( now - since >= DRAIN_S )); then
+    echo "llama-swap still serves $n user request(s) after ${DRAIN_S} s: pausing anyway"; rm -f $f; return 0
+  fi
+  echo "waiting for $n user request(s) on llama-swap to finish before pausing it ($(( now - since )) of ${DRAIN_S} s)"
+  return 1
+}
+phys_ok() {
+  local w i limit=$(( BASE_TOL + $(used) ))
+  if (( $(nholders) == 0 )); then
+    users_done || return 1
+    swap_pause; PAUSED=1
+    for i in $(seq 1 10); do (( $(wired_mb) <= limit )) && return 0; sleep 2; done
+  fi
+  w=$(wired_mb)
+  (( w <= limit )) && return 0
+  echo "memory check: $w MB wired now > $limit MB (baseline allowance $BASE_TOL + $(used) MB reserved): memory outside"
+  echo "  the reservations is still wired (a force-released holder's servers? see $DIR/watchdog.log); waiting"
+  return 1
+}
+swap_pause() {
+  [[ -n ${GPU_LOCK_NOSWAP:-} ]] && { echo "(test) would pause llama-swap"; return; }
+  curl -s -m 30 -X POST -H "Authorization: Bearer $(key)" http://127.0.0.1:8080/api/models/pause >/dev/null \
+    && echo "llama-swap paused (first holder)" || echo "WARNING: could not pause llama-swap"
+}
+swap_resume() {
+  [[ -n ${GPU_LOCK_NOSWAP:-} ]] && { echo "(test) would resume llama-swap"; return; }
+  curl -s -m 30 -X POST -H "Authorization: Bearer $(key)" http://127.0.0.1:8080/api/models/resume >/dev/null \
+    && echo "llama-swap resumed (no model preloaded)" \
+    || echo "WARNING: could not resume llama-swap; check ~/llm-serving/platform/llama-swap/logs/server.log"
+}
+
+take() {  # take NAME MB: 0 and a share if possible
+  local first=0
+  local cur
+  if [[ -e $HOLDERS/$1 ]]; then
+    cur=$(mb_of $HOLDERS/$1)
+    # a holder that names a different MB resizes its share in place: shrinking always works, growing only into free room
+    # (growing queues like a new request, keeping the current share meanwhile; exit 1 until it is granted)
+    if [[ -n $explicit ]] && (( $2 != cur )); then
+      if (( $2 > cur )); then
+        deadlock_check $1 $2
+        join_queue $1 $2
+        may_take $1 || { echo "cannot grow $1 from $cur to $2 MB yet: free $(( POOL - $(used) )) MB; queued, you keep $cur MB meanwhile"; return 1; }
+        phys_ok || return 1
+        rm -f $(ticket_of $1)
+      fi
+      { echo "$2 since $(sed -n '1s/^[0-9]* since //p' $HOLDERS/$1)"; sed -n '2,$p' $HOLDERS/$1; } > $HOLDERS/$1.tmp && mv $HOLDERS/$1.tmp $HOLDERS/$1
+      echo "share of $1 resized: $cur -> $2 MB (reserved $(used) of $POOL MB)"; return 0
+    fi
+    echo "you already hold a share ($cur MB)"; return 0
+  fi
+  deadlock_check $1 $2
+  join_queue $1 $2
+  rm -f $TURNS/$1                                       # polling shows it is here: its turn clock restarts
+  may_take $1 || return 1
+  (( $(nholders) == 0 )) && first=1
+  phys_ok || return 1
+  rm -f $FORCED/$1
+  printf '%s\nchain: %s\nagent: %s\n' "$2 since $(date '+%F %T')" "${CHAIN[*]}" "$AGENT" > $HOLDERS/$1
+  rm -f $(ticket_of $1)
+  echo "gpu share acquired by $1: $2 MB (reserved $(used) of $POOL MB)"
+  (( first && ! PAUSED )) && swap_pause
+  return 0
+}
+
+busy_msg() {
+  echo "waiting: $1 needs $2 MB, free $(( POOL - $(used) )) of $POOL MB; holders: $(holder_list); queue: $(queue_list)"
+}
+holder_list() { local t; for t in $HOLDERS/*(N); do echo -n "${t:t}=$(mb_of $t) "; done; }
+queue_list() { local t; for t in $QUEUE/*(Non); do echo -n "${${t:t}#*-}=$(mb_of $t) "; done; }
+
+need() {
+  [[ -n $name ]] || { echo "usage: gpu-lock $cmd NAME${1:+ [MB]}"; exit 2; }
+  [[ $name =~ '^[A-Za-z0-9_.]+$' ]] || { echo "NAME must be letters, digits, _ or ."; exit 2; }
+}
+parse_mb() {
+  [[ $want == all ]] && { want=$POOL; return; }
+  [[ $want == <-> ]] || { echo "MB must be a number of megabytes or 'all'"; exit 2; }
+  (( want > POOL )) && { echo "$want MB is more than the pool ($POOL MB)"; exit 2; }
+  (( want < 1 )) && { echo "MB must be at least 1"; exit 2; }
+}
+
+[[ -n $name && -f $FORCED/$name ]] && cat $FORCED/$name >&2
+case $cmd in
+  try)
+    need 1; parse_mb
+    lock_state; migrate; sentinel; prune
+    take $name $want && exit 0
+    busy_msg $name $want; exit 1 ;;
+  acquire)
+    need 1; parse_mb
+    for i in $(seq 1 18); do
+      lock_state; migrate; sentinel; prune
+      take $name $want && exit 0
+      echo -n "$(date '+%H:%M:%S') "; busy_msg $name $want
+      unlock_state; trap - EXIT
+      sleep 30
+    done
+    echo "still waiting (your place in the queue is kept for 15 min): call try/acquire again"; exit 1 ;;
+  heartbeat)
+    need
+    lock_state; migrate; sentinel
+    [[ -e $HOLDERS/$name ]] && touch $HOLDERS/$name && echo "heartbeat ok" || { echo "not a holder: $name (holders: $(holder_list))"; exit 1; } ;;
+  release)
+    need
+    lock_state; migrate; sentinel; prune
+    [[ -e $HOLDERS/$name ]] || { echo "not a holder: $name (holders: $(holder_list))"; exit 1; }
+    rm -f $HOLDERS/$name
+    if (( $(nholders) > 0 )); then
+      echo "gpu share released by $name; still held by: $(holder_list)(llama-swap left paused)"
+    elif [[ -n "$(queue_list)" ]]; then
+      echo "gpu share released by $name; queue: $(queue_list)(llama-swap left as is)"
+    else
+      swap_resume
+      echo "gpu share released by $name; no holders, queue empty"
+    fi ;;
+  cancel)
+    # leave the queue without ever holding a share (2026-11-18: agents deleted ticket files by hand). A waiting
+    # `acquire` loop would queue again on its next poll, so stop that process first.
+    need
+    lock_state; migrate; sentinel
+    t=$(ticket_of $name)
+    [[ -n $t ]] || { echo "not queued: $name (queue: $(queue_list))"; exit 1; }
+    rm -f $t; echo "queue ticket removed: $name" ;;
+  status)
+    lock_state; migrate; sentinel; prune
+    if (( $(nholders) == 0 )); then echo "free (0 of $POOL MB reserved)"; else
+      echo "reserved $(used) of $POOL MB; holders:"
+      for t in $HOLDERS/*(N); do echo "  ${t:t}: $(mb_of $t) MB, $(sed -n '1s/^[0-9]* //p' $t), agent $(agent_of $t || true) (idle $(( $(now) - $(mtime $t) ))s)"; done
+    fi
+    echo -n "queue:"; for t in $QUEUE/*(Non); do echo -n " ${${t:t}#*-}=$(mb_of $t)MB(waiting $(( $(now) - ${${t:t}%%-*} ))s)"; done; echo ;;
+  *) echo "usage: gpu-lock try|acquire NAME [MB|all] | heartbeat|release|cancel NAME | status"; exit 2 ;;
+esac

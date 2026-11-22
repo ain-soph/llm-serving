@@ -16,4 +16,4 @@
   （第一行 `OK|WARN|FAIL <时间>`）。不加载会卸下聊天模型的模型，只用标准库。门限：磁盘 < 60 GiB WARN、< 20 GiB FAIL；
   `kern.memorystatus_level` < 15 WARN、< 8 FAIL。
 - **可选的多 agent GPU 锁**：设置 `GPU_LOCK`（锁工具路径）后 `tools/regress` 会先占满整个 GPU 池再跑；设置 `GPU_LOCK_HOLDERS` 后健康检查会报告占锁过久。
-  锁工具本身不在本仓库。
+  锁工具在 `serving/bin/`，由 `tools/install_serving.py` 装到 `~/llm-serving/bin/`，规则见 [gpu-lock.md](gpu-lock.md)。

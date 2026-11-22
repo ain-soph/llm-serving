@@ -14,7 +14,7 @@ RULES = {
     "credential-bearing URL": re.compile(rb"https?://[^\s/:]+:[^\s/@]+@"),
     "literal Bearer credential": re.compile(rb"Bearer\s+[A-Za-z0-9_=-]{24,}"),
 }
-FORBIDDEN = {".env", ".api_key", "api_key", "AGENTS.md", "WORKLOG.md"}
+FORBIDDEN = {".env", ".api_key", "api_key", "AGENTS.md", "WORKLOG.md", "serving-values.json"}
 EXTENSIONS = {".py", ".md", ".json", ".toml", ".lock", ".sh", ".yaml", ".yml", ".txt", ".metal", ".jsonl",
               ".sb", ".rules"}  # .sb/.rules: the local worker's sandbox profile and Codex execpolicy
 
@@ -28,7 +28,8 @@ def inspect_file(path, data, extra_literals=()):
     public = path.as_posix() in PUBLIC_IN_PRIVATE_DIRS
     if path.name in FORBIDDEN or (not public and any(p in {".venv", ".local", "logs", "outputs", "media", "models", "reports", "clients", "mcp"} for p in path.parts)):
         problems.append("private/runtime file")
-    script_dir = path.parent.name == "tools" or path.parts[:1] == ("agents",)
+    # serving/bin: the published GPU lock scripts (tools/install_serving.py)
+    script_dir = path.parent.name == "tools" or path.parts[:1] == ("agents",) or path.parts[:2] == ("serving", "bin")
     if path.suffix not in EXTENSIONS and path.name not in {"Brewfile", "LICENSE", ".gitignore", ".python-version", "Dockerfile", ".keep"} \
             and not (script_dir and data.startswith(b"#!")):
         problems.append("unexpected file type")

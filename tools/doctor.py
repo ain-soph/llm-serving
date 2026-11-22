@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 import install_agents
+import install_serving
 import llm_collab_bridge
 from service import environment
 
@@ -18,6 +19,10 @@ def main():
     p.add_argument("--config", type=Path, default=ROOT / ".local/config/machine.json")
     p.add_argument("--skip-models", action="store_true")
     a = p.parse_args()
+    # Serving glue under ~/llm-serving (gpu-lock, lsw-inflight, Strata routes, llama-swap key): WARN only.
+    install_serving.doctor()
+    if not a.config.is_file():
+        raise SystemExit(f"FAIL missing {a.config.name}; run tools/configure.py first")
     c = json.loads(a.config.read_text())
     errors = []
     for name in ("mlx.core", "mlx_lm", "h3_image_mlx.api", "mflux", "mlx_audio", "torchvision", "mlx_whisper", "mlx_qwen3_asr", "numpy", "soundfile",
