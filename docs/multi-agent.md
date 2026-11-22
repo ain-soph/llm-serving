@@ -8,7 +8,9 @@
 - 正文：[`agents/claude-code/global-CLAUDE.md`](../agents/claude-code/global-CLAUDE.md)，装进 `~/.claude/CLAUDE.md`，对所有
   Claude Code 会话生效。要点：主窗口只编排；L1 打杂交给 Codex 或本地 worker，L2 交给 Claude subagent，L3 由 Claude
   与 agy 各自出方案再互审（必要时 Fable 审阅）；性能分歧看 benchmark；测试清单由 Claude/agy 设计，执行者只收集原始结果；
-  写审分离，work 模式每任务一个写入者。
+  写审分离，work 模式每任务一个写入者；长任务和 gpu-lock 排队用一条后台命令等退出通知，不短间隔轮询（兜底 ≥30 分钟），
+  阶段边界写 checkpoint，上下文约 300k token 时换新 agent 读 checkpoint 接着做。同一条等待规则也在生产 `AGENTS.md` 规则 1
+  和 [gpu-lock.md](gpu-lock.md)。
 - 同一套角色规则也写在 [llm-collab](https://github.com/ain-soph/llm-collab) 的 MCP 策略里，每个 bridge 任务都会带上，
   所以 Codex 和 agy 即使不读 CLAUDE.md 也会收到。
 
@@ -53,7 +55,7 @@
 
 | 旧 wrapper 的行为 | 现在由谁提供 |
 | --- | --- |
-| 策略文本：协调者顺序、3% 交接、VOTE、GPU 行、Permissions 行、Roles 行 | llm-collab `src/server.mjs`，文字相同（`fullControl` 开时带 Permissions 行） |
+| 策略文本：协调者顺序、3% 交接、VOTE、GPU 行、Permissions 行、Roles 行 | llm-collab `src/server.mjs`，文字相同（`fullControl` 开时带 Permissions 行）；2026-11-21 起另加等待行和上下文行 |
 | 委派回合完全控制（Claude/agy/Codex 去沙箱、去审批）；`continue_collaboration` 升级为 implement/yolo | llm-collab `src/provider.mjs`、`src/server.mjs`；`llm-collab.json` 的 `fullControl`、`codexYolo` |
 | `workspace` 可为任意目录（`BRIDGE_WORKSPACE_ROOT=/`）、`taskBranch` 私有 checkout | llm-collab；`llm-collab.json` 的 `workspaceRoot: "/"` |
 | `AGY_MODEL` 作为 Antigravity 默认路由 | llm-collab `src/server.mjs`；值在 `llm-collab.env` |

@@ -34,6 +34,9 @@ worker 只能写这里）、`--timeout 90s|45m|1h`（30 s–60 min，默认 60m�
 `events.jsonl`（Claude Code `stream-json` / Codex `exec --json` 原始事件）、`stderr.log`、`run.log`、`prompt.txt`、
 `net-attempts.jsonl`、`summary.json`。
 
+编排者在后台命令里调用 `run`（如 Claude Code `run_in_background` Bash；带 `--wait` 时尤其如此），结束回合等退出通知，
+不用短间隔轮询（规则见 `agents/claude-code/global-CLAUDE.md` 的“等待长任务”）。
+
 退出码：0 harness 正常结束（任务是否真的完成要自己验）；2 参数错；3 模型/环境错误；75 GPU 忙（未加 `--wait`）
 或 gpu-lock 拒绝；124 硬超时；其他 = harness 自身退出码。
 

@@ -2,7 +2,7 @@
   "llm-collab": {
     "url": "https://github.com/ain-soph/llm-collab.git",
     "branch": "main",
-    "commit": "08cc429dd17e6373c310cd343de681bcc5bced47",
+    "commit": "1efbb387ffbd8691901c5396ea8eb83f68be5b82",
     "path": "release"
   },
   "local-agent-bridge": {
