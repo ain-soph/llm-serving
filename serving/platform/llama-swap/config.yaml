@@ -1,0 +1,68 @@
+# llama-swap: replaces the llama-server router on :8080 (see serve.sh).
+# Each key under models is the model ID clients send in "model". The capacity router lets models
+# share the GPU while their declared capacities fit the pool; otherwise it unloads the cheapest to lose.
+# The API key comes from LLAMA_API_KEY, which serve.sh reads from
+# .api_key next to this file.
+
+healthCheckTimeout: 600   # loading ~95 GB from SSD can be slow on a cold page cache
+unloadTimeout: 30         # was stop-timeout = 30 in models.ini
+globalTTL: 0              # never unload on idle
+
+apiKeys:
+  - "${env.LLAMA_API_KEY}"
+
+# Keep activity history (per-request model/time/tokens) across restarts.
+# Request/response captures stay in memory only.
+store:
+  path: @SERVING_ROOT@/platform/llama-swap/activity.sqlite
+
+macros:
+  "h3-image-cmd": >
+    @SERVING_ROOT@/.venv/bin/python @SERVING_ROOT@/services/image/h3-image-mlx/server.py
+    --port ${PORT} --models @MODELS@/minimax-h3-image
+
+# Memory pool in MB the GPU may wire: ${env.LSW_GPU_POOL} from ~/llm-serving/bin/gpu-pool (exported by serve.sh /
+# lsw-apply) = iogpu.wired_limit_mb - system baseline - always-loaded models (embeddinggemma-2, no capacities).
+# Each model's capacities.gpu is its measured peak footprint plus a margin.
+routing:
+  router:
+    use: capacity
+    settings:
+      capacity:
+        pools:
+          gpu: ${env.LSW_GPU_POOL}
+
+models:
+
+  # MiniMax-H3-Image via h3-image-mlx (github.com/ain-soph/h3-image-mlx, branch serving) behind
+  # ~/llm-serving/services/image/h3-image-mlx/server.py: POST /v1/images/generations and /v1/images/edits. One code path for both
+  # entries (2026-11-16): zero-copy weights (DiT and text encoder replaced by page-aligned copies with
+  # `h3-image-mlx align`, mapped read-only) and the streamed DiT. All sizes stay beside Flash-Next (2026-11-16): in
+  # alternating use a 4096² image takes ~120 s and the next chat reply ~3 s longer (page-cache churn), cheaper than
+  # unloading/reloading the chat model (~26 s); deploy/image-alternate-test-1116-1726. The exclusive target and the
+  # gateway size router were retired.
+  # Idle, the wrapper holds almost nothing; the capacities are generation peaks.
+  # Chat clients keep image models out of their pickers with allowlists
+  # (LobeChat VLLM_MODEL_LIST, Open WebUI connection model_ids).
+  "minimax-h3-image":
+    name: "MiniMax H3 Image"
+    description: "Every size, next to the chat model"
+    ttl: 600              # it fits next to the chat model, so no reload between images
+    capabilities:
+      in: [text, image]
+      out: [image]
+    checkEndpoint: /health
+    env:
+      - "H3_ZERO_COPY=1"
+      - "H3_ASYNC=1"
+      - "H3_GPU_BUDGET_MB=8000"    # DiT buffer cache within the 10000 below
+    cmd: ${h3-image-cmd} --model-id minimax-h3-image
+    capacities:
+      gpu: 10000            # wired peak 2-6 GB (1024²-4096²); 2160p beside Flash-Next + 116k prompt: compressor 9.5 GB, no swap
+    evict_cost: 0
+
+hooks:
+  on_startup:
+    preload:
+      - "qwen3.8-flash-next"   # Strata, fixed 2 slots (conf.d/strata.yaml)
+      - "embeddinggemma-2"   # always loaded (conf.d/embedding.yaml)

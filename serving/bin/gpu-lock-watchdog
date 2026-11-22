@@ -1,0 +1,163 @@
+#!/usr/bin/python3 -I
+"""Force-releases gpu-lock shares whose holders have not used the GPU for IDLE seconds (user rule, 2026-11-15).
+
+Run every minute by the LaunchAgent com.local.gpu-lock-watchdog. Each run:
+  1. reads every process's accumulated GPU time (ns) from `ioreg -a -r -c AGXDeviceUserClient` (no sudo needed);
+  2. keeps only inference processes (command under ~/llm-serving, llama-server/llama-swap, or weights in ~/models)
+     and marks the holders whose processes used more than MIN_GPU_NS since the previous run as active: a process
+     belongs to a holder when the shell that took the share (holders/NAME "chain:" first pid) or else its agent
+     process is an ancestor; GPU use nobody can be matched to marks every holder active (never release wrongly);
+  3. releases a share when it is older than IDLE and none of its activity is younger than IDLE: the holder file
+     is removed, holders/../forced/NAME says why (gpu-lock shows it to that agent; its next heartbeat fails), and
+     llama-swap is resumed when nobody holds or waits. The holder's processes are NOT stopped (user decision):
+     gpu-lock's physical memory check keeps new grants from loading on top of them.
+State: .locks/watchdog-state.json; log: .locks/watchdog.log. Test hooks: GPU_LOCK_DIR, WATCHDOG_FAKE_GPU (a JSON
+file {pid: ns} used instead of ioreg), WATCHDOG_TIME_SHIFT (seconds added to now), GPU_LOCK_NOSWAP.
+"""
+import json, os, plistlib, re, subprocess, time, urllib.request
+from pathlib import Path
+
+HOME = Path.home()
+LOCKS = Path(os.environ.get("GPU_LOCK_DIR") or HOME / "llm-serving/.locks")
+HOLDERS, QUEUE, FORCED = LOCKS / "holders", LOCKS / "queue", LOCKS / "forced"
+STATE, LOG = LOCKS / "watchdog-state.json", LOCKS / "watchdog.log"
+KEY_FILE = HOME / "llm-serving/platform/llama-swap/.api_key"
+IDLE = 600                 # s without GPU use before a share is released (also the grace period after acquiring)
+MIN_GPU_NS = 100_000_000   # 0.1 s of GPU time between two runs counts as use
+INFERENCE = re.compile(r"/llm-serving/|llama-server|llama-swap|/models/")
+
+
+def log(msg):
+    with open(LOG, "a") as f:
+        f.write(time.strftime("%F %T ") + msg + "\n")
+
+
+def gpu_times():
+    fake = os.environ.get("WATCHDOG_FAKE_GPU")
+    if fake:
+        return {int(k): v for k, v in json.loads(Path(fake).read_text()).items()}
+    out = subprocess.run(["/usr/sbin/ioreg", "-a", "-r", "-c", "AGXDeviceUserClient"], capture_output=True).stdout
+    times = {}
+    for c in plistlib.loads(out) if out else []:
+        m = re.match(r"pid (\d+),", c.get("IOUserClientCreator", ""))
+        if m:
+            pid = int(m.group(1))
+            times[pid] = times.get(pid, 0) + sum(u.get("accumulatedGPUTime", 0) for u in c.get("AppUsage") or [])
+    return times
+
+
+def processes():
+    out = subprocess.run(["/bin/ps", "-axo", "pid=,ppid=,lstart=,command="], capture_output=True, text=True).stdout
+    procs = {}
+    for line in out.splitlines():
+        f = line.split(None, 7)          # pid ppid Dow Mon DD HH:MM:SS YYYY command
+        if len(f) == 8:
+            procs[int(f[0])] = (int(f[1]), " ".join(f[2:7]), f[7])
+    return procs
+
+
+def holders():
+    hs = {}
+    for p in HOLDERS.glob("*"):
+        if p.name.endswith(".tmp"):
+            continue
+        lines = p.read_text().splitlines()
+        m = re.match(r"(\d+) since (\S+ \S+)", lines[0] if lines else "")
+        since = time.mktime(time.strptime(m.group(2), "%Y-%m-%d %H:%M:%S")) if m else p.stat().st_mtime
+        kv = dict(l.split(": ", 1) for l in lines[1:] if ": " in l)
+        chain = [int(x) for x in kv.get("chain", "").split()]
+        agent = kv.get("agent", "").split()
+        hs[p.name] = dict(first=lines[0] if lines else "", since=since, shell=chain[0] if chain else None,
+                          agent=int(agent[0]) if agent else None)
+    return hs
+
+
+def ancestors(pid, procs):
+    seen = set()
+    while pid in procs and pid > 1 and pid not in seen:
+        seen.add(pid)
+        pid = procs[pid][0]
+    return seen
+
+
+def lock_state():
+    for _ in range(50):
+        try:
+            (LOCKS / "mutex").mkdir()
+            return True
+        except FileExistsError:
+            try:
+                if time.time() - (LOCKS / "mutex").stat().st_mtime > 30:
+                    (LOCKS / "mutex").rmdir()
+            except OSError:
+                pass
+            time.sleep(0.2)
+    return False
+
+
+def resume_swap():
+    if os.environ.get("GPU_LOCK_NOSWAP"):
+        log("(test) would resume llama-swap")
+        return
+    try:
+        req = urllib.request.Request("http://127.0.0.1:8080/api/models/resume", method="POST",
+                                     headers={"Authorization": "Bearer " + KEY_FILE.read_text().strip()})
+        urllib.request.urlopen(req, timeout=30).read()
+        log("llama-swap resumed (no holders, empty queue)")
+    except Exception as e:  # noqa: BLE001
+        log(f"WARNING: could not resume llama-swap: {e!r}")
+
+
+def main():
+    now = time.time() + float(os.environ.get("WATCHDOG_TIME_SHIFT", 0))   # test hook
+    try:
+        state = json.loads(STATE.read_text())
+    except (OSError, ValueError):
+        state = {}
+    prev, active = state.get("gpu", {}), state.get("active", {})
+    procs, times = processes(), gpu_times()
+    hs = holders()
+    # process identity = pid + start time, so a reused pid does not inherit an old counter
+    snap = {f"{pid}@{procs[pid][1]}": t for pid, t in times.items() if pid in procs}
+    used = []
+    for pid, t in times.items():
+        if pid not in procs or not INFERENCE.search(procs[pid][2]) or "gpu-lock-watchdog" in procs[pid][2]:
+            continue
+        if t - prev.get(f"{pid}@{procs[pid][1]}", 0) > MIN_GPU_NS:
+            used.append(pid)
+    for pid in used:
+        anc = ancestors(pid, procs)
+        owners = [h for h, d in hs.items() if d["shell"] in anc] or [h for h, d in hs.items() if d["agent"] in anc] or list(hs)
+        for h in owners:
+            active[h] = now
+    for h, d in hs.items():
+        last = max(active.get(h, 0), d["since"])
+        if now - d["since"] < IDLE or now - last < IDLE:
+            continue
+        if not lock_state():
+            log(f"could not get the mutex to release {h}; next run")
+            continue
+        try:
+            p = HOLDERS / h
+            if not p.exists() or p.read_text().splitlines()[0:1] != [d["first"]]:
+                continue                      # released or re-acquired meanwhile
+            p.unlink()
+            FORCED.mkdir(exist_ok=True)
+            why = (f"gpu-lock watchdog force-released '{h}' at {time.strftime('%F %T')}: its processes used no GPU for "
+                   f"{IDLE // 60} min (share: {d['first']}). Your processes were NOT stopped: stop your test servers now; "
+                   f"queue again (gpu-lock acquire {h} MB) only right before the next GPU work.")
+            (FORCED / h).write_text(why + "\n")
+            log(why)
+            active.pop(h, None)
+            if not any(HOLDERS.glob("*")) and not any(QUEUE.glob("*")):
+                resume_swap()
+        finally:
+            (LOCKS / "mutex").rmdir()
+    active = {h: t for h, t in active.items() if (HOLDERS / h).exists()}
+    STATE.write_text(json.dumps({"gpu": snap, "active": active, "time": now}))
+
+
+if __name__ == "__main__":
+    LOCKS.mkdir(parents=True, exist_ok=True)
+    HOLDERS.mkdir(exist_ok=True)
+    main()

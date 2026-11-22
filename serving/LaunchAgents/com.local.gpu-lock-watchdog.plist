@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.local.gpu-lock-watchdog</string>
+  <key>ProgramArguments</key>
+  <array><string>/usr/bin/python3</string><string>-I</string><string>@SERVING_ROOT@/bin/gpu-lock-watchdog</string></array>
+  <key>StartInterval</key><integer>60</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>@SERVING_ROOT@/.locks/watchdog.out</string>
+  <key>StandardErrorPath</key><string>@SERVING_ROOT@/.locks/watchdog.out</string>
+</dict>
+</plist>

@@ -2,6 +2,7 @@ import contextlib
 import hashlib
 import io
 import json
+import plistlib
 import sys
 import tempfile
 import unittest
@@ -32,7 +33,7 @@ class InstallServingTests(unittest.TestCase):
                                            "STRATA_EXE": "~/strata/build/strata",
                                            "STRATA_VISION_EXE": "/opt/vision/strata-vision"}))
         self.root = self.home / "llm-serving"
-        self.key = self.root / inst.KEY
+        self.key = self.home / inst.KEY
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -48,8 +49,8 @@ class InstallServingTests(unittest.TestCase):
         self.assertEqual(run("--home", self.home, "--values", self.values, "--check")[0], 1)
         rc, out = run("--home", self.home, "--values", self.values)
         self.assertEqual(rc, 0)
-        for rel, (kind, mode) in inst.FILES.items():
-            self.assertEqual((self.root / rel).stat().st_mode & 0o777, mode, rel)
+        for rel, (_, kind, mode) in inst.FILES.items():
+            self.assertEqual((self.home / rel).stat().st_mode & 0o777, mode, rel)
         self.assertEqual(self.key.stat().st_mode & 0o777, 0o600)
         key = self.key.read_bytes()
         self.assertGreaterEqual(len(key.strip()), 32)
@@ -64,10 +65,10 @@ class InstallServingTests(unittest.TestCase):
 
     def test_verbatim_and_rendered_content(self):
         run("--home", self.home, "--values", self.values)
-        for rel, (kind, _) in inst.FILES.items():
-            data = (self.root / rel).read_bytes()
+        for rel, (src, kind, _) in inst.FILES.items():
+            data = (self.home / rel).read_bytes()
             if kind == "verbatim":
-                self.assertEqual(data, (inst.SOURCE / rel).read_bytes())
+                self.assertEqual(data, (inst.SOURCE / src).read_bytes())
             else:
                 self.assertNotRegex(data.decode(), r"@[A-Z_]+@")
         conf = yaml.safe_load((self.root / "platform/llama-swap/conf.d/strata.yaml").read_text())
@@ -140,9 +141,10 @@ class InstallServingTests(unittest.TestCase):
         out = self.home / "rendered"
         rc, _ = run("--home", self.home, "--values", self.values, "--render", out)
         self.assertEqual(rc, 0)
-        expected = sorted(Path(r) for r, (kind, _) in inst.FILES.items() if kind == "template")
+        expected = sorted(Path(r) for r, (_, kind, _) in inst.FILES.items() if kind == "template")
         self.assertEqual(sorted(p.relative_to(out) for p in out.rglob("*") if p.is_file()), expected)
         self.assertFalse(self.root.exists())
+        self.assertFalse((self.home / "Library").exists())
 
     def test_doctor_reports_without_key(self):
         lines = []
@@ -154,10 +156,47 @@ class InstallServingTests(unittest.TestCase):
         self.assertTrue(all(line.startswith("OK") for line in lines), lines)
         self.assertNotIn(self.key.read_text().strip(), "\n".join(lines))
 
+    def test_launch_agents_written_not_loaded(self):
+        rc, out = run("--home", self.home, "--values", self.values)
+        agents = self.home / "Library/LaunchAgents"
+        self.assertEqual(sorted(p.name for p in agents.iterdir()),
+                         ["com.local.llama-server.plist", "com.local.llm-gateway.plist"])
+        for plist in agents.iterdir():
+            doc = plistlib.loads(plist.read_bytes())
+            self.assertEqual(doc["Label"], plist.stem)
+            self.assertIn(f"launchctl bootstrap gui/$(id -u) {plist}", out)
+        swap = plistlib.loads((agents / "com.local.llama-server.plist").read_bytes())
+        self.assertEqual(swap["ProgramArguments"][1], str(self.root / "platform/llama-swap/serve.sh"))
+        # the watchdog stays disabled: rendered next to its script, never into LaunchAgents
+        watchdog = plistlib.loads((self.root / "bin/com.local.gpu-lock-watchdog.plist.disabled").read_bytes())
+        self.assertEqual(watchdog["ProgramArguments"][-1], str(self.root / "bin/gpu-lock-watchdog"))
+        self.assertFalse(hasattr(inst, "subprocess"))  # it can print launchctl commands, never run them
+        # an edited LaunchAgent is backed up under ~/llm-serving/.backup/Library/LaunchAgents before --update
+        (agents / "com.local.llama-server.plist").write_text("old")
+        rc, out = run("--home", self.home, "--values", self.values, "--update")
+        self.assertIn("launchctl bootout gui/$(id -u)/com.local.llama-server", out)
+        saved = list((self.root / ".backup/Library/LaunchAgents").iterdir())
+        self.assertEqual([p.read_text() for p in saved], ["old"])
+
+    def test_llama_swap_config_and_gateway(self):
+        run("--home", self.home, "--values", self.values)
+        main = yaml.safe_load((self.root / "platform/llama-swap/config.yaml").read_text())
+        self.assertEqual(main["apiKeys"], ["${env.LLAMA_API_KEY}"])
+        self.assertEqual(main["store"]["path"], str(self.root / "platform/llama-swap/activity.sqlite"))
+        self.assertEqual(main["macros"]["h3-image-cmd"].split()[-1], str(self.home / "weights/minimax-h3-image"))
+        caddy = (self.root / "platform/gateway/Caddyfile").read_text()
+        self.assertIn("trusted_proxies static 127.0.0.1/32", caddy)
+        self.values.write_text(json.dumps({"TRUSTED_PROXY": "127.0.0.2"}))
+        self.assertIn("trusted_proxies static 127.0.0.2/32",
+                      inst.rendered(inst.load_values(self.home, self.values))[inst.S + "platform/gateway/Caddyfile"][0].decode())
+        self.values.write_text(json.dumps({"TRUSTED_PROXY": "127.0.0.0/8"}))
+        with self.assertRaises(ValueError):
+            inst.load_values(self.home, self.values)
+
     def test_published_files_pass_privacy_rules(self):
-        for rel in inst.FILES:
-            path = Path("serving") / rel
-            self.assertEqual(privacy_check.inspect_file(path, (inst.SOURCE / rel).read_bytes()), [], rel)
+        for src, _, _ in inst.FILES.values():
+            path = Path("serving") / src
+            self.assertEqual(privacy_check.inspect_file(path, (inst.SOURCE / src).read_bytes()), [], src)
         for private in ("serving/platform/llama-swap/.api_key", ".local/serving-values.json", "serving-values.json"):
             self.assertIn("private/runtime file", privacy_check.inspect_file(Path(private), b"{}\n"))
         self.assertIn("unexpected file type", privacy_check.inspect_file(Path("serving/conf/tool"), b"#!/bin/sh\n"))

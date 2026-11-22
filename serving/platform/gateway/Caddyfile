@@ -1,0 +1,84 @@
+# llm gateway on the Mac Studio (2026-11-16): the only listener on :8080, in front of llama-swap (127.0.0.1:8081),
+# so this machine serves its whole API itself and SWAG on the Mac mini only does TLS, login and plain forwarding.
+# The one thing llama-swap cannot route: /v1/videos (POST renders on minimax-h3-video) and the reads of finished
+# videos/images (/v1/videos GET, /media/*), which go to the standalone read-only server com.local.h3-video-files on
+# 127.0.0.1:8090 (since 2026-11-16; it used to be the llama-swap model minimax-h3-video-files). API keys stay with
+# llama-swap: renders are /upstream paths, reads ask llama-swap first (forward_auth on /v1/models).
+# Client IPs: only the Mac mini (SWAG, @TRUSTED_PROXY@) is trusted; its X-Real-IP (SWAG's real_ip result) becomes the
+# client IP, and X-Forwarded-For is rewritten to that one address, which is what llama-swap's activity log records.
+# LaunchAgent: com.local.llm-gateway.
+# OpenAI Decisions API (2026-11-16): llama-swap routes the SystemOne protocol (/v1/systemone) but not /v1/decisions, so
+# /v1/decisions goes to the translator com.local.decisions (127.0.0.1:8095), which rewrites it to /v1/systemone on
+# llama-swap (models: conf.d/decisions.yaml). The key is checked first, as for the media reads.
+# Image requests go straight to llama-swap (2026-11-16): the size router (com.local.image-router) and the exclusive
+# image target were retired at the user's request — alternating chat and 4096^2 images beside Flash-Next costs ~3 s on the
+# next chat (page-cache churn), less than reloading the chat model (~26 s). Retired files: gateway/retired/.
+{
+	admin off
+	auto_https off
+	persist_config off
+	servers {
+		trusted_proxies static @TRUSTED_PROXY@/32
+		client_ip_headers X-Real-IP
+	}
+	log {
+		output file @SERVING_ROOT@/platform/gateway/logs/caddy.log {
+			roll_size 20MiB
+			roll_keep 3
+		}
+		level WARN
+	}
+}
+
+(upstream) {
+	reverse_proxy 127.0.0.1:8081 {
+		flush_interval -1
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+(decisions) {
+	forward_auth 127.0.0.1:8081 {
+		uri /v1/models
+	}
+	reverse_proxy 127.0.0.1:8095 {
+		header_up X-Forwarded-For {client_ip}
+		header_up X-Real-IP {client_ip}
+	}
+}
+
+(files) {
+	forward_auth 127.0.0.1:8081 {
+		uri /v1/models
+	}
+	reverse_proxy 127.0.0.1:8090 {
+		flush_interval -1
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+:8080 {
+	@video_render {
+		method POST
+		path /v1/videos /v1/videos/*
+	}
+	@video_read {
+		path /v1/videos /v1/videos/* /media/*
+	}
+	@decisions {
+		path /v1/decisions
+	}
+	handle @decisions {
+		import decisions
+	}
+	handle @video_render {
+		rewrite * /upstream/minimax-h3-video{uri}
+		import upstream
+	}
+	handle @video_read {
+		import files
+	}
+	handle {
+		import upstream
+	}
+}

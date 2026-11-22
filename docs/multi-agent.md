@@ -38,7 +38,7 @@
 | --- | --- | --- |
 | 全局 CLAUDE.md 规则 | 本仓库 `agents/claude-code/` | `tools/bootstrap.sh` 或 `tools/install_agents.py` |
 | 本地 worker | 本仓库 `agents/local-worker/` | 同上（建符号链接） |
-| gpu-lock、Strata 路由、llama-swap key | 本仓库 `serving/` | `tools/bootstrap.sh` 或 `tools/install_serving.py` |
+| gpu-lock、llama-swap 配置与 key、网关、Strata 路由、LaunchAgent | 本仓库 `serving/` | `tools/bootstrap.sh` 或 `tools/install_serving.py` |
 | llm-collab MCP 服务 | [ain-soph/llm-collab](https://github.com/ain-soph/llm-collab)，commit 固定在 `agents/llm-collab/pins.json` | `tools/install_agents.py`（clone、`npm ci`、注册三个客户端） |
 | Bridge 运行时 | [ain-soph/local-agent-bridge](https://github.com/ain-soph/local-agent-bridge)（分支 `serving`），同上固定 | 同上 |
 | 启动器、配置、各 provider 的模型 | 本仓库 `agents/llm-collab/` | 同上（复制到 bridge 目录，旧文件先备份） |

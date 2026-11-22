@@ -1,0 +1,24 @@
+#!/bin/zsh
+# Validates llama-swap's config (config.yaml + conf.d/*.yaml), restarts the service, and waits until
+# qwen3.8-flash-next is ready again. Only an exclusive gpu-lock holder may run it: gpu-lock acquire NAME first.
+#   lsw-apply NAME
+set -u
+name=${1:-}; DIR=$HOME/llm-serving/platform/llama-swap
+[[ -n $name ]] || { echo "usage: lsw-apply NAME"; exit 2; }
+# gpu-lock v2: a restart unloads everything and preloads Flash-Next (~70 GB) plus the always-loaded embedding model, so NAME must hold the whole pool
+# (gpu-lock acquire NAME, without MB) and be the only holder.
+H=$HOME/llm-serving/.locks/holders
+eval "$($HOME/llm-serving/bin/gpu-pool --env)"     # LSW_GPU_POOL / LSW_GPU_EXCLUSIVE, as serve.sh exports them
+others=(${${(f)"$(ls $H 2>/dev/null)"}:#$name})
+[[ -f $H/$name ]] || { echo "refusing: $name holds no gpu share (gpu-lock acquire $name, exclusive)"; exit 1; }
+(( $(awk 'NR==1{print $1}' $H/$name) >= LSW_GPU_POOL )) || { echo "refusing: $name holds only $(awk 'NR==1{print $1}' $H/$name) MB; lsw-apply needs an exclusive share (gpu-lock acquire $name without MB)"; exit 1; }
+(( ${#others} == 0 )) || { echo "refusing: other holders present: ${others[*]}"; exit 1; }
+LLAMA_API_KEY=x llama-swap -config $DIR/config.yaml -config-dir $DIR/conf.d -validate || exit 1
+launchctl kickstart -k gui/$UID/com.local.llama-server
+key=$(<$DIR/.api_key)
+for i in $(seq 1 120); do
+  sleep 3
+  curl -s -H "Authorization: Bearer $key" http://127.0.0.1:8080/running | grep -q '"ready"' && break
+done
+curl -s -H "Authorization: Bearer $key" http://127.0.0.1:8080/running \
+  | python3 -I -c "import json,sys; print('running:', [(m['model'], m['state']) for m in json.load(sys.stdin)['running']])"
