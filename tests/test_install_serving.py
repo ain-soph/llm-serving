@@ -75,7 +75,7 @@ class InstallServingTests(unittest.TestCase):
         conf = yaml.safe_load((self.root / "platform/llama-swap/conf.d/strata.yaml").read_text())
         cmd = conf["models"]["qwen3.8-flash-next-uncensored"]["cmd"].split()
         self.assertEqual(cmd[0], str(self.root / ".venv/bin/python"))
-        self.assertEqual(cmd[1], str(self.home / "strata/serve/server.py"))
+        self.assertEqual(cmd[1], str(self.home / "strata/terminal/serve/server.py"))
         self.assertEqual(cmd[cmd.index("--config") + 1],
                          str(self.root / "services/text/strata/configs/strata-uncensored-c262k-p2-compact.json"))
         engine = json.loads((self.root / "services/text/strata/configs/strata-ad427-c262k-p2-compact.json").read_text())

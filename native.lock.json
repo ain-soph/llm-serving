@@ -6,11 +6,6 @@
       "revision": "4cf59801f142f6d6e8e6a71a192a69bc63465abe",
       "license": "MIT"
     },
-    "strata-ggml": {
-      "url": "https://github.com/ggml-org/llama.cpp.git",
-      "revision": "3cf03257f219afbe7334045ff7c6a06ac68c627d",
-      "license": "MIT"
-    },
     "h3": {
       "url": "https://github.com/ain-soph/h3.c.git",
       "revision": "6c3a53e51ba5fdc363483c9cadb3059d54242dc4",

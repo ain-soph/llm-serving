@@ -71,13 +71,12 @@ def build(name, jobs):
     src = checkout(name)
     commands = []
     if name == "strata":
-        ggml = checkout("strata-ggml")
+        # upstream layout: engine/metal (ggml vendored, Strata's own CPU quant layer), terminal/tools/vision (own tower)
         headers = metal_headers()
-        flags = [f"-DMETAL_CPP_DIR={headers}", f"-DSTRATA_GGML_DIR={ggml}"]
-        cmake(src / "metal", src / "build-metal-serving", flags, ["strata"], jobs)
-        vision_flags = [f"-DLLAMA_DIR={ggml}", "-DSTRATA_VISION_CUDA=OFF", "-DSTRATA_VISION_METAL=ON",
-                        "-DSTRATA_PORTABLE=OFF", "-DGGML_OPENMP=OFF"]
-        cmake(src / "tools/vision", src / "build-vision", vision_flags, ["strata-vision"], jobs)
+        flags = [f"-DMETAL_CPP_DIR={headers}", "-DSTRATA_OWN_CPU_QUANT=ON"]
+        cmake(src / "engine/metal", src / "build-metal-serving", flags, ["strata"], jobs)
+        vision_flags = ["-DSTRATA_VISION_CUDA=OFF", "-DSTRATA_VISION_METAL=ON", "-DSTRATA_PORTABLE=OFF"]
+        cmake(src / "terminal/tools/vision", src / "build-vision", vision_flags, ["strata-vision"], jobs)
         products = [src / "build-metal-serving/strata", src / "build-vision/bin/strata-vision"]
         commands = [flags, vision_flags]
     elif name == "h3":

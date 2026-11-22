@@ -7,8 +7,8 @@
 
 | 类别 | 模型 ID | 后端 | 权重精度 | 速度（关键数） | 内存（关键数） | 权重磁盘 |
 | --- | --- | --- | --- | --- | --- | ---: |
-| 文本／视觉 | `qwen3.8-flash-next` | Strata Metal fork | AD-4.27 混合（3.57 bpw 主体） | prefill 2,730–2,758 tok/s（约 35K）；decode 142.4（单路）／151.2（双路合计）tok/s | wired +67,695 MiB（262K × 2 槽） | 96.94 GB |
-| 文本／视觉 | `qwen3.8-flash-next-uncensored` | Strata Metal fork | 同上 | prefill 2,522–2,544 tok/s（约 257K–260K）；续问 TTFT 0.25–0.49 s | wired +66,162 MiB（262K × 2 槽） | 96.95 GB |
+| 文本／视觉 | `qwen3.8-flash-next` | Strata Metal fork | AD-4.27 混合（3.57 bpw 主体） | prefill 2,725 tok/s（26K）／2,694（116K）；decode 152.4（单路）／158.2（双路合计）tok/s（`82d63e19e`） | wired +65,880 MiB（262K × 2 槽） | 96.94 GB |
+| 文本／视觉 | `qwen3.8-flash-next-uncensored` | Strata Metal fork | 同上 | prefill 2,762 tok/s（26K）／2,701（116K）；decode 148.9（单路）／154.3（双路合计）tok/s；260K 续问 TTFT 0.25–0.49 s | wired +65,684 MiB（262K × 2 槽） | 96.95 GB |
 | 文本嵌入 | `embeddinggemma-2` | MLX，M5 TensorOps | BF16 权重，FP32 激活 | 16-token 查询 5.6 ms，64 × 400 token 达 57,814–58,226 tok/s（独占 GPU 内核验收） | 服务 wired 峰值增量 2680 MiB，常驻预留 3160 MiB | 0.558 GB + 32 MB 分词器 |
 | 多模态嵌入 | `embeddinggemma-2-multimodal` | llama.cpp + 适配层 | BF16 | 图片 0.04–0.12 s；5 s 音频 0.035 s；4 s 视频 0.34 s | wired +2996 MiB | 1.540 GB |
 | 文本嵌入 | `qwen3-embedding-0.6b`／`-4b` | MLX，自写服务 | FP16 | 64 × 450 token 0.39／2.50 s | wired 峰值 +2705／+10323 MiB（32K 输入） | 1.21／8.06 GB |
@@ -33,6 +33,20 @@
 ¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享 VAE；文本编码器链接到 H3 图片的 INT8 文件，不另计。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。⁶ 2026-11-18（pa1b）起每个尺寸一个入口：原精确入口与 `-int8` 入口合并为 `common/qwen3_w8a8.py mix` 写出的预量化混合副本（`mix.json`，零拷贝），见 [w8a8.md](w8a8.md)；下文 11-16／11-17 的 `-int8` 数据保留作记录。
 
 ## 文本：Qwen3.8 Flash-Next（Strata）
+
+**现行：Strata `82d63e19e`，2026-11-22**。fork `serving` 改为上游 main `6e38f588a`（v0.2.18 之后）+ 我们的提交（rebase）。配置同下面的省内存双槽：262144 ctx × 2，AD-4.27，INT8 KV，MTP Q2_0（spec 3），两项改变精度的开关关闭。按上游默认：Strata 自有 Qwen 视觉塔、draft-cost 表开（每台机器从前约 100 个真实请求被动学到）、GPU keep-alive 开。M5 Ultra 独占；c=1 为 36–62 token 提示各解码 400 token，c=2 为两路各 400 token 合计，prefill 为服务端计时，均为三次中位数。
+
+| 权重 | 设置 | c=1 decode tok/s | c=2 合计 tok/s | prefill 26,106／115,856 token tok/s | 峰值 wired 增量 MiB | RSS GB |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| AtomicChat | 上游默认（表在用） | 152.4 | 158.2 | 2,724.9／2,693.5 | 65,880 | 66.6 |
+| AtomicChat | draft-cost 表、溢出关（对照） | 152.2 | 153.9 | 2,757.1／2,690.7 | 65,666 | 66.5 |
+| Navin | 上游默认（表在用） | 148.9 | 154.3 | 2,761.8／2,701.0 | 65,684 | 67.2 |
+| Navin | draft-cost 表、溢出关（对照） | 148.6 | 154.6 | 2,757.3／2,699.3 | 65,681 | 67.2 |
+
+- 与上一版（`4cf59801f`）同场对比，速度、内存差异在 ±1% 内（c=2 单次在约 154–159 间跳动，取决于准入时机）。24 条固定贪心请求在表开、关、跨重启下答案逐字相同。
+- 输出变化只有两处，均来自上游：非流式无正文时 `content` 由 `null` 变为 `""`；图片描述因换视觉塔而措辞不同（图中数字与颜色仍正确）。
+- 上游的 SSD 对话溢出层会创建目录，但在本配置下从不写盘：会话指纹要求 `--mtp` 目录含 `dense.bin`，Metal MTP 目录没有这个文件。
+- 修复：开 `--vision` 时省内存双槽的 M-RoPE 表合并错误、两处延迟折叠问题（长会话后续问整段重读）。修复后两图并发、图片加长 prompt 分块读入，答案与单路相同。
 
 
 **现行省内存双槽，2026-11-20**。M5 Ultra / 96 GiB，262144 ctx × 2，AD-4.27，INT8 KV，单请求保留 Q2_0 MTP。两项会改变精度的实验开关保持关闭。相同 AtomicChat 双槽工作负载下，wired 增量峰值 70,962 → 67,695 MiB。两套权重均按 69,500 MiB 预约。

@@ -1,13 +1,13 @@
-# Flash-Next via ain-soph/Strata serving at 4cf59801f.
+# Flash-Next via ain-soph/Strata serving at 82d63e19e (upstream main 6e38f588a + our commits).
 # 262144 tokens per slot, two physical states, Q2_0 MTP, INT8 KV, 1024 MiB conversation cache.
-# Compact dual-slot qualification on M5 Ultra peaked at +67695 MiB wired.
+# Compact dual-slot qualification on M5 Ultra peaked at +67695 MiB wired; 82d63e19e peaked at +65880..+66763 MiB (2026-11-21/22).
 # Reserve 69500 MiB for either weight variant. See reports/strata-compact-dual-20261119.md.
 models:
   "qwen3.8-flash-next":
     name: "Qwen3.8 Flash-Next"
-    description: "AtomicChat AD-4.27 on Strata, 262144 ctx x 2 slots, compact Metal, MTP"
+    description: "AtomicChat AD-4.27 on Strata, 262144 ctx x 2 slots, compact Metal, MTP, Strata vision tower"
     cmd: >
-      @SERVING_ROOT@/.venv/bin/python @STRATA_RELEASE@/serve/server.py
+      @SERVING_ROOT@/.venv/bin/python @STRATA_RELEASE@/terminal/serve/server.py
       --engine strata --config @SERVING_ROOT@/services/text/strata/configs/strata-ad427-c262k-p2-compact.json
       --host 127.0.0.1 --port ${PORT}
     env:
@@ -20,9 +20,9 @@ models:
 
   "qwen3.8-flash-next-uncensored":
     name: "Qwen3.8 Flash-Next Uncensored"
-    description: "Navin AD-4.27 on Strata, 262144 ctx x 2 slots, compact Metal, MTP"
+    description: "Navin AD-4.27 on Strata, 262144 ctx x 2 slots, compact Metal, MTP, Strata vision tower"
     cmd: >
-      @SERVING_ROOT@/.venv/bin/python @STRATA_RELEASE@/serve/server.py
+      @SERVING_ROOT@/.venv/bin/python @STRATA_RELEASE@/terminal/serve/server.py
       --engine strata --config @SERVING_ROOT@/services/text/strata/configs/strata-uncensored-c262k-p2-compact.json
       --host 127.0.0.1 --port ${PORT}
     env:

@@ -8,7 +8,7 @@
   "--ple-gguf",
   "@MODELS@/strata-uncensored/metal/uncensored-ad427-ple.gguf",
   "--expert-profile",
-  "@STRATA_RELEASE@/data/expert-profile.bin",
+  "@STRATA_RELEASE@/terminal/data/expert-profile.bin",
   "--expert-cache",
   "64",
   "--prefill",
