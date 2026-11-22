@@ -9,10 +9,12 @@
   - L2 常规开发、调试、分析 → Claude subagent。
   - L3 高难（内核融合、算子编排、难优化）→ Claude subagent 与 Antigravity（Orchestrator：Neon planner xhigh + Hydrogen
     executor xhigh）各自独立出方案，再互审；必要时 Fable 5.2 high 做顾问和审阅。
+  - Antigravity 只在具体的高难技术设计/分析（内核、算子编排、性能优化）时引入；普通工程（仓库整理、安装/恢复链、
+    配置、发布）由 Claude 独自规划，不走 agy 审阅轮。
 - **性能分歧用 benchmark 决定，不靠投票**；Codex 不参与高难设计投票。
 - **测试清单**（命令、参数、输出路径、验收标准）由 Claude/agy 设计。Codex 和本地 worker 只执行并收集原始结果，
   不得设计实验、挑选或跳过测试、改阈值、下结论；结果由 Claude subagent 分析。
-- **写审分离**：agy 写的由 Claude 审，Claude 写的由 agy 审。work 模式下每个任务只有一个写入者，并行任务用不同的 `taskBranch`。
+- **写审分离**：L3 任务中 agy 写的由 Claude 审，Claude 写的由 agy 审。work 模式下每个任务只有一个写入者，并行任务用不同的 `taskBranch`。
 - **llm-collab bridge**（MCP `llm-collab`）：`start_collaboration` 的 review 模式用于讨论（结论用 `record_decision` 记下），
   work 模式用于实现（给出计划、验收检查和固定的 `resumeKey`）；`get_collaboration` 看进度、证据和 `latestHandoff`，
   `continue_collaboration` 继续同一任务 ID，`list_collaborations` 按任务找。
