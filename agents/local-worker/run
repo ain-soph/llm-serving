@@ -1,0 +1,237 @@
+#!/bin/zsh
+# local-worker: run a headless coding agent (Claude Code or Codex CLI) on the local Strata Flash-Next model.
+# See README.md next to this file. Prints one JSON summary on stdout; everything else goes to stderr and logs/<run>/.
+#
+#   run [--harness claude|codex] [--variant normal|uncensored] --cwd DIR [--timeout 60m] [--wait]
+#       [--max-turns N] [--label TEXT] [--task-file FILE | -- "task text"]
+#
+# Exit: 0 harness finished (check the task yourself), 2 usage, 3 setup/model error, 75 GPU busy (no --wait),
+#       124 hard timeout, other = the harness's own exit code.
+set -u
+setopt pipe_fail no_nomatch
+
+HERE=${0:A:h}
+SERVING=$HOME/llm-serving
+GPU_LOCK=$SERVING/bin/gpu-lock
+KEY_FILE=$SERVING/platform/llama-swap/.api_key
+STRATA_CFG=$SERVING/services/text/strata/configs
+API_URL=${LOCAL_WORKER_API_URL:-http://127.0.0.1:8080}   # override only for offline tests against a fake server
+LOCK_MB=70000                                           # Strata entry capacity 69500 + margin
+MAX_TIMEOUT=3600
+PY=/usr/bin/python3
+
+harness=claude variant=normal cwd= timeout_s=3600 wait=0 max_turns=100 label= task= task_file= under_lock=
+die() { print -u2 -- "local-worker: $*"; exit 2; }
+to_seconds() {
+  local v=$1
+  case $v in
+    <->) echo $v ;; <->s) echo ${v%s} ;; <->m) echo $(( ${v%m} * 60 )) ;; <->h) echo $(( ${v%h} * 3600 )) ;;
+    *) return 1 ;;
+  esac
+}
+while (( $# )); do
+  case $1 in
+    --harness) harness=${2:-}; shift 2 ;;
+    --variant) variant=${2:-}; shift 2 ;;
+    --cwd) cwd=${2:-}; shift 2 ;;
+    --timeout) timeout_s=$(to_seconds ${2:-}) || die "bad --timeout '${2:-}' (use 90s, 45m, 1h)"; shift 2 ;;
+    --wait) wait=1; shift ;;
+    --max-turns) max_turns=${2:-}; shift 2 ;;
+    --label) label=${2:-}; shift 2 ;;
+    --task-file) task_file=${2:-}; shift 2 ;;
+    --under-lock) under_lock=${2:-}; shift 2 ;;   # caller already holds share NAME (>= 69500 MB, sole holder)
+    -h|--help) sed -n '2,10p' $0; exit 0 ;;
+    --) shift; task="$*"; break ;;
+    *) die "unknown argument '$1' (task text goes after --)" ;;
+  esac
+done
+
+case $harness in claude|codex) ;; *) die "--harness must be claude or codex" ;; esac
+case $variant in
+  normal) MODEL=qwen3.8-flash-next; ENGINE_CFG=$STRATA_CFG/strata-ad427-c262k-p2-compact.json ;;
+  uncensored) MODEL=qwen3.8-flash-next-uncensored; ENGINE_CFG=$STRATA_CFG/strata-uncensored-c262k-p2-compact.json ;;
+  *) die "--variant must be normal or uncensored" ;;
+esac
+[[ -n $task_file ]] && { [[ -r $task_file ]] || die "cannot read --task-file $task_file"; task=$(<$task_file); }
+[[ -n ${task// /} ]] || die "no task: pass it after -- or with --task-file"
+[[ -n $cwd && -d $cwd ]] || die "--cwd must be an existing directory"
+cwd=${cwd:A}
+case $cwd in
+  /|$HOME|$SERVING|$SERVING/platform*|$SERVING/services*|$SERVING/bin*|$HOME/models*|$HOME/.claude*|$HOME/.codex*)
+    die "refusing --cwd $cwd: give the worker its own project or scratch directory" ;;
+esac
+(( timeout_s >= 30 && timeout_s <= MAX_TIMEOUT )) || die "--timeout must be between 30s and 60m"
+[[ $max_turns == <-> ]] || die "--max-turns must be a number"
+[[ -z $under_lock || $under_lock =~ '^[A-Za-z0-9_.]+$' ]] || die "bad --under-lock name"
+[[ -r $KEY_FILE ]] || { print -u2 "local-worker: llama-swap key file missing"; exit 3; }
+
+RUN_ID=$(date +%Y%m%d-%H%M%S)-$harness-$variant${label:+-${label//[^A-Za-z0-9_.-]/_}}
+RUN_DIR=$HERE/logs/$RUN_ID
+mkdir -p $RUN_DIR/tmp
+LOCK_NAME=local_worker_$$
+log() { print -u2 -- "[local-worker $(date +%H:%M:%S)] $*"; print -- "$(date +%FT%T) $*" >> $RUN_DIR/run.log; }
+jstr() { $PY -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
+log "run $RUN_ID: harness=$harness variant=$variant model=$MODEL cwd=$cwd timeout=${timeout_s}s"
+
+# ---------------------------------------------------------------- cleanup (EXIT trap; INT/TERM -> exit)
+held=0 hb_pid= proxy_pid= job_pid= exit_code=0 t_start=$(date +%s) t_lock= t_ready= t_end=
+cleanup() {
+  local rc=$?
+  trap - EXIT INT TERM
+  [[ -n $job_pid ]] && kill -0 $job_pid 2>/dev/null && { kill -TERM -- -$job_pid 2>/dev/null; sleep 3; kill -KILL -- -$job_pid 2>/dev/null; }
+  [[ -n $hb_pid ]] && { kill $hb_pid 2>/dev/null; pkill -P $hb_pid 2>/dev/null; }
+  [[ -n $proxy_pid ]] && kill $proxy_pid 2>/dev/null
+  if (( held )); then
+    if [[ $variant == uncensored ]]; then   # leave llama-swap's default (normal) resident state, not the other variant
+      curl -s -m 60 -X POST -H "Authorization: Bearer $(<$KEY_FILE)" $API_URL/api/models/unload/$MODEL >/dev/null \
+        && log "unloaded $MODEL"
+    fi
+    log "$($GPU_LOCK release $LOCK_NAME 2>/dev/null | tail -1)"
+    held=0
+  fi
+  [[ -n $t_end ]] || t_end=$(date +%s)
+  (( exit_code == 0 )) && exit_code=$rc
+  [[ $run_status == busy ]] && { rm -rf $RUN_DIR/tmp; exit $exit_code; }
+  $PY $HERE/lib/summarize.py --harness $harness --variant $variant --model $MODEL --cwd $cwd --run-dir $RUN_DIR \
+      --status $exit_code:$run_status --engine-log ${engine_log:-} --engine-offset ${engine_offset:-0} \
+      --t-start $t_start --t-lock ${t_lock:-0} --t-ready ${t_ready:-0} --t-end $t_end > $RUN_DIR/summary.json \
+      2>> $RUN_DIR/run.log && cat $RUN_DIR/summary.json
+  rm -rf $RUN_DIR/tmp
+  exit $exit_code
+}
+run_status=setup
+trap cleanup EXIT
+trap 'exit 143' INT TERM
+
+finish() { exit_code=$1; run_status=$2; log "$3"; exit $1; }
+
+# ---------------------------------------------------------------- GPU share
+offline=0
+[[ $API_URL != http://127.0.0.1:8080 && -n ${LOCAL_WORKER_NO_LOCK:-} ]] && offline=1
+holders_of() { $GPU_LOCK status 2>/dev/null | sed -n 's/^  \([A-Za-z0-9_.]*\): .*/\1/p'; }
+queue_of() { $GPU_LOCK status 2>/dev/null | sed -n 's/^queue://p' | tr -s ' '; }
+if (( offline )); then
+  log "offline test mode: no gpu-lock, API $API_URL"
+elif [[ -n $under_lock ]]; then
+  [[ $(holders_of) == $under_lock ]] || finish 3 lock-error "--under-lock $under_lock: that share must be the only holder"
+  log "running under the caller's share $under_lock (no acquire/release here)"
+else
+  st_h=$(holders_of | tr '\n' ' '); st_q=$(queue_of)
+  if [[ -n ${st_h// /} || -n ${st_q// /} ]] && (( ! wait )); then
+    print -- "{\"status\":\"busy\",\"reason\":$(jstr "gpu-lock holders: ${st_h:-none}; queue:${st_q:- empty}"),\"hint\":\"retry later or pass --wait\"}"
+    finish 75 busy "GPU busy (holders: ${st_h:-none}; queue:${st_q:- empty}); not waiting"
+  fi
+  while true; do
+    out=$($GPU_LOCK try $LOCK_NAME $LOCK_MB 2>&1); rc=$?
+    if (( rc == 0 )); then
+      held=1
+      others=$(holders_of | grep -vx $LOCK_NAME | tr '\n' ' ')
+      [[ -z ${others// /} ]] && break
+      # Somebody else holds a share: resuming llama-swap under them is not allowed (AGENTS.md rule 2).
+      $GPU_LOCK release $LOCK_NAME >/dev/null 2>&1; held=0
+      (( wait )) || finish 75 busy "another share appeared ($others); not waiting"
+      log "other holders ($others); waiting"; sleep 30; continue
+    fi
+    (( rc == 4 )) && finish 75 busy "gpu-lock refused (deadlock check): $out"
+    if [[ $out == *"user request"* ]]; then      # first holder drains outside users' chats (<= 120 s): always wait
+      log "gpu-lock: ${out%%$'\n'*}"; sleep 10; continue
+    fi
+    if (( ! wait )); then
+      $GPU_LOCK cancel $LOCK_NAME >/dev/null 2>&1
+      print -- "{\"status\":\"busy\",\"reason\":$(jstr "$out")}"
+      finish 75 busy "GPU busy: ${out%%$'\n'*}"
+    fi
+    log "waiting for the GPU: ${out%%$'\n'*}"; sleep 30
+  done
+  t_lock=$(date +%s)
+  log "gpu share $LOCK_NAME ($LOCK_MB MB) acquired after $(( t_lock - t_start )) s"
+  ( while sleep 600; do $GPU_LOCK heartbeat $LOCK_NAME >/dev/null 2>&1; done ) &
+  hb_pid=$!
+fi
+[[ -n $t_lock ]] || t_lock=$(date +%s)
+
+KEY=$(<$KEY_FILE)
+if (( ! offline )); then
+  # gpu-lock paused llama-swap for its first holder; this run is the only holder and needs llama-swap to serve.
+  curl -s -m 30 -X POST -H "Authorization: Bearer $KEY" $API_URL/api/models/resume >/dev/null \
+    || finish 3 model-error "could not resume llama-swap"
+  log "llama-swap resumed; loading $MODEL"
+  code=$(curl -s -m 600 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $KEY" $API_URL/upstream/$MODEL/health)
+  [[ $code == 200 ]] || finish 3 model-error "$MODEL did not come up (HTTP $code)"
+fi
+t_ready=$(date +%s)
+log "model ready after $(( t_ready - t_lock )) s"
+engine_log=$($PY -c 'import json,sys; print(json.load(open(sys.argv[1])).get("log",""))' $ENGINE_CFG 2>/dev/null)
+engine_offset=$( [[ -f $engine_log ]] && stat -f %z $engine_log || echo 0 )
+log "engine log $engine_log from byte $engine_offset"
+
+# ---------------------------------------------------------------- network recorder + sandbox
+$PY $HERE/lib/deny_proxy.py $RUN_DIR/net-attempts.jsonl > $RUN_DIR/tmp/proxy.port 2>/dev/null &
+proxy_pid=$!
+for i in {1..50}; do [[ -s $RUN_DIR/tmp/proxy.port ]] && break; sleep 0.1; done
+PROXY_PORT=$(head -1 $RUN_DIR/tmp/proxy.port)
+[[ $PROXY_PORT == <-> ]] || finish 3 setup-error "deny proxy did not start"
+API_PORT=${${API_URL##*:}%%/*}
+PROXY=http://127.0.0.1:$PROXY_PORT
+
+PREAMBLE="You are a local worker agent running headless with no human to ask. Rules:
+- Work only inside the current directory ($cwd). Do not read or change files elsewhere unless the task names them.
+- There is no network access. Do not install packages, download anything, push, or change git remotes or git config.
+- You may run ordinary shell commands here (tests, linters, scripts). Keep going until the task is done or clearly impossible.
+- Finish with a short plain-text report: files changed, commands run, final test result, anything left undone.
+
+Task:
+"
+PROMPT="$PREAMBLE$task"
+
+typeset -a ENVV CMD
+ENVV=(HOME=$HOME USER=$USER LOGNAME=$USER LANG=en_US.UTF-8 TERM=dumb SHELL=/bin/zsh
+      PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin TMPDIR=$RUN_DIR/tmp/ TMPPREFIX=$RUN_DIR/tmp/zsh CLAUDE_CODE_TMPDIR=$RUN_DIR/tmp
+      HTTP_PROXY=$PROXY HTTPS_PROXY=$PROXY ALL_PROXY=$PROXY http_proxy=$PROXY https_proxy=$PROXY all_proxy=$PROXY
+      NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost PIP_NO_INDEX=1 UV_OFFLINE=1)
+if [[ $harness == claude ]]; then
+  HHOME=$HERE/claude-config
+  ENVV+=(CLAUDE_CONFIG_DIR=$HHOME ANTHROPIC_BASE_URL=$API_URL ANTHROPIC_API_KEY=$KEY ANTHROPIC_MODEL=$MODEL
+         ANTHROPIC_SMALL_FAST_MODEL=$MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL=$MODEL ANTHROPIC_DEFAULT_SONNET_MODEL=$MODEL
+         ANTHROPIC_DEFAULT_OPUS_MODEL=$MODEL CLAUDE_CODE_SUBAGENT_MODEL=$MODEL
+         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1 DISABLE_ERROR_REPORTING=1
+         CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 ENABLE_TOOL_SEARCH=false
+         CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 CLAUDE_CODE_MAX_CONTEXT_TOKENS=262144 CLAUDE_CODE_MAX_OUTPUT_TOKENS=32768
+         API_TIMEOUT_MS=900000 BASH_DEFAULT_TIMEOUT_MS=300000 BASH_MAX_TIMEOUT_MS=600000)
+  CMD=(claude -p "$PROMPT" --model $MODEL --output-format stream-json --verbose
+       --strict-mcp-config --setting-sources "" --settings $HERE/lib/claude-settings.json
+       --tools "Bash,Read,Edit,Write,Glob,Grep" --permission-mode acceptEdits --permission-prompts none
+       --no-session-persistence --disable-slash-commands --max-turns $max_turns)
+else
+  HHOME=$HERE/codex-home
+  ENVV+=(CODEX_HOME=$HHOME LOCAL_WORKER_API_KEY=$KEY)
+  CMD=(codex exec --json --skip-git-repo-check --ephemeral --dangerously-bypass-approvals-and-sandbox
+       -C $cwd -m $MODEL -c "model_providers.strata.base_url=\"$API_URL/v1\"" -o $RUN_DIR/last-message.txt "$PROMPT")
+fi
+print -r -- "$PROMPT" > $RUN_DIR/prompt.txt
+
+# ---------------------------------------------------------------- run, with a hard deadline on the whole process group
+run_status=running
+log "starting $harness (events: $RUN_DIR/events.jsonl)"
+( cd $cwd && exec $PY -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' env -i "${ENVV[@]}" sandbox-exec -f $HERE/lib/sandbox.sb -D API_PORT=$API_PORT -D PROXY_PORT=$PROXY_PORT \
+    -D WORK=$cwd -D HARNESS_HOME=$HHOME -D RUN_DIR=$RUN_DIR "${CMD[@]}" ) < /dev/null > $RUN_DIR/events.jsonl 2> $RUN_DIR/stderr.log &
+job_pid=$!
+deadline=$(( $(date +%s) + timeout_s )) next_note=$(( $(date +%s) + 300 ))
+while kill -0 $job_pid 2>/dev/null; do
+  if (( $(date +%s) >= deadline )); then
+    log "hard timeout (${timeout_s}s): killing the $harness process group"
+    kill -TERM -- -$job_pid 2>/dev/null; sleep 10; kill -KILL -- -$job_pid 2>/dev/null
+    wait $job_pid 2>/dev/null; job_pid=; t_end=$(date +%s)
+    finish 124 timeout "timed out"
+  fi
+  if (( $(date +%s) >= next_note )); then
+    log "still running ($(( $(date +%s) - t_ready )) s, $(wc -l < $RUN_DIR/events.jsonl | tr -d ' ') events)"; next_note=$(( next_note + 300 ))
+  fi
+  sleep 2
+done
+wait $job_pid; hrc=$?; job_pid=
+t_end=$(date +%s)
+log "$harness exited with $hrc after $(( t_end - t_ready )) s"
+exit_code=$hrc
+run_status=$( (( hrc == 0 )) && echo done || echo harness-error )
+exit $hrc

@@ -15,6 +15,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import configure
+import install_agents
 import privacy_check
 from service import environment
 
@@ -134,6 +135,46 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("credential token", privacy_check.inspect_file(name, token))
         self.assertIn("private literal", privacy_check.inspect_file(name, b"value=private-value", [b"private-value"]))
         self.assertIn("private/runtime file", privacy_check.inspect_file(Path(".local/config/machine.json"), b"{}"))
+
+    def test_agent_files_pass_privacy_rules(self):
+        self.assertEqual(privacy_check.inspect_file(Path("agents/local-worker/run"), b"#!/bin/zsh\n"), [])
+        self.assertEqual(privacy_check.inspect_file(Path("agents/local-worker/lib/sandbox.sb"), b"(version 1)"), [])
+        self.assertIn("unexpected file type", privacy_check.inspect_file(Path("agents/local-worker/blob"), b"data"))
+        self.assertIn("private/runtime file", privacy_check.inspect_file(Path("agents/local-worker/logs/x.json"), b"{}"))
+
+    def test_claude_md_block_merges_without_overwriting(self):
+        new = install_agents.block("rules v2")
+        self.assertEqual(install_agents.merge(None, new), (new, "created"))
+        own = "# my notes\nkeep me\n"
+        text, action = install_agents.merge(own, new)
+        self.assertEqual(action, "appended")
+        self.assertTrue(text.startswith(own) and text.endswith(new))
+        self.assertEqual(install_agents.merge(text, new), (text, "unchanged"))
+        old = own + "\n" + install_agents.block("rules v1") + "tail\n"
+        text, action = install_agents.merge(old, new)
+        self.assertEqual((action, text), ("updated", own + "\n" + new + "tail\n"))
+        with self.assertRaises(ValueError):
+            install_agents.merge(install_agents.BEGIN + "\nhalf", new)
+
+    def test_install_agents_backs_up_and_links(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            target, backups = home / ".claude/CLAUDE.md", home / "backup"
+            target.parent.mkdir()
+            target.write_text("personal rules\n")
+            action, saved = install_agents.install_claude_md(target, backups, home)
+            self.assertEqual(action, "appended")
+            self.assertEqual(saved.read_text(), "personal rules\n")
+            self.assertIn(install_agents.TEMPLATE.read_text().strip(), target.read_text())
+            self.assertEqual(install_agents.install_claude_md(target, backups, home), ("unchanged", None))
+            worker = home / "serving/local-worker"
+            self.assertEqual(install_agents.link_worker(worker, check=True), "linked")
+            self.assertFalse(worker.exists())
+            self.assertEqual(install_agents.link_worker(worker), "linked")
+            self.assertEqual(install_agents.link_worker(worker), "unchanged")
+            other = home / "other"
+            other.mkdir()
+            self.assertEqual(install_agents.link_worker(other), "kept (existing directory)")
 
     def test_media_stays_local_and_offline_by_default(self):
         path = ROOT / "h3-video/server.py"

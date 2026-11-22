@@ -6,6 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import install_agents
 from service import environment
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +63,15 @@ def main():
         for name in required["files"]:
             if not (Path(c["models"]) / name).is_file():
                 errors.append(f"Missing model file: {name}")
+    # Agent rules and the local worker are optional for serving: report drift, do not fail.
+    try:
+        claude = install_agents.install_claude_md(Path.home() / ".claude/CLAUDE.md", None, Path.home(), check=True)[0]
+        print(("OK" if claude == "unchanged" else "WARN") + f" agent rules in ~/.claude/CLAUDE.md: {claude}"
+              + ("" if claude == "unchanged" else "; run tools/install_agents.py"))
+    except ValueError as e:
+        print(f"WARN agent rules in ~/.claude/CLAUDE.md: {e}")
+    worker = install_agents.link_worker(Path.home() / "llm-serving/platform/agent-bridge/local-worker", check=True)
+    print(("OK" if worker == "unchanged" else "WARN") + f" local worker link: {worker}")
     if errors:
         for message in errors:
             print("FAIL", message)

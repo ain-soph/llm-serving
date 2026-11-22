@@ -60,6 +60,8 @@ cd llm-serving
 .venv/bin/python tools/native.py all
 ```
 
+`bootstrap.sh` 最后还会把多 agent 分工规则装进 `~/.claude/CLAUDE.md`（标记块合并，不覆盖原有内容）并链接本地 worker，见[多 agent 分工与恢复](docs/multi-agent.md)。
+
 `Brewfile` 统一安装 **Homebrew Python 3.15**、uv、Caddy、llama-swap、llama.cpp、FFmpeg、CMake、Ninja。uv 使用 Homebrew 的 Python 3.15 创建项目唯一的 `.venv`：**线上只有这一个环境**，所有 Python 服务使用同一个解释器；开发新模型时用它自己的 `.venv-dev`，上线时并进来。`pyproject.toml` 只写版本下限，`uv.lock` 精确锁定全部依赖，包括各 fork 的完整 commit。
 
 原生引擎从 `native.lock.json` 的完整 commit 构建到 `.local/src/`。编译后的可执行文件、动态库、Metal shader 和构建信息留在同一个本地构建树，不能只搬一个可执行文件。
@@ -98,4 +100,4 @@ cd llm-serving
 
 尚未在干净系统完成全套原生重编译和端到端推理恢复演练。本仓库提供可审查的迁移工具和当前配置，首次切换前仍需运行真实 API 冒烟检查。`doctor.py` 不加载模型，不替代正确性/性能验证。
 
-更多说明：[设计与硬件优化](docs/design.md)、[运维：回归测试与健康检查](docs/operations.md)、[客户端接入与 MCP](docs/clients.md)、[发布与隐私](docs/privacy.md)。
+更多说明：[多 agent 分工与恢复](docs/multi-agent.md)、[设计与硬件优化](docs/design.md)、[运维：回归测试与健康检查](docs/operations.md)、[客户端接入与 MCP](docs/clients.md)、[发布与隐私](docs/privacy.md)。

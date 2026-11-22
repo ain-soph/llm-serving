@@ -1,0 +1,10 @@
+# runtime state written by the harnesses and the wrapper
+logs/
+claude-config/*
+!claude-config/.keep
+codex-home/*
+!codex-home/config.toml
+!codex-home/rules/
+codex-home/rules/*
+!codex-home/rules/default.rules
+__pycache__/

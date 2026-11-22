@@ -1,0 +1,54 @@
+# CODEX_HOME for local-worker runs (never ~/.codex). The wrapper `run` passes the model and the provider URL
+# with -c overrides; the key comes from the environment (LOCAL_WORKER_API_KEY), never from this file.
+model_provider = "strata"
+model = "qwen3.8-flash-next"
+model_context_window = 262144
+model_auto_compact_token_limit = 120000
+model_reasoning_summary = "auto"
+approval_policy = "never"
+check_for_update_on_startup = false
+web_search = "disabled"
+hide_agent_reasoning = false
+
+[model_providers.strata]
+name = "Strata (local, via llama-swap)"
+base_url = "http://127.0.0.1:8080/v1"
+wire_api = "responses"
+env_key = "LOCAL_WORKER_API_KEY"
+stream_idle_timeout_ms = 600000
+request_max_retries = 2
+stream_max_retries = 2
+
+[analytics]
+enabled = false
+
+[feedback]
+enabled = false
+
+[history]
+persistence = "none"
+
+[shell_environment_policy]
+# "all" (the wrapper already starts Codex with a minimal env) so TMPDIR/TMPPREFIX reach the shell: zsh writes
+# here-documents under TMPPREFIX, and the sandbox only allows the run directory.
+inherit = "all"
+exclude = ["*KEY*", "*TOKEN*", "*SECRET*"]
+
+# Keep the tool set small and local: no plugins/apps/browser/image tools (their sync also tried github.com).
+
+[features]
+plugins = false
+remote_plugin = false
+apps = false
+image_generation = false
+browser_use = false
+browser_use_external = false
+computer_use = false
+in_app_browser = false
+tool_suggest = false
+skill_search = false
+goals = false
+fast_mode = false
+
+[agents]
+enabled = false

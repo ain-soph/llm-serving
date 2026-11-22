@@ -1,0 +1,7 @@
+# execpolicy for local-worker Codex runs: never push or touch remotes; network is also blocked by the sandbox.
+prefix_rule(pattern = ["git", "push"], decision = "forbidden")
+prefix_rule(pattern = ["git", "remote"], decision = "forbidden")
+prefix_rule(pattern = ["curl"], decision = "forbidden")
+prefix_rule(pattern = ["wget"], decision = "forbidden")
+prefix_rule(pattern = ["ssh"], decision = "forbidden")
+prefix_rule(pattern = ["gpu-lock"], decision = "forbidden")

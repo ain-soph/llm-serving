@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": ["Bash", "Read", "Glob", "Grep", "Edit(./**)", "Write(./**)"],
+    "deny": [
+      "WebFetch", "WebSearch", "Task", "Agent",
+      "Bash(git push:*)", "Bash(git push)", "Bash(git remote:*)", "Bash(git config:*)",
+      "Bash(curl:*)", "Bash(wget:*)", "Bash(ssh:*)", "Bash(scp:*)", "Bash(rsync:*)", "Bash(nc:*)",
+      "Bash(sudo:*)", "Bash(launchctl:*)", "Bash(brew:*)",
+      "Bash(pip install:*)", "Bash(pip3 install:*)", "Bash(uv pip install:*)", "Bash(uv add:*)", "Bash(npm install:*)",
+      "Bash(gpu-lock:*)", "Bash(lsw-apply:*)",
+      "Read(~/llm-serving/platform/llama-swap/.api_key)"
+    ]
+  },
+  "cleanupPeriodDays": 30,
+  "includeCoAuthoredBy": false
+}
