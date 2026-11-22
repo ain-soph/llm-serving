@@ -98,10 +98,12 @@ $PY -m mflux.models.qwen21.weights.qwen21_q8 "$M/base/text_encoder" "$M/te-q8"  
 | `MFLUX_ZERO_COPY_STREAM` | 1 | DiT block 和文本编码器层只在计算时持有权重（生成期 wired 44–52 → <10 GB） |
 | `MFLUX_QWEN21_W8A8` | `w8a8/base` 或 `w8a8/turbo` | DiT 用 INT8 ConvRot 权重和 W8A8 GEMM |
 | `MFLUX_QWEN21_TE_Q8` | `te-q8` | 文本编码器 W8A16（去掉这个变量就改回 BF16 文本编码器） |
-| `MFLUX_QWEN21_VAE_STRIP_FROM`、`_STRIP_BUDGET` | 2、16384 | VAE 两段条带解码，行数按图宽选 |
 | `MFLUX_QWEN21_VAE_CACHE_MB` | 2048 | VAE 的 MLX 缓存上限 |
 | `QWEN_IMAGE_CACHE_MB`、`QWEN_IMAGE_REF_CACHE_MB` | 6144、2048 | 去噪阶段 MLX 缓存上限（不带／带参考图） |
 | `QWEN21_FUSION` | 不设 | 逐元素融合（不设 = 全开，空 = 全关）；输出与不融合逐字节相同 |
+
+VAE 两段条带解码（行数按图宽选）是上游 mflux 自 #1000 起的默认行为，不需要变量；原来的 `MFLUX_QWEN21_VAE_STRIP_FROM=2`、
+`_STRIP_BUDGET=16384` 与上游默认值相同，2026-11-21 起已删除。
 
 W8A8 GEMM 使用 M5 的 Metal TensorOps INT8 指令；其他机型未验证。
 
