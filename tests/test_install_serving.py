@@ -65,6 +65,7 @@ class InstallServingTests(unittest.TestCase):
 
     def test_verbatim_and_rendered_content(self):
         run("--home", self.home, "--values", self.values)
+        self.assertEqual(inst.FILES[inst.S + "bin/gpu-top"], ("bin/gpu-top", "verbatim", 0o755))
         for rel, (src, kind, _) in inst.FILES.items():
             data = (self.home / rel).read_bytes()
             if kind == "verbatim":

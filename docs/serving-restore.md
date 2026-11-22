@@ -24,6 +24,7 @@
 | --- | --- | --- | --- |
 | `llm-serving/bin/gpu-lock` | `bin/gpu-lock` | 原样 | 多 agent 显存预约锁；路径都从 `$HOME` 推出。规则见 [gpu-lock.md](gpu-lock.md) |
 | `llm-serving/bin/gpu-pool` | `bin/gpu-pool` | 原样 | gpu-lock、serve.sh、lsw-apply 用它从 `iogpu.wired_limit_mb` 算池大小 |
+| `llm-serving/bin/gpu-top` | `bin/gpu-top` | 原样 | 只读查看 gpu-lock 池子、持有者、队列和 llama-swap（类似 top），见 [gpu-lock.md](gpu-lock.md) |
 | `llm-serving/bin/lsw-inflight` | `bin/lsw-inflight` | 原样 | gpu-lock 暂停 llama-swap 前统计外部在途请求 |
 | `llm-serving/bin/lsw-apply` | `bin/lsw-apply` | 原样 | 校验 llama-swap 配置并重启（只许独占 gpu-lock 持有者运行）；只用 `$HOME` 路径 |
 | `llm-serving/bin/gpu-lock-watchdog` | `bin/gpu-lock-watchdog` | 原样 | 强制释放空闲份额；只用 `Path.home()` |

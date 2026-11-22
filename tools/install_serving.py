@@ -1,7 +1,7 @@
 """Restore the serving glue: GPU lock scripts, llama-swap launcher and config, gateway, Strata routes, LaunchAgents.
 
 Files come from serving/ in this checkout (docs/serving-restore.md has the full inventory):
-  verbatim  ~/llm-serving/bin/{gpu-lock,gpu-pool,lsw-inflight,lsw-apply,gpu-lock-watchdog},
+  verbatim  ~/llm-serving/bin/{gpu-lock,gpu-pool,gpu-top,lsw-inflight,lsw-apply,gpu-lock-watchdog},
             ~/llm-serving/platform/llama-swap/{serve,start,stop}.sh
   template  llama-swap config.yaml and conf.d/strata.yaml, the gateway Caddyfile, the two Strata engine configs and
             the LaunchAgent plists (@NAME@ placeholders, values from a machine-local JSON file that is never committed)
@@ -34,6 +34,7 @@ KEY = S + "platform/llama-swap/.api_key"
 FILES = {
     S + "bin/gpu-lock": ("bin/gpu-lock", "verbatim", 0o755),
     S + "bin/gpu-pool": ("bin/gpu-pool", "verbatim", 0o755),
+    S + "bin/gpu-top": ("bin/gpu-top", "verbatim", 0o755),
     S + "bin/lsw-inflight": ("bin/lsw-inflight", "verbatim", 0o755),
     S + "bin/lsw-apply": ("bin/lsw-apply", "verbatim", 0o755),
     S + "bin/gpu-lock-watchdog": ("bin/gpu-lock-watchdog", "verbatim", 0o755),

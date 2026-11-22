@@ -1,0 +1,632 @@
+#!/usr/bin/python3 -I
+"""gpu-top: a top-like view of gpu-lock: pool, holders, queue, llama-swap and measured memory. Strictly read-only.
+
+  gpu-top [-d SECONDS]   full screen, refreshed every SECONDS (default 2); q quits, space refreshes now
+  gpu-top --once         print one snapshot and exit (the default when stdout is not a terminal)
+  gpu-top --json         one snapshot as JSON, for agents
+  --no-swap              do not ask llama-swap (loaded models, pause state, requests in flight)
+
+What it reads (see bin/gpu-lock for the format; docs/gpu-lock.md for the rules):
+  .locks/holders/NAME    "MB since DATE TIME", "chain: PIDS" (first = the shell that took the share), "agent: PID NAME";
+                         mtime = last heartbeat
+  .locks/queue/T-NAME    the requested MB; T = arrival time, mtime = last poll
+  .locks/turns/NAME      when NAME's turn came; .locks/forced/NAME: watchdog notices; .locks/drain-since
+  bin/gpu-pool           the pool (MB), as gpu-lock computes it
+  llama-swap /api/events (127.0.0.1:8081, the first messages only): models not stopped, paused or not, requests in
+                         flight (from outside this machine = what gpu-lock waits for, same rule as bin/lsw-inflight)
+  vm_stat, sysctl        measured wired memory and memory pressure (not reservations)
+
+It never calls gpu-lock, never writes under .locks and never takes gpu-lock's state mutex ($DIR/mutex, a directory
+gpu-lock creates around every state change). Instead it reads like a seqlock: no mutex + the same directory listing and
+file mtimes/sizes before and after reading = a consistent snapshot. If the mutex stays held (gpu-lock may hold it
+for tens of seconds while it pauses llama-swap) or files keep changing for ~0.3 s, it shows the last read marked
+"state busy". Files that vanish mid-read are skipped; a half-written file is flagged and counted the way gpu-lock
+counts it (no number = the whole pool).
+Queue status mirrors gpu-lock's rules (may_take, backfill, turns, deadlock refusal) on that snapshot; it is a
+prediction for each waiter's next poll, which also needs gpu-lock's wired-memory check to pass.
+Test hooks: GPU_LOCK_DIR (as in gpu-lock), GPU_LOCK_FAKE_WIRED (MB, as in gpu-lock).
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HOME = Path.home()
+LOCKS = Path(os.environ.get("GPU_LOCK_DIR") or HOME / "llm-serving/.locks")
+GPU_POOL = HOME / "llm-serving/bin/gpu-pool"
+KEY_FILE = HOME / "llm-serving/platform/llama-swap/.api_key"
+LSW = ("127.0.0.1", 8081)
+# Same values as bin/gpu-lock (tests/test_gpu_top.py checks they stay in step)
+DEFAULT_POOL = 77000
+BASE_TOL = 6000
+STALE = 3600
+TICKET_STALE = 900
+BACKFILL_MAX = 1200
+TURN_MAX = 300
+MUTEX_STALE = 30          # gpu-lock removes a mutex older than this
+LOCAL = {"127.0.0.1", "::1", "localhost", ""}   # bin/lsw-inflight: requests from these are not waited for
+NAME_RE = re.compile(r"^[A-Za-z0-9_.]+$")
+HOLDER_RE = re.compile(r"^(\d+) since (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\s*$")
+
+
+# ---------------------------------------------------------------- lock state (no mutex, seqlock-style retries)
+def _read(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read(65536).decode("utf-8", "replace")
+    except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+        return None
+
+
+def _entries(d):
+    """Visible regular files of a state directory (gpu-lock's *(N) glob skips dotfiles; NAME.tmp only exists under
+    the mutex while a share is resized)."""
+    try:
+        names = os.listdir(d)
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+    return sorted(n for n in names if not n.startswith(".") and not n.endswith(".tmp"))
+
+
+def signature(locks):
+    sig = []
+    for sub in ("holders", "queue", "turns", "forced"):
+        d = locks / sub
+        for n in _entries(d):
+            try:
+                st = os.stat(d / n)
+                sig.append((sub, n, st.st_mtime_ns, st.st_size))
+            except FileNotFoundError:
+                sig.append((sub, n, None, None))
+    for n in ("drain-since",):
+        try:
+            st = os.stat(locks / n)
+            sig.append(("", n, st.st_mtime_ns, st.st_size))
+        except FileNotFoundError:
+            pass
+    return sig
+
+
+def mutex_age(locks, now):
+    try:
+        return max(0, int(now - os.stat(locks / "mutex").st_mtime))
+    except FileNotFoundError:
+        return None
+
+
+def _mtime(path):
+    try:
+        return os.stat(path).st_mtime
+    except FileNotFoundError:
+        return None
+
+
+def read_raw(locks):
+    """One pass over the state files. Entries whose file vanished between listing and reading are left out."""
+    raw = {"holders": {}, "queue": [], "turns": {}, "forced": {}, "drain_since": None}
+    for n in _entries(locks / "holders"):
+        p = locks / "holders" / n
+        text, mt = _read(p), _mtime(p)
+        if text is not None and mt is not None:
+            raw["holders"][n] = (text, mt)
+    for n in _entries(locks / "queue"):
+        arrived, _, name = n.partition("-")
+        if not arrived.isdigit() or not name:
+            continue
+        p = locks / "queue" / n
+        text, mt = _read(p), _mtime(p)
+        if text is not None and mt is not None:
+            raw["queue"].append((int(arrived), name, text, mt))
+    for sub in ("turns", "forced"):
+        for n in _entries(locks / sub):
+            text = _read(locks / sub / n)
+            if text is not None:
+                raw[sub][n] = text
+    t = _read(locks / "drain-since")
+    if t is not None and t.strip().isdigit():
+        raw["drain_since"] = int(t.strip())
+    return raw
+
+
+def _partial(raw):
+    """Files caught between gpu-lock's truncate and write (empty), or not in their format."""
+    for text, _ in raw["holders"].values():
+        if not text.strip():
+            return True
+    return any(not text.strip() for _, _, text, _ in raw["queue"])
+
+
+def read_state(locks, tries=6, pause=0.05, clock=time.time):
+    """(raw, info): consistent when no mutex and nothing changed during the read; else the last read, marked busy."""
+    raw = None
+    for attempt in range(tries):
+        now = clock()
+        m0, s0 = mutex_age(locks, now), signature(locks)
+        raw = read_raw(locks)
+        m1, s1 = mutex_age(locks, clock()), signature(locks)
+        if m0 is None and m1 is None and s0 == s1 and not _partial(raw):
+            return raw, {"consistent": True, "busy": False, "mutex_age_s": None, "reads": attempt + 1}
+        if attempt + 1 < tries:
+            time.sleep(pause)
+    return raw, {"consistent": False, "busy": True, "mutex_age_s": m1, "reads": tries}
+
+
+# ---------------------------------------------------------------- processes
+def processes():
+    """{pid: (ppid, command)} from one ps call; {} if ps fails."""
+    try:
+        out = subprocess.run(["/bin/ps", "-axww", "-o", "pid=,ppid=,command="], capture_output=True, text=True,
+                             timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    procs = {}
+    for line in out.splitlines():
+        f = line.split(None, 2)
+        if len(f) >= 2 and f[0].isdigit() and f[1].isdigit():
+            procs[int(f[0])] = (int(f[1]), f[2] if len(f) > 2 else "")
+    return procs
+
+
+def alive(pid, procs):
+    if pid is None:
+        return None
+    if procs:
+        return pid in procs
+    try:
+        os.kill(pid, 0)                  # signal 0: existence check only
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def ancestors(pid, procs):
+    seen = []
+    while pid in procs and pid > 1 and pid not in seen:
+        seen.append(pid)
+        pid = procs[pid][0]
+    return seen
+
+
+def waiting_procs(procs):
+    """{NAME: [pid, ...]} of running `gpu-lock acquire|try NAME ...` processes (the acquire loop sleeps inside one)."""
+    out = {}
+    for pid, (_, cmd) in procs.items():
+        tok = cmd.split()
+        for i in (0, 1):
+            if len(tok) > i + 2 and os.path.basename(tok[i]) == "gpu-lock" and tok[i + 1] in ("acquire", "try"):
+                out.setdefault(tok[i + 2], []).append(pid)
+                break
+    return out
+
+
+# ---------------------------------------------------------------- gpu-lock's rules on a snapshot
+def gpu_pool():
+    try:
+        v = subprocess.run([str(GPU_POOL)], capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        v = ""
+    return (int(v), "gpu-pool") if v.isdigit() else (DEFAULT_POOL, "default (gpu-pool unavailable)")
+
+
+def mb_of(text, pool):
+    """gpu-lock's mb_of: the first field of line 1 if it is a number, else the whole pool."""
+    first = (text.splitlines() or [""])[0].split()
+    return int(first[0]) if first and first[0].isdigit() else pool
+
+
+def may_take(me, pool, holders, queue, turns, now):
+    """gpu-lock's may_take on this snapshot: (ok, reason). holders {name: mb}, queue [(arrived, name, mb)] in order;
+    a waiter without a turns file would get one now."""
+    free = pool - sum(holders.values())
+    if me in holders:
+        mb = next((m for _, n, m in queue if n == me), pool)
+        ok = mb <= free + holders[me]
+        return ok, "growth fits" if ok else f"growth needs {mb - holders[me]} MB, {free} free"
+    for arrived, n, mb in queue:
+        if n == me:
+            return (True, "fits") if mb <= free else (False, f"needs {mb} MB, {max(free, 0)} MB free for it")
+        if n in holders:
+            if mb - holders[n] <= free:
+                free -= mb - holders[n]
+            continue
+        if mb <= free:
+            if now - turns.get(n, now) > TURN_MAX:
+                continue
+            free -= mb
+        elif now - arrived > BACKFILL_MAX:
+            return False, f"nobody may pass {n} (waiting > {BACKFILL_MAX // 60} min)"
+    return False, "not queued"
+
+
+def grow_deadlock(pool, holders, queue):
+    """Names of holders asking to grow that could never all be served (gpu-lock's deadlock refusal, exit 4)."""
+    want = {n: mb for _, n, mb in queue if n in holders and mb > holders[n]}
+    cur = {n: holders[n] for n in want}
+    avail = pool - sum(cur.values())
+    progressed = True
+    while want and progressed:
+        progressed = False
+        for g in list(want):
+            if want[g] - cur[g] <= avail:
+                avail += cur[g]
+                del want[g]
+                progressed = True
+    return set(want)
+
+
+def parse_holder(name, text, mtime, pool, now, procs):
+    lines = text.splitlines()
+    m = HOLDER_RE.match(lines[0]) if lines else None
+    kv = dict(l.split(": ", 1) for l in lines[1:] if ": " in l)
+    chain = []
+    for p in kv.get("chain", "").split():
+        if p.isdigit() and int(p) not in chain:      # gpu-lock's acquire loop appends the chain once per poll
+            chain.append(int(p))
+    agent = kv.get("agent", "").split()
+    agent_pid = int(agent[0]) if agent and agent[0].isdigit() else None
+    shell = chain[0] if chain else None
+    since = None
+    if m:
+        try:
+            since = time.mktime(time.strptime(m.group(2), "%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            pass
+    mb = mb_of(text, pool)
+    shell_alive, agent_alive = alive(shell, procs), alive(agent_pid, procs)
+    cmd_pid = shell if shell_alive else agent_pid if agent_alive else None
+    beat = int(now - mtime)
+    return {
+        "name": name, "mb": mb, "exclusive": mb >= pool,
+        "since": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(since)) if since else None,
+        "held_s": int(now - since) if since else None,
+        "heartbeat_age_s": beat, "stale": beat > STALE,
+        "partial": not m,
+        "shell_pid": shell, "shell_alive": shell_alive, "chain": chain,
+        "agent_pid": agent_pid, "agent": " ".join(agent[1:]) or None, "agent_alive": agent_alive,
+        "alive": bool(shell_alive or agent_alive) if (shell or agent_pid) else None,
+        "command": procs.get(cmd_pid, (0, None))[1] if cmd_pid else None,
+    }
+
+
+def build(locks=LOCKS, swap=True, now=None, procs=None, clock=time.time):
+    """The whole snapshot as a JSON-ready dict."""
+    if not locks.is_dir():
+        return {"error": f"no gpu-lock state directory at {locks}", "lock_dir": str(locks)}
+    raw, info = read_state(locks, clock=clock)
+    now = clock() if now is None else now
+    procs = processes() if procs is None else procs
+    pool, pool_src = gpu_pool()
+    holders = [parse_holder(n, t, mt, pool, now, procs) for n, (t, mt) in sorted(raw["holders"].items())]
+    live = {h["name"]: h["mb"] for h in holders if not h["stale"]}       # what gpu-lock sees after its prune
+    turns = {n: int(t.strip()) for n, t in raw["turns"].items() if t.strip().isdigit()}
+    tickets = sorted(raw["queue"])                                       # gpu-lock's (Non) glob: by arrival
+    q = [(a, n, mb_of(t, pool)) for a, n, t, mt in tickets if now - mt <= TICKET_STALE]
+    dead = grow_deadlock(pool, live, q)
+    waiting = waiting_procs(procs)
+    queue = []
+    for pos, (arrived, name, text, mt) in enumerate(tickets, 1):
+        mb = mb_of(text, pool)
+        stale = now - mt > TICKET_STALE
+        pids = waiting.get(name, [])
+        refused = name in dead
+        if not refused and pids:          # a waiter inside the script holding another share that it cannot fit beside
+            up = set(ancestors(pids[0], procs))
+            for h in holders:
+                if h["name"] != name and h["shell_pid"] in up and h["shell_alive"] and mb + h["mb"] > pool:
+                    refused = True
+        ok, why = (False, "stale: dropped on the next gpu-lock call") if stale else \
+            may_take(name, pool, live, q, turns, now)
+        turn_s = int(now - turns[name]) if name in turns else None
+        status = "deadlock" if refused else "stale" if stale else "ready" if ok else "waiting"
+        if turn_s is not None and not ok and not stale:
+            why += f"; turn came {fmt_dur(turn_s)} ago" + (" (lapsed)" if turn_s > TURN_MAX else "")
+        queue.append({
+            "pos": pos, "name": name, "mb": mb, "exclusive": mb >= pool,
+            "grow_from": live.get(name), "arrived": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(arrived)),
+            "waited_s": int(now - arrived), "last_poll_s": int(now - mt), "stale": stale,
+            "pids": pids, "partial": not text.strip(),
+            "status": status, "reason": "would be refused (exit 4) on its next poll" if refused else why,
+            "deadlock": refused, "turn_since_s": turn_s,
+        })
+    reserved = sum(live.values())
+    snap = {
+        "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)), "lock_dir": str(locks),
+        "pool_mb": pool, "pool_source": pool_src, "reserved_mb": reserved, "free_mb": pool - reserved,
+        "stale_reserved_mb": sum(h["mb"] for h in holders if h["stale"]),
+        "state": info, "holders": holders, "queue": queue,
+        "forced": {n: t.strip().splitlines()[0] if t.strip() else "" for n, t in raw["forced"].items()},
+        "drain_since_s": int(now - raw["drain_since"]) if raw["drain_since"] else None,
+        "system": system_memory(reserved),
+        "llama_swap": llama_swap() if swap else None,
+    }
+    return snap
+
+
+# ---------------------------------------------------------------- measured memory (not reservations)
+def _run(cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def system_memory(reserved):
+    out = {"source": "measured (vm_stat, sysctl), not gpu-lock bookkeeping"}
+    vm = _run(["/usr/bin/vm_stat"])
+    page = re.search(r"page size of (\d+) bytes", vm)
+    page = int(page.group(1)) if page else 16384
+    pages = {k.strip(): int(v.strip().rstrip(".")) for k, v in re.findall(r"^(Pages [^:]+):\s+(\d+)\.?$", vm, re.M)}
+    mb = lambda key: pages[key] * page // 1048576 if key in pages else None   # noqa: E731
+    wired = int(os.environ["GPU_LOCK_FAKE_WIRED"]) if os.environ.get("GPU_LOCK_FAKE_WIRED", "").isdigit() \
+        else mb("Pages wired down")
+    out.update(wired_mb=wired, compressed_mb=mb("Pages occupied by compressor"), free_mb=mb("Pages free"))
+    sc = dict(re.findall(r"^([\w.]+): (.*)$", _run(["/usr/sbin/sysctl", "hw.memsize", "iogpu.wired_limit_mb",
+                                                   "kern.memorystatus_level", "kern.memorystatus_vm_pressure_level",
+                                                   "vm.swapusage"]), re.M))
+    num = lambda k: int(sc[k]) if sc.get(k, "").strip().isdigit() else None   # noqa: E731
+    out["total_mb"] = num("hw.memsize") // 1048576 if num("hw.memsize") else None
+    out["wired_limit_mb"] = num("iogpu.wired_limit_mb")
+    out["available_pct"] = num("kern.memorystatus_level")
+    out["pressure"] = {1: "normal", 2: "warning", 4: "critical"}.get(num("kern.memorystatus_vm_pressure_level"))
+    swap = re.search(r"used = ([\d.]+)M", sc.get("vm.swapusage", ""))
+    out["swap_used_mb"] = int(float(swap.group(1))) if swap else None
+    # gpu-lock grants a share only while wired <= BASE_TOL + reserved (its phys_ok)
+    out["lock_wired_allowance_mb"] = BASE_TOL + reserved
+    out["lock_memory_check_ok"] = wired <= BASE_TOL + reserved if wired is not None else None
+    return out
+
+
+# ---------------------------------------------------------------- llama-swap (first messages of /api/events)
+def client(req):
+    """The request's client, as in bin/lsw-inflight."""
+    headers = req.get("req_headers") or {}
+    xff = headers.get("X-Forwarded-For") or headers.get("X-Real-Ip") or headers.get("X-Real-IP") or ""
+    return xff.split(",")[0].strip() if xff else req.get("remote_ip", "")
+
+
+def parse_events(buf):
+    """{models, paused, inflight} from the SSE bytes seen so far; keys appear once their message has arrived."""
+    got = {}
+    for line in buf.split(b"\n"):
+        if not line.startswith(b"data:"):
+            continue
+        try:
+            msg = json.loads(line[5:])
+            data = json.loads(msg["data"]) if isinstance(msg.get("data"), str) else msg.get("data")
+        except (ValueError, KeyError, TypeError):
+            continue
+        t = msg.get("type")
+        if t == "modelStatus" and isinstance(data, list):
+            got["models"] = [{"id": m.get("id"), "state": m.get("state")} for m in data
+                             if isinstance(m, dict) and m.get("state") not in (None, "stopped")]
+        elif t == "pauseChanged" and isinstance(data, dict):
+            got["paused"] = bool(data.get("paused"))
+        elif t == "inflight" and isinstance(data, dict) and data.get("operation") == "snapshot":
+            got["inflight"] = [{"model": r.get("model"), "path": r.get("req_path"), "client": client(r),
+                                "remote": client(r) not in LOCAL, "elapsed_s": int((r.get("elapsed_ms") or 0) / 1000)}
+                               for r in (data.get("requests") or []) if isinstance(r, dict)]
+    return got
+
+
+def llama_swap(timeout=1.5):
+    try:
+        key = KEY_FILE.read_text().strip()
+    except OSError as e:
+        return {"reachable": False, "error": f"no API key file ({type(e).__name__})"}
+    deadline = time.time() + timeout
+    buf, got = b"", {}
+    try:
+        with socket.create_connection(LSW, timeout=timeout) as s:
+            s.sendall(("GET /api/events HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/event-stream\r\n"
+                       f"Authorization: Bearer {key}\r\nConnection: close\r\n\r\n").encode())
+            while len(buf) < 4_000_000 and time.time() < deadline:
+                s.settimeout(max(0.05, deadline - time.time()))
+                chunk = s.recv(65536)
+                if not chunk:
+                    break
+                buf += chunk
+                got = parse_events(buf)
+                if len(got) == 3:
+                    break
+    except socket.timeout:
+        pass
+    except OSError as e:
+        return {"reachable": False, "error": f"{type(e).__name__}: {e}"}
+    if not buf.startswith(b"HTTP/1.1 200") and not buf.startswith(b"HTTP/1.0 200"):
+        return {"reachable": False, "error": (buf.split(b"\r\n", 1)[0].decode(errors="replace") or "no answer")}
+    got = parse_events(buf)
+    got["reachable"] = True
+    return got
+
+
+# ---------------------------------------------------------------- text rendering
+def fmt_dur(s):
+    if s is None:
+        return "-"
+    s = int(s)
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m{s % 60:02d}s"
+    return f"{s // 3600}h{s % 3600 // 60:02d}m"
+
+
+def gb(mb):
+    return f"{mb / 1024:.1f} GB"
+
+
+def fmt_mb(mb, pool):
+    return "all" if mb >= pool else str(mb)
+
+
+def bar(frac, width):
+    n = max(0, min(width, round(frac * width)))
+    return "[" + "#" * n + "." * (width - n) + "]"
+
+
+def render(snap, width=100):
+    """[(text, style)] with style in "", "head", "bold", "warn", "bad", "dim"."""
+    if "error" in snap:
+        return [(snap["error"], "bad")]
+    L = []
+    pool, used, free = snap["pool_mb"], snap["reserved_mb"], snap["free_mb"]
+    L.append((f"gpu-top  {snap['time']}   pool {pool} MB ({gb(pool)})   reserved {used} MB ({gb(used)})   "
+              f"free {free} MB ({gb(free)})", "head"))
+    pct = used / pool if pool else 0
+    L.append((f"{bar(pct, max(10, min(60, width - 12)))} {pct * 100:3.0f}%", "bad" if free <= 0 else "bold"))
+    st = snap["state"]
+    if st["busy"]:
+        age = st["mutex_age_s"]
+        L.append(("STATE BUSY: " + (f"gpu-lock's mutex held {fmt_dur(age)}" + (" (stale: the next gpu-lock call removes it)"
+                  if age > MUTEX_STALE else "") if age is not None else "state files changing")
+                  + "; showing the last read, it may be mid-change", "warn"))
+    if snap["stale_reserved_mb"]:
+        L.append((f"+{snap['stale_reserved_mb']} MB held by stale shares (no heartbeat > {STALE // 60} min): "
+                  "dropped on the next gpu-lock call, not counted above", "warn"))
+    sw = snap["llama_swap"]
+    if sw is not None:
+        if not sw.get("reachable"):
+            L.append((f"llama-swap: unreachable ({sw.get('error')})", "dim"))
+        else:
+            models = ", ".join(f"{m['id']}" + ("" if m["state"] == "ready" else f" ({m['state']})")
+                               for m in sw.get("models", [])) or "none"
+            inf = sw.get("inflight", [])
+            remote = sum(r["remote"] for r in inf)
+            paused = {True: "PAUSED", False: "running"}.get(sw.get("paused"), "?")
+            L.append((f"llama-swap: {paused}   loaded: {models}   in flight: {len(inf)} ({remote} from outside)", ""))
+            for r in inf[:5]:
+                L.append((f"    {r['model']} {r['path']}  {fmt_dur(r['elapsed_s'])}  from "
+                          f"{'outside' if r['remote'] else 'this machine'}", "dim"))
+    if snap["drain_since_s"] is not None:
+        L.append((f"first holder waiting {fmt_dur(snap['drain_since_s'])} for user requests to finish before the pause",
+                  "warn"))
+    sy = snap["system"]
+    if sy.get("wired_mb") is not None:
+        chk = sy["lock_memory_check_ok"]
+        L.append((f"memory (measured, not reservations): wired {sy['wired_mb']} MB ({gb(sy['wired_mb'])})"
+                  + (f" of limit {sy['wired_limit_mb']} MB" if sy.get("wired_limit_mb") else "")
+                  + (f"; pressure {sy['pressure']}" if sy.get("pressure") else "")
+                  + (f", {sy['available_pct']}% available" if sy.get("available_pct") is not None else "")
+                  + (f"; compressed {gb(sy['compressed_mb'])}" if sy.get("compressed_mb") is not None else "")
+                  + (f"; swap used {gb(sy['swap_used_mb'])}" if sy.get("swap_used_mb") is not None else ""),
+                  "" if sy.get("pressure") in (None, "normal") else "warn"))
+        L.append((f"gpu-lock memory check (wired <= {BASE_TOL} + reserved = {sy['lock_wired_allowance_mb']} MB): "
+                  + ("ok" if chk else "FAILS: wired memory no reservation explains; new shares wait"),
+                  "" if chk else "warn"))
+    for n, why in snap["forced"].items():
+        L.append((f"forced release notice for {n}: {why}", "warn"))
+
+    L.append(("", ""))
+    L.append((f"HOLDERS ({len(snap['holders'])})", "bold"))
+    if snap["holders"]:
+        L.append((f"{'NAME':<20} {'MB':>6} {'HELD':>7} {'BEAT':>7} {'PID':>6} {'ALIVE':<6} {'AGENT':<14} COMMAND", "head"))
+    for h in snap["holders"]:
+        al = {True: "yes", False: "DEAD", None: "?"}[h["alive"]]
+        if h["alive"] and h["shell_pid"] and not h["shell_alive"]:
+            al = "agent"                # the taking shell exited, the agent is still there
+        agent = f"{h['agent_pid']} {h['agent'] or ''}".strip() if h["agent_pid"] else "-"
+        cols = (f"{h['name'][:20]:<20} {fmt_mb(h['mb'], pool) + ('?' if h['partial'] else ''):>6} "
+                f"{fmt_dur(h['held_s']):>7} {fmt_dur(h['heartbeat_age_s']):>7} {str(h['shell_pid'] or '-'):>6} "
+                f"{al:<6} {agent[:14]:<14} ")
+        cmd = " ".join((h["command"] or "-").split())
+        style = "bad" if h["alive"] is False or h["stale"] else ""
+        L.append((cols + cmd[:max(0, width - len(cols))], style))
+        if h["stale"]:
+            L.append((f"    stale: no heartbeat for {fmt_dur(h['heartbeat_age_s'])}; dropped on the next gpu-lock call",
+                      "bad"))
+        elif h["alive"] is False:
+            L.append(("    its shell and agent have exited: a leaked share until released or stale", "bad"))
+    L.append(("", ""))
+    L.append((f"QUEUE ({len(snap['queue'])})", "bold"))
+    if snap["queue"]:
+        L.append((f"{'#':>2} {'NAME':<20} {'WANTS':>12} {'WAITED':>7} {'POLL':>7} {'PID':>6} STATUS", "head"))
+    for q in snap["queue"]:
+        want = fmt_mb(q["mb"], pool) + ("?" if q["partial"] else "")
+        if q["grow_from"] is not None:
+            want = f"{fmt_mb(q['grow_from'], pool)}->{want}"
+        pid = str(q["pids"][0]) if q["pids"] else "-"
+        cols = (f"{q['pos']:>2} {q['name'][:20]:<20} {want:>12} {fmt_dur(q['waited_s']):>7} "
+                f"{fmt_dur(q['last_poll_s']):>7} {pid:>6} ")
+        text = f"{q['status']}: {q['reason']}"
+        style = {"deadlock": "bad", "stale": "dim", "ready": "bold"}.get(q["status"], "")
+        L.append((cols + text[:max(0, width - len(cols))], style))
+    return L
+
+
+def print_once(snap, width):
+    for text, _ in render(snap, width):
+        print(text[:width] if width else text)
+
+
+def run_curses(args):
+    import curses
+
+    def main(scr):
+        curses.curs_set(0)
+        styles = {"": 0, "head": curses.A_BOLD, "bold": curses.A_BOLD, "dim": curses.A_DIM,
+                  "warn": curses.A_BOLD, "bad": curses.A_BOLD}
+        if curses.has_colors():
+            curses.start_color()
+            curses.use_default_colors()
+            for i, c in ((1, curses.COLOR_YELLOW), (2, curses.COLOR_RED), (3, curses.COLOR_CYAN)):
+                curses.init_pair(i, c, -1)
+            styles.update(warn=curses.color_pair(1) | curses.A_BOLD, bad=curses.color_pair(2) | curses.A_BOLD,
+                          head=curses.color_pair(3) | curses.A_BOLD)
+        scr.timeout(int(args.delay * 1000))
+        while True:
+            snap = build(swap=not args.no_swap)
+            h, w = scr.getmaxyx()
+            scr.erase()
+            lines = render(snap, w - 1)
+            lines.append(("", ""))
+            lines.append((f"refresh {args.delay:g}s   q quit   space refresh   read-only", "dim"))
+            for y, (text, style) in enumerate(lines[:h]):
+                try:
+                    scr.addnstr(y, 0, text, w - 1, styles.get(style, 0))
+                except curses.error:
+                    pass
+            scr.refresh()
+            k = scr.getch()
+            if k in (ord("q"), ord("Q"), 27):
+                return
+
+    try:
+        curses.wrapper(main)
+    except KeyboardInterrupt:
+        pass
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="gpu-top", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("-d", "--delay", type=float, default=2.0, help="refresh interval in seconds (default 2)")
+    p.add_argument("--once", action="store_true", help="print one snapshot and exit")
+    p.add_argument("--json", action="store_true", help="print one snapshot as JSON and exit")
+    p.add_argument("--no-swap", action="store_true", help="do not ask llama-swap")
+    a = p.parse_args(argv)
+    if a.delay < 0.2:
+        p.error("-d must be at least 0.2 s")
+    if a.json:
+        snap = build(swap=not a.no_swap)
+        print(json.dumps(snap, indent=2))
+        return 1 if "error" in snap else 0
+    if a.once or not (sys.stdout.isatty() and sys.stdin.isatty()):
+        snap = build(swap=not a.no_swap)
+        print_once(snap, shutil.get_terminal_size((120, 24)).columns)
+        return 1 if "error" in snap else 0
+    run_curses(a)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except BrokenPipeError:
+        sys.exit(0)

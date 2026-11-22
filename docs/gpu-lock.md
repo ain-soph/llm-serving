@@ -46,6 +46,61 @@ llama-swap 配置改动。调研、下载、编译、写文件和只用 CPU 的�
   或等待的东西不依赖这个请求。
 - `gpu-lock status` 显示持有者及其 MB、空闲 MB 和队列。共享运行时在 benchmark 日志里记下同时持有者。
 
+## 查看占用：gpu-top
+
+`~/llm-serving/bin/gpu-top`（源码 [`serving/bin/gpu-top`](../serving/bin/gpu-top)，同样由 `install_serving.py` 安装）像
+`top` / `nvidia-smi` 一样显示池子、持有者、队列、llama-swap 和系统实测内存。**严格只读**：不调用 gpu-lock、不写
+`.locks`、不拿 gpu-lock 的状态互斥锁，也就不能代替 acquire/release，等待时也不要用它轮询。
+
+```sh
+gpu-top            # 全屏，每 2 s 刷新（-d 秒数可改）；q 退出，空格立即刷新
+gpu-top --once     # 打印一次后退出（stdout 不是终端时自动如此）
+gpu-top --json     # 一次快照的 JSON，给 agent 用；--no-swap 不问 llama-swap
+```
+
+- 顶部：池总量 / 已预约 / 空闲（MB 与 GB）。超过 60 分钟没心跳的份额单列（gpu-lock 下次调用时丢弃，不计入）。
+- **持有者**：名字、MB（整池显示 `all`）、已持有时长（HELD）、距上次心跳（BEAT）、拿份额的 shell pid、是否还活着
+  （`yes`；`agent` = 那个 shell 已退出但 agent 进程还在；`DEAD` = 都已退出，份额漏了，需 release 或等它过期）、agent 进程、
+  命令行（截断）。
+- **队列**：顺序、名字、请求量（持有者扩容显示 `旧->新`）、已等待、距上次轮询、正在等待的 `gpu-lock acquire|try` 进程 pid，
+  以及按 gpu-lock 同一套规则（先到先得、插队、20 分钟后禁止插队、5 分钟轮次、死锁拒绝）在当前快照上推算的状态：
+  `ready`（下次轮询就会拿到，前提是下面的内存检查通过）、`waiting`（附原因）、`deadlock`（下次轮询会被 exit 4 拒绝）、
+  `stale`（超过 15 分钟没轮询，下次调用被清掉）。这是推算，不是 gpu-lock 的决定。
+- llama-swap：是否暂停、已加载的模型、在途请求数（其中来自本机之外、gpu-lock 暂停前会等的有几个，规则同 `lsw-inflight`）。
+- **系统实测**（不是记账）：`vm_stat` 的 wired、`sysctl` 的内存压力 / 可用百分比 / 压缩 / swap，以及 gpu-lock 发放份额前的
+  内存检查（wired ≤ 6000 + 已预约）此刻是否通过。
+
+读状态的方式：gpu-lock 每次改状态都在 `.locks/mutex` 目录互斥锁里进行。gpu-top 不拿这个锁，而是像 seqlock 一样读：读前读后都
+没有 mutex、目录列表和各文件 mtime/大小前后一致，才算一致快照；否则隔 50 ms 重读，最多 6 次。互斥锁一直被占（第一个持有者
+暂停 llama-swap 时可占几十秒）就显示上次读到的内容并标 `STATE BUSY`，不会卡住。读的途中消失的文件跳过；只写了一半的文件
+标 `?`，按 gpu-lock 的规则计（没有数字 = 整个池）。JSON 里 `state.consistent` / `state.busy` 表示这一点。
+
+示例（2026-11-21，一个独占持有者、6 个排队；排第一的 `mpm_tests` 已等满 20 分钟，后面的都不能插队）：
+
+```text
+gpu-top  2026-11-21 23:54:05   pool 82032 MB (80.1 GB)   reserved 82032 MB (80.1 GB)   free 0 MB (0.0 GB)
+[############################################################] 100%
+llama-swap: PAUSED   loaded: none   in flight: 0 (0 from outside)
+memory (measured, not reservations): wired 7690 MB (7.5 GB) of limit 88064 MB; pressure normal, 89% available; compressed 0.5 GB; swap used 0.8 GB
+gpu-lock memory check (wired <= 6000 + reserved = 88032 MB): ok
+
+HOLDERS (1)
+NAME                     MB    HELD    BEAT    PID ALIVE  AGENT          COMMAND
+a1121                   all  15m31s      6s  38809 yes    73217 claude   /bin/zsh ./s4.sh
+
+QUEUE (6)
+ # NAME                        WANTS  WAITED    POLL    PID STATUS
+ 1 mpm_tests                    8000  46m37s     25s  81578 waiting: needs 8000 MB, 0 MB free for it
+ 2 qwen3mlxaudio                 all  41m03s     22s  57876 waiting: nobody may pass mpm_tests (waiting > 20 min)
+ 3 strata_rebase                 all  35m47s      8s  30124 waiting: nobody may pass mpm_tests (waiting > 20 min)
+ 4 mflux_fusion_pr_g3           8000   9m16s     13s  83580 waiting: nobody may pass mpm_tests (waiting > 20 min)
+ 5 lora_compat                 30000   5m10s      8s  51545 waiting: nobody may pass mpm_tests (waiting > 20 min)
+ 6 lora_compat_h3              12000   3m10s      9s  78413 waiting: nobody may pass mpm_tests (waiting > 20 min)
+```
+
+`gpu-lock status` 也能看，但它会拿互斥锁并顺带清理过期份额和票据；只想看时用 gpu-top。测试：`tests/test_gpu_top.py`
+（假状态目录，不调用 gpu-lock）。
+
 ## 相关规则
 
 - 规则 2：只有持有份额时才能为直接测试（在 llama-swap 之外起服务）腾内存。脚本已替你暂停 llama-swap，再暂停一次无害；
