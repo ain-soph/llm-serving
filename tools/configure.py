@@ -158,7 +158,7 @@ def main():
     p.add_argument("--h3-source", type=Path)
     p.add_argument("--strata-exe")
     p.add_argument("--vision-exe")
-    p.add_argument("--nemo-exe")
+    p.add_argument("--nemo-exe", help="Nemotron ASR server (retired 2026-11-18, optional; tools/nemo.sh)")
     for name in ("llama-server", "llama-swap", "caddy", "ffmpeg", "ffprobe"):
         p.add_argument("--" + name)
     a = p.parse_args()
@@ -197,7 +197,7 @@ def main():
     key.chmod(0o600)
     lock = json.loads((ROOT / "native.lock.json").read_text())
     sources = {name: str(ROOT / ".local/src" / f"{name}-{v['revision'][:12]}")
-               for name, v in lock["sources"].items()}
+               for name, v in lock["sources"].items() if name != "nemo" or a.nemo_exe}
     if a.strata_source:
         sources["strata"] = str(a.strata_source.expanduser().absolute())
     if a.h3_source:
@@ -206,8 +206,9 @@ def main():
                 for name in ("llama-server", "llama-swap", "caddy", "ffmpeg", "ffprobe")}
     binaries.update({"strata": a.strata_exe or str(Path(sources["strata"]) / "build-metal-serving/strata"),
                      "strata-vision": a.vision_exe or str(Path(sources["strata"]) / "build-vision/bin/strata-vision"),
-                     "h3": str(Path(sources["h3"]) / "h3"),
-                     "nemo": a.nemo_exe or str(Path(sources["nemo"]) / "build/metal-server/bin/nemo-speech")})
+                     "h3": str(Path(sources["h3"]) / "h3")})
+    if a.nemo_exe:  # Nemotron was retired 2026-11-18: only configured (and checked by doctor) when asked for
+        binaries["nemo"] = a.nemo_exe
     config = {"root": str(ROOT), "python": str(ROOT / ".venv/bin/python"),
               "models": str(a.models.expanduser().absolute()), "state": str(state), "config": str(out),
               "listen": a.listen, "public_base": a.public_base.rstrip("/"), "fetch_hosts": a.fetch_host,

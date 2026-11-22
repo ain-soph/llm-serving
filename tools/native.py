@@ -118,7 +118,8 @@ def main():
         if not shutil.which(tool):
             parser.error(f"Missing {tool}; run bootstrap.sh and install Apple Command Line Tools")
     run(["xcrun", "--find", "clang"])
-    for name in (["strata", "h3", "nemo"] if a.component == "all" else [a.component]):
+    # "all" = the engines in service; nemo (Nemotron ASR, retired 2026-11-18) only when named
+    for name in (["strata", "h3"] if a.component == "all" else [a.component]):
         build(name, a.jobs)
 
 

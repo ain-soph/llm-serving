@@ -13,7 +13,7 @@ def environment(c):
     paths += ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
     return dict(os.environ, PATH=os.pathsep.join(dict.fromkeys(paths)),
                 LLM_ROOT=c["root"], LLM_MODELS_DIR=c["models"], LLM_STATE_DIR=c["state"],
-                LLM_PYTHON=c["python"], LLM_NEMO_EXE=b["nemo"],
+                LLM_PYTHON=c["python"], LLM_NEMO_EXE=b.get("nemo", ""),
                 FFMPEG=b["ffmpeg"], FFPROBE=b["ffprobe"], H3_FFMPEG=b["ffmpeg"], H3_FFPROBE=b["ffprobe"],
                 H3_VIDEO_SOURCE=c["sources"]["h3"], H3_VIDEO_BIN=b["h3"],
                 H3_VIDEO_LSW_URL="http://127.0.0.1:8081", H3_VIDEO_LSW_KEY_FILE=str(state / "api_key"),

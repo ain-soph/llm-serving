@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 port=${1:?PORT required}; shift
+: "${LLM_NEMO_EXE:?Nemotron is retired (2026-11-18); rerun tools/configure.py with --nemo-exe to re-enable}"
 model_dir="$LLM_MODELS_DIR/nemotron-3.5-transcribe-30b-a4b-gguf"
 exec "$LLM_NEMO_EXE" serve --host 127.0.0.1 --port "$port" --no-ui --device metal \
   --asr-model "$model_dir/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-AD-IQ4_NL.gguf" \
