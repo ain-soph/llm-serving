@@ -14,6 +14,11 @@ models:
       gpu: 6000
     evict_cost: 10
 
+  # Runtime: mlx-qwen3-asr on the original BF16 checkpoints (cast to float16 at load). The production host runs
+  # pre-quantized 8-bit weights with float16 activations on mlx-audio instead: add
+  # "--backend mlx-audio --fast --batch 8" there (4.5-10 % faster on every test set, 2.3-2.9x on 12-16 min audio,
+  # same WER / CER). Not used here: mlx-audio keeps the stored dtype, and BF16 activations are much slower on
+  # short files.
   "qwen3-asr-1.7b":
     name: "Qwen3-ASR 1.7B"
     capabilities:

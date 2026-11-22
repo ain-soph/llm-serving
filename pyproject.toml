@@ -41,6 +41,6 @@ h3-image-mlx = { git = "https://github.com/ain-soph/h3-image-mlx", rev = "dd38f9
 mflux = { git = "https://github.com/ain-soph/mflux", rev = "adec835fd5ed37e5c40aaaed02f11b05335b63a7" }
 mlx = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx-0.32.4%2Bserving.005fe7a2-cp315-cp315-macosx_26_0_arm64.whl" }
 mlx-metal = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx_metal-0.32.4%2Bserving.005fe7a2-py3-none-macosx_26_0_arm64.whl" }
-mlx-audio = { git = "https://github.com/ain-soph/mlx-audio", rev = "cb2e9791a66a5aaf50375df2227e00c6d1096cff" }
+mlx-audio = { git = "https://github.com/ain-soph/mlx-audio", rev = "fc3820aa4d3405249a2de92695eca1e8d2cc407a" }
 mlx-qwen3-asr = { git = "https://github.com/ain-soph/mlx-qwen3-asr", rev = "38568173399a013b2856fc480a2dc06604d7a2e5" }
 mlx-whisper = { git = "https://github.com/ain-soph/mlx-examples", rev = "46502543022c044396b44c83dd8848fcf4a1c168", subdirectory = "whisper" }

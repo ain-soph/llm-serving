@@ -18,7 +18,17 @@ blocks of 32; asr/w8a8/asr_quant.py, converted at load). Decoding reads every we
 this is 1.27-1.31x faster end to end with the same error rates (reports/asr.md); the audio encoder stays float16
 (W8A8 gave no speed-up there). Used by the qwen3-asr-1.7b-int8 entry; the default entry stays exact.
 
-Usage: .venv/bin/python server.py --port PORT [--model DIR] [--aligner DIR] [--model-id ID] [--dtype float16] [--q8]"""
+--backend mlx-audio (2026-11-21): run the same weights on mlx-audio's qwen3_asr / qwen3_forced_aligner through
+mlxaudio_engine.py (same chunking, language, token-budget and timestamp semantics).
+Default stays mlx-qwen3-asr. --dtype / --q8 apply to mlx-qwen3-asr only
+(mlx-audio keeps the stored float16 / 8-bit layers). With mlx-audio:
+  --fast     one-pass prefill, pipelined greedy loop, vectorized prompt merge, fast aligner call (4.5-10 % faster
+             than mlx-qwen3-asr on every test set; same transcripts as mlx-audio's own loop on 12 of 13 sets)
+  --batch N  decode up to N chunks of one long request together (needs --fast; rows grouped by length, per-row end
+             token / repetition stop / token budget): 2.3-2.9x on 12-16 min audio at N=8, MLX peak 4.20 -> 4.59 GB
+
+Usage: .venv/bin/python server.py --port PORT [--model DIR] [--aligner DIR] [--model-id ID] [--dtype float16] [--q8]
+       [--backend mlx-qwen3-asr|mlx-audio] [--fast] [--batch N]"""
 import argparse
 import concurrent.futures as cf
 import json
@@ -29,6 +39,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # mlxaudio_engine.py
 from http_api import SR, Server, Handler, ts
 
 log = logging.getLogger("qwen3-asr-server")
@@ -36,10 +47,11 @@ log = logging.getLogger("qwen3-asr-server")
 class Engine:
     """Owns the MLX model; every call runs on one dedicated thread."""
 
-    def __init__(self, model_dir, aligner_dir, dtype, q8=False):
+    def __init__(self, model_dir, aligner_dir, dtype, q8=False, backend="mlx-qwen3-asr", fast=False, batch=1):
         self.pool = cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx")
         self.model_dir, self.aligner_dir, self.dtype_name, self.q8 = model_dir, aligner_dir, dtype, q8
-        self.session = self.aligner = None
+        self.backend, self.fast, self.batch = backend, fast, batch
+        self.session = self.aligner = self.mlxaudio = None
         self.ready = False
         self.pool.submit(self._load).result()
 
@@ -50,6 +62,13 @@ class Engine:
         # several GiB of allocator cache beside the resident model/aligner.
         mx.set_cache_limit(512 * 1024**2)
         t = time.time()
+        if self.backend == "mlx-audio":
+            from mlxaudio_engine import MlxAudioQwen3
+            self.mlxaudio = MlxAudioQwen3(self.model_dir, self.aligner_dir, fast=self.fast, batch=self.batch)
+            self.ready = True
+            log.info("loaded %s + %s on mlx-audio (fast=%s, batch=%d) in %.1fs", self.model_dir, self.aligner_dir,
+                     self.fast, self.batch, time.time() - t)
+            return
         self.session = Session(self.model_dir, dtype=getattr(mx, self.dtype_name))
         if self.q8:
             sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "w8a8"))
@@ -67,8 +86,11 @@ class Engine:
 
     def _run(self, audio, language, context, timestamps):
         t = time.time()
-        r = self.session.transcribe(audio, language=language, context=context, return_timestamps=timestamps,
-                                    return_chunks=True, forced_aligner=self.aligner if timestamps else None)
+        if self.mlxaudio is not None:
+            r = self.mlxaudio.transcribe(audio, language=language, context=context, timestamps=timestamps)
+        else:
+            r = self.session.transcribe(audio, language=language, context=context, return_timestamps=timestamps,
+                                        return_chunks=True, forced_aligner=self.aligner if timestamps else None)
         if r.truncated:
             raise RuntimeError("decoder token budget exhausted; refusing an incomplete transcript")
         log.info("transcribed %.1fs audio in %.2fs (lang=%s, timestamps=%s)", len(audio) / SR, time.time() - t,
@@ -114,7 +136,14 @@ def main():
     ap.add_argument("--model-id", default="qwen3-asr-1.7b")
     ap.add_argument("--dtype", default="float16", choices=("float16", "bfloat16", "float32"))
     ap.add_argument("--q8", action="store_true", help="8-bit text decoder weights (W8A16)")
+    ap.add_argument("--backend", default="mlx-qwen3-asr", choices=("mlx-qwen3-asr", "mlx-audio"))
+    ap.add_argument("--fast", action="store_true", help="mlx-audio: our one-pass prefill / pipelined decode path")
+    ap.add_argument("--batch", type=int, default=1, help="mlx-audio --fast: chunks of one request decoded together")
     a = ap.parse_args()
+    if a.backend != "mlx-audio" and (a.fast or a.batch != 1):
+        ap.error("--fast / --batch apply to --backend mlx-audio only")
+    if a.batch > 1 and not a.fast:
+        ap.error("--batch needs --fast (mlx-audio's own batched loop has no repetition stop)")
     os.environ.setdefault("HF_HUB_OFFLINE", "1")  # weights are local; never fetch at runtime
     logging.basicConfig(level=logging.INFO, format="[qwen3-asr] %(message)s")
     server = Server((a.host, a.port), Handler)  # bind first so llama-swap sees the port while loading
@@ -122,7 +151,8 @@ def main():
     server.response_builder = build_response
     server.engine = type("E", (), {"ready": False})()
     import threading
-    threading.Thread(target=lambda: setattr(server, "engine", Engine(a.model, a.aligner, a.dtype, a.q8)),
+    threading.Thread(target=lambda: setattr(server, "engine", Engine(a.model, a.aligner, a.dtype, a.q8, a.backend, a.fast,
+                                                                          a.batch)),
                      daemon=True).start()
     log.info("listening on http://%s:%d (model %s)", a.host, a.port, a.model)
     server.serve_forever()
