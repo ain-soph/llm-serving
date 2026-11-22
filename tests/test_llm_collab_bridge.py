@@ -190,6 +190,28 @@ class BridgeInstallTests(unittest.TestCase):
         with self.assertRaisesRegex(bridge_mod.BridgeError, "local changes"):
             self.install()
 
+    def test_inherited_delegated_client_homes_are_ignored(self):
+        # A bridge-delegated session runs with CODEX_HOME=<bridge>/state/codex; HOME is the real home (no --home).
+        state = self.bridge / "state"
+        (state / "codex").mkdir(parents=True)
+        (state / "codex/config.toml").write_text('model = "x"\n')
+        inherited = {"HOME": str(self.home), "CODEX_HOME": str(state / "codex"),
+                     "CLAUDE_CONFIG_DIR": str(state / "claude")}
+        before = snapshot(state)
+        with patch.dict(os.environ, inherited):
+            env = bridge_mod._client_env(self.home)
+            self.assertEqual(env["CODEX_HOME"], str(self.home / ".codex"))
+            self.assertNotIn("CLAUDE_CONFIG_DIR", env)
+            lines, _ = self.install()
+            self.assertIn("bridge MCP registration in Codex: registered", lines)
+            self.assertFalse(self.install("check")[1])
+        self.assertEqual(snapshot(state), before)
+        self.assertIn(str(self.bridge / "mcp"), (self.home / ".codex/config.toml").read_text())
+        self.assertIn("llm-collab", json.loads((self.home / ".claude.json").read_text())["mcpServers"])
+        custom = self.home / "custom-codex"
+        with patch.dict(os.environ, {"HOME": str(self.home), "CODEX_HOME": str(custom)}):
+            self.assertEqual(bridge_mod._client_env(self.home)["CODEX_HOME"], str(custom))
+
     def test_status_after_install(self):
         self.install()
         with patch.dict(os.environ, {"CODEX_HOME": str(self.home / ".codex")}):

@@ -52,7 +52,7 @@ daemon 副本与 Homebrew 版本号相同、内容一致，所以优先用它没
   再否则 Homebrew 的 `node`。
 - 注册：Claude Code（user scope）、Codex（`$CODEX_HOME` 或 `~/.codex`）、Antigravity（`~/.gemini/config/mcp_config.json`），
   都通过各自的 CLI 写入，已指向 `<bridge>/mcp` 时不动。委派 Codex 的 `state/codex/config.toml` 由 Bridge 每次按白名单重写，
-  不能也不应该在那里注册（否则委派回合会递归调用 llm-collab）。`--no-register` 跳过注册，`--no-bridge` 跳过整个 bridge。
+  不能也不应该在那里注册（否则委派回合会递归调用 llm-collab）。在委派会话里运行安装器时，继承来的 `CODEX_HOME`、`CLAUDE_CONFIG_DIR` 若指向 bridge 目录内部会被忽略，改用 `<home>` 下的默认位置。`--no-register` 跳过注册，`--no-bridge` 跳过整个 bridge。
 - 回滚：被替换的文件先备份到 `~/llm-serving/.backup/llm-serving/platform/agent-bridge/<文件名>.<时间>-install-agents`。
   恢复旧启动器：`cp -p <备份的 mcp> ~/llm-serving/platform/agent-bridge/mcp`，然后在客户端里重启 MCP 服务。
   安装器不删除旧 wrapper 的 `server.mjs`、`provider.mjs`、`team.mjs`，所以恢复 `mcp` 即完整回到旧版本。

@@ -216,7 +216,26 @@ def _client_env(home):
         env["HOME"] = str(home)
         env["CODEX_HOME"] = str(Path(home) / ".codex")
         env.pop("CLAUDE_CONFIG_DIR", None)
+    # Bridge-delegated turns run with CODEX_HOME (and possibly CLAUDE_CONFIG_DIR) inside the bridge directory, e.g.
+    # <bridge>/state/codex. The Bridge rebuilds that config.toml from allowlisted keys on every delegated start, and
+    # an llm-collab entry there would let delegated turns call the coordinator recursively. Never read or write a
+    # registration there: fall back to the interactive client's default location under <home>.
+    for name, default in (("CODEX_HOME", Path(home) / ".codex"), ("CLAUDE_CONFIG_DIR", None)):
+        if env.get(name) and _inside(env[name], bridge_dir(home)):
+            if default is None:
+                env.pop(name)
+            else:
+                env[name] = str(default)
+    env.setdefault("CODEX_HOME", str(Path(home) / ".codex"))
     return env
+
+
+def _inside(path, directory):
+    try:
+        Path(os.path.realpath(path)).relative_to(os.path.realpath(directory))
+        return True
+    except ValueError:
+        return False
 
 
 def _read_json(path):
