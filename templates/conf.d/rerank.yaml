@@ -1,7 +1,11 @@
-# Qwen3-Reranker on MLX behind rerank/server.py: POST /v1/rerank. Zero-copy copies (common/qwen3_w8a8.py --float:
-# page-aligned, mapped from the page cache, same scores); documents sorted by length before batching.
-# -int8 entries: W8A8 copies (int8 weights and activations, INT8 TensorOps GEMM), separate so the defaults stay exact.
-# Capacities = measured wired peak + margin; see docs/rerank.md and docs/performance.md.
+# Qwen3-Reranker 0.6B / 4B / 8B on MLX behind rerank/server.py: POST /v1/rerank, relevance_score = sigmoid(yes - no).
+# One entry per size (2026-11-18), each a stored per-class precision copy written by common/qwen3_w8a8.py mix
+# (mix.json, page-aligned, mapped zero-copy); the old exact / -int8 pairs are gone (no aliases):
+#   0.6B: q/k/v, o, gate/up W8A8, down BF16, BF16 activations
+#   4B:   q/k/v, o, gate/up W8A8, down FP16, FP16 activations
+#   8B:   every projection W8A8 (the same numbers as the old 8B W8A8 copy)
+# Documents are sorted by length before batching; one long document runs its MLP in token chunks (exact).
+# Capacities = wired peak of one 32K-token document + ~0.5 GB; see docs/rerank.md and docs/w8a8.md.
 macros:
   "rerank-cmd": >
     @PYTHON@ @ROOT@/rerank/server.py --host 127.0.0.1 --port ${PORT}
@@ -9,62 +13,36 @@ macros:
 models:
   "qwen3-reranker-0.6b":
     name: "Qwen3 Reranker 0.6B"
-    description: "Fast reranker (20 docs ~0.13 s)"
-    cmd: ${rerank-cmd} --model-id qwen3-reranker-0.6b --model @MODELS@/qwen3-reranker/zc-0.6b-bf16
+    description: "Fast reranker (20 docs ~0.1 s)"
+    cmd: ${rerank-cmd} --model-id qwen3-reranker-0.6b --model @MODELS@/qwen3-reranker/mix-0.6b
     capabilities:
       reranker: true
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 3500             # wired peak +2660 MiB, one 32K-token document (long documents: MLP in token chunks)
+      gpu: 3000             # wired peak 2388 MiB, one 32K-token document
     evict_cost: 0
 
   "qwen3-reranker-4b":
     name: "Qwen3 Reranker 4B"
-    description: "Exact 4B reranker (20 docs ~0.85 s)"
-    cmd: ${rerank-cmd} --model-id qwen3-reranker-4b --model @MODELS@/qwen3-reranker/zc-4b-bf16
+    description: "Open WebUI reranker: per-class W8A8 / FP16 (20 docs ~0.6 s)"
+    cmd: ${rerank-cmd} --model-id qwen3-reranker-4b --model @MODELS@/qwen3-reranker/mix-4b
     capabilities:
       reranker: true
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 10000            # wired peak +9096 MiB, one 32K-token document (long documents: MLP in token chunks)
-    evict_cost: 0
-
-  "qwen3-reranker-4b-int8":
-    name: "Qwen3 Reranker 4B (W8A8)"
-    description: "4B with int8 weights and activations: 1.4x faster (20 docs ~0.6 s), same nDCG; suggested for RAG frontends"
-    cmd: >
-      ${rerank-cmd} --model-id qwen3-reranker-4b-int8 --model @MODELS@/qwen3-reranker/w8a8-4b
-      --w8a8-classes q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj --float-model @MODELS@/qwen3-reranker/zc-4b-bf16
-    capabilities:
-      reranker: true
-    checkEndpoint: /health
-    ttl: 1800
-    capacities:
-      gpu: 8000             # wired peak +7019 MiB, one 32K-token document (long documents: MLP in token chunks)
+      gpu: 8000             # wired peak 7309 MiB, one 32K-token document
     evict_cost: 0
 
   "qwen3-reranker-8b":
     name: "Qwen3 Reranker 8B"
-    description: "Most accurate reranker (20 docs ~1.8 s)"
-    cmd: ${rerank-cmd} --model-id qwen3-reranker-8b --model @MODELS@/qwen3-reranker/zc-8b-q8_0
+    description: "Most accurate reranker, W8A8 (20 docs ~1.1 s)"
+    cmd: ${rerank-cmd} --model-id qwen3-reranker-8b --model @MODELS@/qwen3-reranker/mix-8b
     capabilities:
       reranker: true
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 11000            # wired peak +9373 MiB, one 32K-token document (long documents: MLP in token chunks)
-    evict_cost: 0
-
-  "qwen3-reranker-8b-int8":
-    name: "Qwen3 Reranker 8B (W8A8)"
-    description: "8B with int8 weights and activations: 1.7x faster (20 docs ~1.1 s), scores within ~0.03"
-    cmd: ${rerank-cmd} --model-id qwen3-reranker-8b-int8 --model @MODELS@/qwen3-reranker/w8a8-8b
-    capabilities:
-      reranker: true
-    checkEndpoint: /health
-    ttl: 1800
-    capacities:
-      gpu: 10000            # wired peak +9225 MiB, one 32K-token document (long documents: MLP in token chunks)
+      gpu: 9500             # wired peak 8775 MiB, one 32K-token document
     evict_cost: 0

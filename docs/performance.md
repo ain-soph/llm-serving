@@ -11,14 +11,12 @@
 | 文本／视觉 | `qwen3.8-flash-next-uncensored` | Strata Metal fork | 同上 | prefill 2,522–2,544 tok/s（约 257K–260K）；续问 TTFT 0.25–0.49 s | wired +66,162 MiB（262K × 2 槽） | 96.95 GB |
 | 文本嵌入 | `embeddinggemma-2` | MLX，M5 TensorOps | BF16 权重，FP32 激活 | 16-token 查询 5.6 ms，64 × 400 token 达 57,814–58,226 tok/s（独占 GPU 内核验收） | 服务 wired 峰值增量 2680 MiB，常驻预留 3160 MiB | 0.558 GB + 32 MB 分词器 |
 | 多模态嵌入 | `embeddinggemma-2-multimodal` | llama.cpp + 适配层 | BF16 | 图片 0.04–0.12 s；5 s 音频 0.035 s；4 s 视频 0.34 s | wired +2996 MiB | 1.540 GB |
-| 文本嵌入 | `qwen3-embedding-0.6b`／`-4b`／`-8b` | MLX，自写服务 | FP16／FP16／Q8_0 | 64 × 450 token 0.39／2.50／5.21 s | wired 峰值 +2705／+10323／+11026 MiB（32K 输入） | 1.21／8.06／8.53 GB |
-| 文本嵌入 | `qwen3-embedding-4b-int8`／`-8b-int8` | 同上 | W8A8（4B 的 down_proj 用 FP16） | 比精确入口快 1.32×／1.64× | 容量 8000／11500 MiB | 4.43／8.21 GB |
+| 文本嵌入 | `qwen3-embedding-0.6b`／`-4b` | MLX，自写服务 | FP16 | 64 × 450 token 0.39／2.50 s | wired 峰值 +2705／+10323 MiB（32K 输入） | 1.21／8.06 GB |
+| 文本嵌入 | `qwen3-embedding-8b` | 同上 | 按层类混合⁶：W8A8，down_proj 8 位权重（Q8_0），FP16 激活 | 短查询 34.7 → 29.1 ms；1300 篇 62.6 → 45.6 s（对原 Q8_0） | wired 峰值 9983 MiB（32K 输入） | 7.89 GB |
 | 文本嵌入 | `voyage-4-nano` | 同上 | BF16 | 64 × 450 token 0.24 s | +2614 MiB | 0.709 GB |
-| 重排 | `qwen3-reranker-0.6b` | MLX，自写服务 | BF16 | 20 篇 0.14 s | 加载后 footprint 0.30 GB；wired +2735 MiB | 1.203 GB |
-| 重排 | `qwen3-reranker-4b` | 同上 | BF16 | 20 篇 0.86 s | footprint 0.30 GB；wired +9432 MiB | 8.055 GB |
-| 重排 | `qwen3-reranker-4b-int8` | 同上 | W8A8（down_proj 用 BF16） | 比精确 4B 快 1.33× | wired +5758 MiB | 4.426 GB |
-| 重排 | `qwen3-reranker-8b` | 同上 | Q8_0 等价 MLX 8-bit | 20 篇 1.80 s | wired +9829 MiB | 8.529 GB |
-| 重排 | `qwen3-reranker-8b-int8` | 同上 | W8A8 | 20 篇 1.07 s | wired +9422 MiB | 8.210 GB |
+| 重排 | `qwen3-reranker-0.6b` | MLX，自写服务 | 按层类混合⁶：W8A8，down_proj BF16，BF16 激活 | 20 篇约 0.1 s | wired 峰值 2388 MiB（32K 文档） | 0.852 GB |
+| 重排 | `qwen3-reranker-4b` | 同上 | 按层类混合⁶：W8A8，down_proj FP16，FP16 激活 | 20 篇约 0.6 s；60 × 20 篇 63.5 → 47.1 s（对原 BF16） | wired 峰值 7309 MiB | 5.322 GB |
+| 重排 | `qwen3-reranker-8b` | 同上 | 按层类混合⁶：全部 W8A8 | 20 篇约 1.1 s；60 × 20 篇 132.8 → 81.7 s（对原 Q8_0） | wired 峰值 8775 MiB | 7.667 GB |
 | 决策 | `pplx-decider-flash` | MLX 移植 | 按层类：W8A8，down_proj／视觉塔 FP16；预量化存盘、零拷贝 | 短请求 23–47 ms；图片 0.17–0.51 s；2K／8K／32.6K token 0.20／0.82／5.64 s | wired 峰值 +8783 MiB（4096 MB 缓存）；只发文本时视觉塔不驻留 | 6.29 GB³ |
 | 决策 | `elephant-1` | MLX 移植 + 官方 OneJev | 按层类：W8A8，in_proj_z 用 8-bit 只量化权重；预量化存盘、零拷贝 | 短请求 0.078–0.084 s；16.3K token 3.16 s | wired 峰值 +8730 MiB | 11.07 GB⁵ |
 | 决策 | `mammoth-1` | 同上，27B | 按层类：W8A8，out_proj 用 8-bit 只量化权重；预量化存盘、零拷贝 | 短请求 0.20–0.21 s；16.3K token 8.9 s | wired 峰值 +27458 MiB（不能与聊天模型共存） | 29.69 GB⁵ |
@@ -32,7 +30,7 @@
 | 图片 | `qwen-image-2.1-turbo-pe` | mflux fork | 同 Turbo | 先由聊天模型改写提示词：文生图 36.3 s、编辑 27.6 s（中位） | 同上 | 同上¹ |
 | 视频＋音频 | `minimax-h3-video`（旧名 `-stream` 为别名） | h3.c fork | INT8 DiT（零拷贝）、W8A16 文本编码器、BF16 VAE 计算 | fast 768p：5 s 片段 165–170 s；15 s 片段 758 s | standard 768p wired +14.3 GB（按 block 释放）；DiT GPU 峰值 22.20／33.00 GiB（fast） | 58.90 GB² |
 
-¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享 VAE；文本编码器链接到 H3 图片的 INT8 文件，不另计。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。
+¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享 VAE；文本编码器链接到 H3 图片的 INT8 文件，不另计。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。⁶ 2026-11-18（pa1b）起每个尺寸一个入口：原精确入口与 `-int8` 入口合并为 `common/qwen3_w8a8.py mix` 写出的预量化混合副本（`mix.json`，零拷贝），见 [w8a8.md](w8a8.md)；下文 11-16／11-17 的 `-int8` 数据保留作记录。
 
 ## 文本：Qwen3.8 Flash-Next（Strata）
 

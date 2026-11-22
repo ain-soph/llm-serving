@@ -62,7 +62,7 @@ MEDIA_ID = re.compile(r"(video_[0-9a-f]{24}|img_[0-9a-f]{16})")
 CONTEXT_HEADERS = (b"x-chat-id", b"x-user-id", b"x-user-message-id")
 PRESET_MODEL = {"fast": "minimax-h3-video-fast", "standard": "minimax-h3-video", "best": "minimax-h3-video-best"}
 DEFAULT_MODEL = {"chat": "qwen3.8-flash-next", "asr": "qwen3-asr-1.7b", "embedding": "embeddinggemma-2",
-                 "image": "minimax-h3-image", "tts": "qwen3-tts", "rerank": "qwen3-reranker-4b-int8",
+                 "image": "minimax-h3-image", "tts": "qwen3-tts", "rerank": "qwen3-reranker-4b",
                  "decision": "elephant-1"}
 KINDS = ("chat", "image", "video", "asr", "tts", "embedding", "rerank", "decision")
 CHAT_ENDPOINTS = "/v1/chat/completions (OpenAI), /v1/messages (Anthropic), /v1/responses (OpenAI Responses)"
@@ -821,7 +821,7 @@ async def rerank(query: str, documents: list[str], top_n: int = 0, instruction: 
         documents: up to 200 passages
         top_n: keep only the best N (0 = all)
         instruction: optional task description, e.g. "Given a legal question, find the passage that answers it"
-        model: a rerank model id from list_models; empty = qwen3-reranker-4b-int8 (-0.6b fastest, -8b most accurate)
+        model: a rerank model id from list_models; empty = qwen3-reranker-4b (-0.6b fastest, -8b most accurate)
     """
     model = await pick_model("rerank", model)
     body = {"model": model, "query": query, "documents": documents[:200]}

@@ -7,15 +7,15 @@ Transformers 5.23.0，具体依赖由 `uv.lock` 固定。
 
 | ID | 模型目录（相对于模型根目录） | 权重／激活 | 运行文件逻辑大小 |
 | --- | --- | --- | ---: |
-| `qwen3-reranker-0.6b` | `qwen3-reranker/zc-0.6b-bf16` | BF16／BF16 | 1.203 GB |
-| `qwen3-reranker-4b` | `qwen3-reranker/zc-4b-bf16` | BF16／BF16 | 8.055 GB |
-| `qwen3-reranker-4b-int8` | `qwen3-reranker/w8a8-4b` | W8A8（INT8 权重与激活） | 4.426 GB |
-| `qwen3-reranker-8b` | `qwen3-reranker/zc-8b-q8_0` | Q8_0 等价 MLX affine 8-bit、group 32、FP16 scale/bias／FP16 | 8.529 GB |
-| `qwen3-reranker-8b-int8` | `qwen3-reranker/w8a8-8b` | W8A8 | 8.210 GB |
+| `qwen3-reranker-0.6b` | `qwen3-reranker/mix-0.6b` | q/k/v、o、gate/up W8A8，down BF16／BF16 | 0.84 GB |
+| `qwen3-reranker-4b` | `qwen3-reranker/mix-4b` | q/k/v、o、gate/up W8A8，down FP16／FP16 | 5.31 GB |
+| `qwen3-reranker-8b` | `qwen3-reranker/mix-8b` | 全部 W8A8／FP16 | 7.65 GB |
 
-`zc-*` 是 `mlx-*` 转换结果重写成的页对齐零拷贝文件（分数与 `mlx-*` 完全相同；8B 输出头只留 yes/no 两行，
-所以比 9.228 GB 的 `mlx-8b-q8_0` 小），`w8a8-*` 是 W8A8 副本；生成步骤见 [零拷贝与 W8A8 副本](w8a8.md)。
-给 RAG 前端（例如 Open WebUI 的重排设置）推荐 `qwen3-reranker-4b-int8`：比精确的 4B 快 1.4 倍，SciFact nDCG@10 0.7498 对 0.7514，单个分数偏差约 0.02（排序几乎不变）；需要精确分数时用 `qwen3-reranker-4b`。
+2026-11-18（pa1b）起每种尺寸只有一个入口，目录是按层类选精度的预量化混合副本（`mix.json` 记录每类精度，页对齐、零拷贝映射）；
+原来的精确入口与 `-int8` 入口（`zc-*`、`w8a8-*` 目录）已合并，不留别名。与原精确入口相比：0.6B 平均分数差 0.0068、top-1 98.3%；
+4B 文档批量快 1.35×、单篇短文档 33.5 → 20.5 ms，平均差 0.0074、top-1 96.7%；8B 快 1.63×，与原 8B W8A8 入口数值相同。
+生成步骤（零拷贝浮点副本 → `common/qwen3_w8a8.py mix`）见 [零拷贝与 W8A8 副本](w8a8.md)。
+RAG 前端（例如 Open WebUI 的重排设置）用 `qwen3-reranker-4b`。
 
 迁移应复制这些已验证目录。`models.required.json` 检查必需文件，避免空目录被误判为完整模型。权重不上传 GitHub。
 

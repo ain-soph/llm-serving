@@ -55,33 +55,36 @@
     },
     "qwen3-reranker-0.6b": {
       "relative_paths": [
-        "qwen3-reranker/zc-0.6b-bf16"
+        "qwen3-reranker/mix-0.6b"
       ],
-      "measured_on": "2026-11-17",
+      "measured_on": "2026-11-21",
       "files": 8,
-      "bytes": 1203031581,
-      "GB": 1.203032,
-      "allocated_bytes": 1203056640
+      "bytes": 851988219,
+      "GB": 0.851988,
+      "allocated_bytes": 852013056,
+      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
     },
     "qwen3-reranker-4b": {
       "relative_paths": [
-        "qwen3-reranker/zc-4b-bf16"
+        "qwen3-reranker/mix-4b"
       ],
-      "measured_on": "2026-11-17",
+      "measured_on": "2026-11-21",
       "files": 8,
-      "bytes": 8055053851,
-      "GB": 8.055054,
-      "allocated_bytes": 8055078912
+      "bytes": 5322342136,
+      "GB": 5.322342,
+      "allocated_bytes": 5322366976,
+      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
     },
     "qwen3-reranker-8b": {
       "relative_paths": [
-        "qwen3-reranker/zc-8b-q8_0"
+        "qwen3-reranker/mix-8b"
       ],
-      "measured_on": "2026-11-17",
+      "measured_on": "2026-11-21",
       "files": 9,
-      "bytes": 8529493241,
-      "GB": 8.529493,
-      "allocated_bytes": 8545677312
+      "bytes": 7666859431,
+      "GB": 7.666859,
+      "allocated_bytes": 7666884608,
+      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
     },
     "whisper-large-v3": {
       "relative_paths": [
@@ -153,26 +156,6 @@
       "allocated_bytes": 26804301824,
       "note": "Three entries: W8A8 DiTs, W8A16 text encoder (te-q8), FP32 VAE. The BF16 text encoder file is the conversion source only (and the rollback); the BF16 DiT files are not needed."
     },
-    "qwen3-reranker-4b-int8": {
-      "relative_paths": [
-        "qwen3-reranker/w8a8-4b"
-      ],
-      "measured_on": "2026-11-17",
-      "files": 8,
-      "bytes": 4426194458,
-      "GB": 4.426194,
-      "allocated_bytes": 4426219520
-    },
-    "qwen3-reranker-8b-int8": {
-      "relative_paths": [
-        "qwen3-reranker/w8a8-8b"
-      ],
-      "measured_on": "2026-11-17",
-      "files": 9,
-      "bytes": 8210440873,
-      "GB": 8.210441,
-      "allocated_bytes": 8210464768
-    },
     "qwen3-embedding-0.6b": {
       "relative_paths": [
         "qwen3-embedding/zc-0.6b-fp16"
@@ -195,33 +178,14 @@
     },
     "qwen3-embedding-8b": {
       "relative_paths": [
-        "qwen3-embedding/zc-8b-q8_0"
+        "qwen3-embedding/mix-8b"
       ],
-      "measured_on": "2026-11-17",
+      "measured_on": "2026-11-21",
       "files": 13,
-      "bytes": 8529486159,
-      "GB": 8.529486,
-      "allocated_bytes": 8529518592
-    },
-    "qwen3-embedding-4b-int8": {
-      "relative_paths": [
-        "qwen3-embedding/w8a8-4b"
-      ],
-      "measured_on": "2026-11-17",
-      "files": 12,
-      "bytes": 4430637682,
-      "GB": 4.430638,
-      "allocated_bytes": 4430667776
-    },
-    "qwen3-embedding-8b-int8": {
-      "relative_paths": [
-        "qwen3-embedding/w8a8-8b"
-      ],
-      "measured_on": "2026-11-17",
-      "files": 13,
-      "bytes": 8210419455,
-      "GB": 8.210419,
-      "allocated_bytes": 8226316288
+      "bytes": 7892754942,
+      "GB": 7.892755,
+      "allocated_bytes": 7892787200,
+      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
     },
     "voyage-4-nano": {
       "relative_paths": [

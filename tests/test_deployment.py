@@ -60,13 +60,21 @@ class DeploymentTests(unittest.TestCase):
             rerank = yaml.safe_load((output / "conf.d/rerank.yaml").read_text())
             command = shlex.split(rerank["macros"]["rerank-cmd"])
             self.assertEqual(command[:2], [str(root / ".venv/bin/python"), str(root / "rerank/server.py")])
-            for model_id, directory in [("qwen3-reranker-0.6b", "zc-0.6b-bf16"), ("qwen3-reranker-4b", "zc-4b-bf16"),
-                                        ("qwen3-reranker-4b-int8", "w8a8-4b"), ("qwen3-reranker-8b", "zc-8b-q8_0"),
-                                        ("qwen3-reranker-8b-int8", "w8a8-8b")]:
-                args = shlex.split(rerank["models"][model_id]["cmd"])
-                self.assertEqual(args[args.index("--model") + 1], str(models / "qwen3-reranker" / directory))
+            # pa1b (2026-11-18): one entry per size, each a stored per-class mix (mix.json); no -int8 entries
+            self.assertEqual(list(rerank["models"]), ["qwen3-reranker-0.6b", "qwen3-reranker-4b", "qwen3-reranker-8b"])
+            for size in ("0.6b", "4b", "8b"):
+                args = shlex.split(rerank["models"][f"qwen3-reranker-{size}"]["cmd"])
+                self.assertEqual(args[args.index("--model") + 1], str(models / "qwen3-reranker" / f"mix-{size}"))
+                self.assertNotIn("--float-model", args)
+                self.assertNotIn("--w8a8-classes", args)
             embed = yaml.safe_load((output / "conf.d/qwen3-embedding.yaml").read_text())
             self.assertEqual(shlex.split(embed["macros"]["qe-cmd"])[1], str(root / "embedding/qwen3/server.py"))
+            self.assertEqual(list(embed["models"]), ["qwen3-embedding-0.6b", "qwen3-embedding-4b", "qwen3-embedding-8b",
+                                                     "voyage-4-nano"])
+            for model_id, directory in [("qwen3-embedding-0.6b", "zc-0.6b-fp16"), ("qwen3-embedding-4b", "zc-4b-fp16"),
+                                        ("qwen3-embedding-8b", "mix-8b")]:
+                args = shlex.split(embed["models"][model_id]["cmd"])
+                self.assertEqual(args[args.index("--model") + 1], str(models / "qwen3-embedding" / directory))
             args = shlex.split(embed["models"]["voyage-4-nano"]["cmd"])
             self.assertEqual(args[args.index("--model") + 1], str(models / "voyage-4-nano/zc-bf16"))
             decide = yaml.safe_load((output / "conf.d/decisions.yaml").read_text())
@@ -86,8 +94,6 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(list(mammoth["models"]), ["mammoth-1"])
             args = shlex.split(mammoth["models"]["mammoth-1"]["cmd"])
             self.assertEqual(args[args.index("--model") + 1], str(models / "mammoth-1-mix8"))
-            args = shlex.split(rerank["models"]["qwen3-reranker-4b-int8"]["cmd"])
-            self.assertEqual(args[args.index("--float-model") + 1], str(models / "qwen3-reranker/zc-4b-bf16"))
             qwen_pe = yaml.safe_load((output / "conf.d/qwen-image.yaml").read_text())["models"]["qwen-image-2.1-turbo-pe"]
             self.assertIn("QWEN_IMAGE_DEFAULT_ENHANCE=llm", qwen_pe["env"])
             tts = yaml.safe_load((output / "conf.d/tts.yaml").read_text())
@@ -110,12 +116,51 @@ class DeploymentTests(unittest.TestCase):
                 args = shlex.split(entry["cmd"])
                 self.assertEqual(args[args.index("--model") + 1], str(models / "qwen-image-2.1" / variant))
                 self.assertIn(f"MFLUX_QWEN21_W8A8={models / 'qwen-image-2.1/w8a8' / variant}", entry["env"])
+            self.assertNotIn("nemo", config["binaries"])                  # Nemotron retired 2026-11-18
+            self.assertNotIn("nemo", config["sources"])
             env = environment(config)
+            self.assertEqual(env["LLM_NEMO_EXE"], "")
             self.assertEqual(env["H3_VIDEO_FETCH_HOSTS"], "")
             self.assertEqual(env["H3_VIDEO_LSW_URL"], "http://127.0.0.1:8081")
             self.assertEqual(config["trusted_proxies"], [])
             self.assertNotIn("trusted_proxies", (output / "Caddyfile").read_text())
             self.assertFalse(any("@MODELS@" in p.read_text() for p in output.rglob("*.yaml")))
+
+    def test_nemo_is_opt_in(self):
+        # Nemotron was retired 2026-11-18; --nemo-exe brings it back (binary and lock source) for tools/nemo.sh.
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "root"
+            root.mkdir()
+            shutil.copytree(ROOT / "templates", root / "templates")
+            shutil.copy2(ROOT / "native.lock.json", root / "native.lock.json")
+            exe = base / "nemo-speech"
+            args = ["configure.py", "--models", str(base / "models"), "--state", str(base / "state"),
+                    "--output", str(base / "out"), "--pool-mb", "83192", "--nemo-exe", str(exe)]
+            hw = {"system": "Darwin", "arch": "arm64", "memory_mb": 98304, "wired_limit_mb": 88064}
+            with patch.object(configure, "ROOT", root), patch.object(configure, "hardware", return_value=hw), \
+                 patch.object(sys, "argv", args), contextlib.redirect_stdout(io.StringIO()):
+                configure.main()
+            config = json.loads((base / "out/machine.json").read_text())
+            self.assertEqual(config["binaries"]["nemo"], str(exe))
+            self.assertIn("nemo", config["sources"])
+            self.assertEqual(environment(config)["LLM_NEMO_EXE"], str(exe))
+
+    def test_retrieval_models_are_required(self):
+        # Every Qwen3 rerank / embedding directory the templates point at is checked by doctor (pa1b layout).
+        import re
+        required = json.loads((ROOT / "models.required.json").read_text())
+        for name in ("rerank.yaml", "qwen3-embedding.yaml"):
+            for directory in re.findall(r"--model @MODELS@/(\S+)", (ROOT / "templates/conf.d" / name).read_text()):
+                self.assertIn(directory, required["directories"])
+                if directory.startswith(("qwen3-reranker/", "qwen3-embedding/")):
+                    marker = "mix.json" if Path(directory).name.startswith("mix-") else "w8a8.json"
+                    self.assertIn(f"{directory}/model.safetensors", required["files"])
+                    self.assertIn(f"{directory}/{marker}", required["files"])
+        listed = [d for d in required["directories"] if d.startswith(("qwen3-reranker/", "qwen3-embedding/"))]
+        self.assertEqual(listed, ["qwen3-reranker/mix-0.6b", "qwen3-reranker/mix-4b", "qwen3-reranker/mix-8b",
+                                  "qwen3-embedding/zc-0.6b-fp16", "qwen3-embedding/zc-4b-fp16",
+                                  "qwen3-embedding/mix-8b"])
 
     def test_small_pool_requires_validated_profile(self):
         hw = {"system": "Darwin", "arch": "arm64", "memory_mb": 32768, "wired_limit_mb": 24000}

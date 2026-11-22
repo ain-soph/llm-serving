@@ -9,7 +9,7 @@
 | Open WebUI | 朗读（TTS） | 引擎 OpenAI，地址网关，模型 `qwen3-tts`，音色 `vivian` |
 | Open WebUI | 语音转文字 | 引擎 OpenAI，模型 `qwen3-asr-1.7b`（或更快的 `qwen3-asr-1.7b-int8`） |
 | Open WebUI | 出图／编辑 | 图片连接 → 网关；默认 `qwen-image-2.1-turbo`，可选 `-turbo-pe`、`qwen-image-2.1`、`minimax-h3-image` |
-| Open WebUI | 检索 | 嵌入 `embeddinggemma-2`；混合检索 + 重排 `qwen3-reranker-4b-int8`（TOP_K 20 → 6） |
+| Open WebUI | 检索 | 嵌入 `embeddinggemma-2`；混合检索 + 重排 `qwen3-reranker-4b`（TOP_K 20 → 6） |
 | LobeChat | 对话、出图、TTS、ASR | 自定义 OpenAI 兼容提供方指向网关，按类型添加模型 ID（图片、`qwen3-tts`、`qwen3-tts-design`） |
 | OpenClaw | TTS | `tts.provider = openai`，`baseUrl` 网关，`model` `qwen3-tts`，`speakerVoice` `vivian`，`responseFormat` mp3 |
 | 任何 MCP 客户端 | 工具 | `mcp/server.py`（见下） |
@@ -23,7 +23,7 @@
 | 工具 | 后端 | 默认 |
 | --- | --- | --- |
 | `speak` | `/v1/audio/speech` | `qwen3-tts`、`vivian`；`-design` 用 `instructions` 描述音色（粤语用它）；`-clone` 用参考音频 + 文字稿 |
-| `rerank` | `/v1/rerank` | `qwen3-reranker-4b-int8`，返回按分数排序的 `[{index, score, text}]` |
+| `rerank` | `/v1/rerank` | `qwen3-reranker-4b`，返回按分数排序的 `[{index, score, text}]` |
 | `decide` | `/v1/decisions`（或 SystemOne） | `elephant-1`（能与聊天模型共存）；`mammoth-1` 会卸下聊天模型 |
 | `generate_image`／`edit_image` | `/v1/images/*` | `prompt_enhance`、`background=transparent` 只对 `qwen-image-*` 生效，返回 `revised_prompt` |
 
