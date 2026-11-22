@@ -4,6 +4,8 @@
 `tools/native.py h3` 构建 `h3` 和 `h3_pack_int8`），每次渲染启动一个 `h3` 子进程，空闲时不占模型内存。
 路由模板：`templates/conf.d/h3-video.yaml`。速度与内存：[性能与资源报告](performance.md#视频音频minimax-h3-video)。
 
+2026-11-22 fork 整理：`serving` 重建为上游 `8974cc0` + 24 个签名提交（不再带未使用的上游 PR #77），渲染输出逐字节不变；本文提到的旧 commit（`0ff19ee`、`67a014a`、`0feaa4c` 等）在 tag `serving-pre-cleanup-20261122` 下仍可取。
+
 ## 入口
 
 只有一个入口 `minimax-h3-video`（常驻模式，INT8 DiT 零拷贝映射）。请求体的 `model` 可以带预设后缀
@@ -33,6 +35,30 @@ h3.c `70f657e` 起，零拷贝 DiT 默认按 block 建、放 Metal buffer（每 
 | `H3_DIT_STREAM_INFLIGHT` | 2 | 最多在途的 command buffer 数 |
 
 权重不是零拷贝（非 M5 或未页对齐）时自动保持常驻。
+
+稀疏档（`standard`／`turbo`／`fast`）的稀疏评估总是走 h3.c 的 NAX 块稀疏内核（由稀疏计划选择）；2026-11-21 起包装器不再设
+`H3_ATTN=nax`，前几次评估和首尾层这些密集注意力改用默认 MPS SDPA（NAX 密集慢 4–5%）：1344×768 5 s 去噪快 1.4–2.1%，输出变化为舍入级。
+
+**视频 VAE（h3.c `67a014a` 起）**：解码器融合 BF16 输入与 tile 流水线、去噪期间预读 VAE 权重页，编码器 buffer arena 与融合 GroupNorm+SiLU+pad；
+输出逐字节不变，768p 解码 24.5 → 21.2 s，首帧编码每张 5.0 → 3.3 s，Ref2VA 编码快约 19%。默认全开，`H3_VAE_FUSED=0`、`H3_VAE_PREFETCH=0`、
+`H3_VAE_ENC_OPT=0` 分别退回原路径；`H3_VAE_ENC_FAST=1`、`H3_VAE_ENC_BF16=1` 为可选的非逐字节变体（默认关）。
+
+**旋转 W8A8 DiT（h3.c `0feaa4c` 起）**：`FL2VA/transformer-int8-rot256` 是 qkv／fc1／fc2 的 K 维乘 Hadamard H256 后再 INT8 的 pack
+（`h3_pack_int8 --rot qkv,fc1,fc2`，再 `tools/align_int8_pack.py`），DiT 对官方 BF16 的误差约降 27%、去噪快约 1.5%。包装器对 fast／standard／best 的文本与首尾帧渲染设
+`H3_DIT_VARIANT=rot256` 并加 `--use-int8-row-fc2`；turbo、Ref2VA 用各自原 pack。没有这个 pack 时自动用原 pack；`H3_VIDEO_DIT_ROT=0` 关闭。
+旋转类别写在 marker 和每个权重文件的元数据里，h3 加载时比对，不一致直接报错。不要把它改名成 `transformer-int8`：旧版 h3 不读旋转信息。
+
+**提示词条件磁盘缓存**（h3.c `0ff19ee` 起，`H3_COND_CACHE_DIR`）：每次渲染是新进程，同一提示词原来每次都要重跑 tokenizer 和 INT8 文本编码器
+（约 2.5 s、读约 24 GB），首帧／参考请求还要重跑 VAE、视觉和音频编码。缓存保存种子增强之前的全部条件，命中时输出逐字节相同。
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `H3_COND_CACHE_DIR` | 关（包装器设为 `$LLM_STATE_DIR/h3-video/cond-cache`，可用 `H3_VIDEO_COND_CACHE` 改） | 缓存目录 |
+| `H3_COND_CACHE_MAX_MB` | 2048 | 总大小上限，按最近使用淘汰 |
+
+键是 SHA-256：提示词与条件参数、首帧／参考文件内容、文本编码器／tokenizer／VAE 文件身份、着色器源码、可执行文件内容、系统版本、GPU、
+ffmpeg（有媒体时）、除 DiT／采样器／诊断专用以外的 `H3_*` 环境变量。条目带 magic、版本、完整键和载荷哈希，任何不一致都重新计算；
+写入先写临时文件再改名。删掉目录即清空。
 
 ## 权重目录
 

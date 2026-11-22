@@ -19,7 +19,8 @@ POST /v1/videos fields (JSON values or multipart form fields):
   prompt            required. Describe scene, action, camera, look and the desired sound.
   seconds | frames  duration; default 5 s, at most 15 s (362 frames) at any size. H3 rounds frames up to 5+17n at
                     24 fps (5 s -> 124 frames). 1344x768: standard 5 s ~4.5 min (15 s not measured with the wide
-                    sparse layout; dense was ~43 min); fast 5 s ~3 min, 15 s ~13 min; best 5 s ~12 min.
+                    sparse layout; dense was ~43 min); fast 5 s ~3 min, 15 s ~13 min (estimate: an old INT8-QK
+                    run took 758 s, not remeasured since); best 5 s ~12 min.
   size              "WxH", multiples of 32, W*H <= 768*1344 (default 1344x768; 768x1344 portrait).
   seed              integer (default random)
   preset            four tiers, fastest first (1344x768, 5 s): "fast" (~3 min; tight block-sparse attention + token
@@ -149,7 +150,7 @@ HOLD_WAIT_S = 15          # how long an async POST waits for its hold request to
 #         or the tight layout (ghosted double images); 15 s shots drift (light, hair), hence the 8 s cap. The LoRA is
 #         trained on FL2VA only: Ref2VA references and continuations fall back to standard.
 PRESETS = {
-    "fast": {"steps": 20, "layers": 45, "reuse": 2, "sparse": "fast", "token_reduction": True},    # 5 s ~3 min, 15 s ~13
+    "fast": {"steps": 20, "layers": 45, "reuse": 2, "sparse": "fast", "token_reduction": True},    # 5 s ~3 min, 15 s ~13 (est.)
     "turbo": {"steps": 6, "layers": 50, "reuse": 1, "sparse": "relaxed"},                           # 5 s ~3.3 min
     "standard": {"steps": 20, "layers": 45, "reuse": 2, "sparse": "relaxed"},                       # 5 s ~4.5 min
     "best": {"steps": 20, "layers": 50, "reuse": 1},                                                # 5 s ~12 min
@@ -158,21 +159,44 @@ PRESET_ALIASES = {"quality": "best", "draft": "fast"}   # names used before 2026
 TURBO_MODELS = os.environ.get("H3_VIDEO_TURBO_MODELS")   # default: minimax-h3-turbo next to --models
 TURBO_MAX_SECONDS = 8.0
 DEFAULT_PRESET = "standard"
-# Every preset: video VAE in BF16 on TensorOps (H3_VAE_BF16=2, PSNR ~52 dB vs F32, 2.3x faster decode).
-H3_ENV = {"H3_VAE_BF16": "2"}
+# Every preset: video VAE in BF16 on TensorOps (H3_VAE_BF16=2, 2.3x faster decode; vs the FP32 path on real latents
+# 64.2 dB 8-bit frame PSNR; the earlier ~52 dB compared two H.264 MP4s).
+# Prompt conditioning (text encoder output + keyframe / reference latents) is cached on disk across renders
+# (h3.c H3_COND_CACHE_DIR, 2026-11-21): a repeated prompt skips the tokenizer and the INT8 text encoder (~2.5-4 s, ~24 GiB
+# read); the output is bit-identical. Keyed by prompt, media content, weight / tokenizer / binary identity and env;
+# LRU-bounded to H3_COND_CACHE_MAX_MB (default 2048). Not under outputs/ (that is pruned and served).
+COND_CACHE_DIR = Path(os.environ.get("H3_VIDEO_COND_CACHE") or Path(os.environ.get("LLM_STATE_DIR", str(Path.home() / "Library/Application Support/llm-serving"))) / "h3-video/cond-cache")
+H3_ENV = {"H3_VAE_BF16": "2", "H3_COND_CACHE_DIR": str(COND_CACHE_DIR), "H3_COND_CACHE_MAX_MB": "2048"}
 # Sparse attention (h3.c H3_SPARSE): a query block keeps the key blocks of the frames within t0 and, further away
 # in time, those within a spatial radius that halves as the distance doubles (r0 >> level, at least rmin); sink=1 also
 # keeps frame 0 for every query. Dense for the first evaluations (layout forms there) and the first/last block; with
 # fewer than 10 passes (a custom "steps") only the first two stay dense.
 # BF16 attention since 2026-11-17 (INT8 audit): int8 Q@K^T saved 5 of 160 s on a 768p 5 s fast render (DiT
 # 128.4 vs 134.2 s) with 14x the attention error (rel. RMS 0.021 vs 0.0015).
+# The sparse evaluations always run h3.c's NAX block-sparse kernel (selected by the plan, whatever H3_ATTN says);
+# since 2026-11-21 the dense ones (first evaluations, first/last block) use the default MPS SDPA instead of
+# H3_ATTN=nax, which is 4-5% slower on dense attention (docs/performance.md).
 SPARSE_LAYOUTS = {"fast": "t0=1,r0=4,rmin=0,sink=0", "relaxed": "t0=1,r0=12,rmin=2,sink=1"}
+# Hadamard-rotated W8A8 DiT (Track A, user decision 2026-11-22, docs/performance.md): text and first/last-frame
+# renders of fast / standard / best load FL2VA/transformer-int8-rot256 (h3 H3_DIT_VARIANT=rot256; qkv, fc1, fc2 inputs
+# rotated by H256 before INT8, the classes read from the pack's marker and checked against every weight file) with
+# row-wise FC2 activation scales (--use-int8-row-fc2, which this pack was validated with and does not record). DiT
+# velocity error vs BF16 -27 %, 768p denoise -1.4 % (best) / -1.8 % (standard). Not for turbo (its LoRA-folded pack was
+# not re-packed with rotation), Ref2VA (own unrotated pack) or --ssd-streaming (h3 refuses row FC2 there): those keep
+# the base pack and no row FC2. Without the pack's marker the base pack is used. Off switch: H3_VIDEO_DIT_ROT=0 in the
+# wrapper's environment; the base FL2VA/transformer-int8 stays on disk.
+ROT_DIT = "FL2VA/transformer-int8-rot256"
+ROT_VARIANT = "rot256"
+# h3 study / DiT-selection variables are never inherited from the wrapper's own environment (a stray one would
+# change or break production renders); the wrapper sets H3_DIT_VARIANT itself.
+CHILD_ENV_SCRUB = ("H3_DIT_", "H3_TEXT_EMB_", "H3_DUMP_", "H3_TEACHER_FORCE_", "H3_VAE_LATENT_", "H3_VAE_RGB_OUT",
+                   "H3_STOP_AFTER_ENCODE")
+ROT_DIT_ENABLED = os.environ.get("H3_VIDEO_DIT_ROT", "1") != "0"
 
 
 def sparse_env(layout, steps):
     dense_steps = 4 if steps >= 10 else 2
-    return {"H3_ATTN": "nax",
-            "H3_SPARSE": f"{SPARSE_LAYOUTS[layout]},dense_head=1,dense_tail=1,dense_steps={dense_steps}"}
+    return {"H3_SPARSE": f"{SPARSE_LAYOUTS[layout]},dense_head=1,dense_tail=1,dense_steps={dense_steps}"}
 
 
 def parse_sparse(value, preset_layout):
@@ -890,6 +914,11 @@ class Handler(BaseHTTPRequestHandler):
             argv += ["--render-width", str(render[0]), "--render-height", str(render[1])]
         if mode == "stream":
             argv.append("--ssd-streaming")
+        rot_dit = Path(models_dir) / ROT_DIT
+        use_rot = (ROT_DIT_ENABLED and preset_name != "turbo" and not ref2va and mode != "stream"
+                   and (rot_dit / "h3-int8-pack.json").is_file())
+        if use_rot:
+            argv.append("--use-int8-row-fc2")
         for key, raw in (("first-frame", first), ("last-frame", last)):
             if raw:
                 f = d / (key + sniff_ext(raw, key))
@@ -934,12 +963,20 @@ class Handler(BaseHTTPRequestHandler):
             f.write_bytes(raw)
             argv += ["--ref-audio", str(f)]
         env = dict(os.environ, **H3_ENV)
+        try:
+            COND_CACHE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)   # h3 creates only the last level
+        except OSError:
+            pass
         if p.get("sparse"):
             env.update(sparse_env(p["sparse"], p["steps"]))
+        for k in [k for k in env if k.startswith(CHILD_ENV_SCRUB)]:
+            del env[k]
+        if use_rot:
+            env["H3_DIT_VARIANT"] = ROT_VARIANT
         job = {"id": job_id, "object": "video", "model": model_name or self.server.model_id, "status": "queued", "progress": 0,
                "created_at": int(time.time()), "seconds": round(frames / FPS, 3), "frames": frames,
                "size": f"{width}x{height}", "seed": seed,
-               "settings": dict(p, preset=preset_name, mode=mode,
+               "settings": dict(p, preset=preset_name, mode=mode, dit="int8-rot256" if use_rot else "int8",
                                 **({"requested_preset": requested_preset, "fallback": fallback} if fallback else {}),
                                 conditioning="extension" if prev else "ref2va" if ref2va else
                                 ("fl2va" if first or last else "t2va")),

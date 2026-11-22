@@ -705,6 +705,58 @@ M5 Ultra 独占 GPU，六步、INT8 ConvRot、流式零拷贝，缓存预算 800
 
 - 预设四档（2026-11-18 起）：`best`（精确）、`standard`（默认，放宽块稀疏）、`turbo`（可选，Turbo LoRA 折进 DiT，6 步）、`fast`（紧块稀疏 + token 削减）；5 s 片段约 12／4.5–5／3.3–3.6／3 分钟。`best`、`standard`、`fast` 是同一份权重的请求参数，`turbo` 另用一份 22 GB 的 INT8 DiT。
 
+**2026-11-21：密集评估改回 MPS、提示词条件磁盘缓存**（h3.c `0ff19ee`；CC；1344×768 124 帧，独占，seed 42，ABBA 各 2 次，进程墙钟）
+
+| 预设 | 去噪 旧 → 新 | 总耗时 旧 → 新 |
+| --- | ---: | ---: |
+| standard | 256.1 → 252.6 s（−1.4%） | 285.9 → 282.5 s |
+| turbo | 164.6 → 161.1 s（−2.1%） | 194.2 → 190.6 s |
+| fast | 134.4 → 132.3 s（−1.6%） | 164.2 → 162.3 s |
+
+- 稀疏评估不变（全部评估稀疏时 `H3_ATTN=nax` 与不设逐字节相同）；只有密集评估从 NAX 换成 MPS，画面差别在同一换核的噪声底以内。
+
+| 条件缓存 | 未命中 | 命中 |
+| --- | ---: | ---: |
+| T2V 512² 39 帧 | 17.33 s | 14.26 s |
+| T2V 1344×768 124 帧 | 282.96 s | 279.79 s |
+| 首帧／参考图 512² 39 帧 | 20.4 s | 16.3 s |
+| 参考视频 2.5 s，512×288 56 帧 | 58.93 s | 21.43 s |
+
+- 未命中、命中与不开缓存三者 MP4 逐字节相同（T2V、首帧、Ref2VA 参考图、参考视频）。
+
+**2026-11-22：逐位一致视频 VAE**（h3.c `67a014a`；独占，standard，条件缓存关；输出逐字节不变）
+
+| 阶段 | 旧（0ff19ee） | 新 | 变化 |
+| --- | ---: | ---: | ---: |
+| VAE 解码，1344×768 124 帧（固定 latent，3 次中位数） | 24.52 s | 21.15 s | −13.7% |
+| VAE 解码，512² 22 帧 | 1.27 s | 1.16 s | −8.6% |
+| VAE 编码，首／尾帧 1344×768（每张） | 5.01 s | 3.33 s | −33% |
+| VAE 编码，Ref2VA 3 s 上下文 512²／1344×768 | 50.6／157.1 s | 41.1／127.2 s | −19% |
+| 编码器 GPU 分配峰值（Ref2VA） | 13.1 GiB | 7.9 GiB | −40% |
+
+| 端到端（standard） | 旧 | 新 | MP4 |
+| --- | ---: | ---: | --- |
+| T2V 512² 5 s | 51.2 s | 49.2 s | 相同 |
+| 首尾帧 1344×768 5 s | 370.5 s | 363.4 s | 相同 |
+| Ref2VA 512²（3 s 上下文 → 8 s） | 183.1 s | 171.9 s | 相同 |
+
+- 解码器：RMSNorm／SwiGLU／QK-norm+RoPE 直接写 BF16 GEMM 输入、tile 流水线、去噪期间后台预读 VAE 权重页（`H3_VAE_FUSED`、`H3_VAE_PREFETCH`，默认开）。
+  编码器：buffer arena、每 tile 一条命令链、GroupNorm+SiLU+pad 融合（`H3_VAE_ENC_OPT`，默认开）。去噪耗时不变，峰值不增。
+- 可选、默认关、非逐字节：`H3_VAE_ENC_FAST=1`（单张图 2D 卷积，每张 0.62 s，latent 相对误差 2.6e-6）、`H3_VAE_ENC_BF16=1`（BF16 卷积，再快 13%，相对误差 2.2–2.7%）。
+
+**2026-11-22：Hadamard 旋转 W8A8 DiT**（h3.c `0feaa4c`；`FL2VA/transformer-int8-rot256`，`H3_DIT_VARIANT=rot256` + `--use-int8-row-fc2`；fast／standard／best 的文本与首尾帧，turbo 与 Ref2VA 不变；独占）
+
+| 项 | 原 pack | 旋转 pack |
+| --- | ---: | ---: |
+| DiT 速度场对官方 BF16 的 rel L2（teacher forcing，3 组平均） | 4.05e-2 | 2.96e-2（×0.732） |
+| 去噪 1344×768 124 帧 best（3 种子中位数） | 655.5 s | 646.5 s（−1.4%） |
+| 去噪 1344×768 124 帧 standard | 251.3 s | 246.9 s（−1.8%） |
+| DiT 加载（512²，中位数） | 0.341 s | 0.355 s |
+| wired 峰值 − 基线，1344×768 | 11.24 GiB | 10.94 GiB |
+
+- 权重 W8（逐行 F32 scale），激活 A8：qkv／fc1 输入在融合 AdaLN 量化里乘 H256，FC2 输入乘 H256 后按行单尺度；注意力 BF16。
+- 同 seed 输出与原来不同。端到端对 BF16 参考的单对 PSNR 判据（≥ 原 pack −0.5 dB）有 3 组未过（轨迹分岔成另一合理样本，无伪影）；用户 2026-11-22 认为误差可接受。
+
 **四档实测**（2026-11-18，1344×768 124 帧，独占，seed 42；`turbo` 6 步、50 层、放宽稀疏）
 
 | 场景 | best | standard | turbo | fast |
@@ -1090,6 +1142,7 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 | IA | 11-17，INT8 逐类复查 `evals/int8-principle/u3`～`u6` | 重排／嵌入 4B 与 8B、elephant、Qwen-Image、H3 图片与视频 |
 | HT | 11-18，H3 视频文本编码器 INT8 `h3-video/te-int8/runs/` | 3 条提示词逐层类；768p 124 帧端到端 |
 | BS | 11-17，H3 视频按 block 释放 `bench/streamw/s1-1117-1612`，上线 `h3-video-streamw-deploy-1117-1629` | 512² 56 帧、768p 124 帧，standard |
+| CC | 11-21，H3 视频密集评估 MPS + 提示词条件磁盘缓存 `bench/cc/s1-1121-1624` | 768p 124 帧 standard／turbo／fast ABBA；512² T2V、首帧、Ref2VA |
 | EP | 11-17，EmbeddingGemma 精度 `deploy/embedding-dtype-1117/` | 短查询、8000 token、64 × 400、4 × 8000、SciFact 全库 |
 | AQ | 11-17，ASR 逐类检查 `asr/w8a8/results/whisper-1117-2105`、`qwen-1117-2128`，上线 `deploy-1117-2150` | en100／zh100／mix60／long_en／long_zh |
 | UE | 11-18，统一 Python 环境切换（`tools/regress` 完整一套） | 46 个用例 |
