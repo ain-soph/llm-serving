@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 import install_agents
+import llm_collab_bridge
 from service import environment
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -72,6 +73,8 @@ def main():
         print(f"WARN agent rules in ~/.claude/CLAUDE.md: {e}")
     worker = install_agents.link_worker(Path.home() / "llm-serving/platform/agent-bridge/local-worker", check=True)
     print(("OK" if worker == "unchanged" else "WARN") + f" local worker link: {worker}")
+    for ok, message in llm_collab_bridge.status(Path.home()):
+        print(("OK " if ok else "WARN ") + message + ("" if ok else "; run tools/install_agents.py"))
     if errors:
         for message in errors:
             print("FAIL", message)

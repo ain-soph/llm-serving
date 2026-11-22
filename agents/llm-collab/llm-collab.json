@@ -1,0 +1,14 @@
+{
+  "bridgeRoot": "./runtime/upstream",
+  "workspace": "./workspace",
+  "workspaceRoot": "/",
+  "fullControl": true,
+  "codexYolo": true,
+  "stateDirectory": "./state",
+  "productionRoot": "../..",
+  "providers": {
+    "claude": "claude",
+    "antigravity": "agy",
+    "codex": "./codex-select"
+  }
+}

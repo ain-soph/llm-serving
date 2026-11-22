@@ -1,0 +1,14 @@
+{
+  "llm-collab": {
+    "url": "https://github.com/ain-soph/llm-collab.git",
+    "branch": "main",
+    "commit": "08cc429dd17e6373c310cd343de681bcc5bced47",
+    "path": "release"
+  },
+  "local-agent-bridge": {
+    "url": "https://github.com/ain-soph/local-agent-bridge.git",
+    "branch": "serving",
+    "commit": "7ceed8f1dfb7293437607ffcb645caf871887166",
+    "path": "runtime/upstream"
+  }
+}

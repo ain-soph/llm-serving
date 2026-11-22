@@ -1,0 +1,26 @@
+#!/bin/sh
+# Codex CLI used for bridge-delegated turns and quota checks (llm-collab.json providers.codex).
+# Installed as <bridge>/codex-select by tools/install_agents.py from agents/llm-collab/codex-select.
+#
+# Order: LLM_COLLAB_CODEX_BIN if set, else the Codex app-server daemon's copy of the same version as the `codex`
+# on PATH, else that `codex`. Reason: Homebrew's Caskroom copy of codex-code-mode-host hung in _dyld_start even
+# after the quarantine was removed (a fresh copy of the same file started fine), so every delegated Codex tool
+# call timed out with "gRPC code-mode host timed out waiting for session opening response". The daemon installs a
+# byte-identical build of the same version under ~/.codex/packages; prefer it when present. Harmless once
+# `brew reinstall --cask codex` fixes the Caskroom host: both copies are the same build.
+set -eu
+if [ -n "${LLM_COLLAB_CODEX_BIN:-}" ]; then exec "$LLM_COLLAB_CODEX_BIN" "$@"; fi
+codex=$(command -v codex || true)
+if [ -z "$codex" ]; then echo "codex-select: codex not found on PATH" >&2; exit 127; fi
+# Homebrew cask layout: <prefix>/Caskroom/codex/<version>/bin/codex (or .../<version>/codex).
+real=$(realpath "$codex" 2>/dev/null || printf '%s\n' "$codex")
+dir=$(dirname -- "$real")
+case "$dir" in */bin) dir=$(dirname -- "$dir") ;; esac
+version=$(basename -- "$dir")
+case "$version" in
+  [0-9]*.[0-9]*)
+    for daemon in "${HOME:-}/.codex/packages/app-server-daemon/releases/$version"-*/bin/codex; do
+      if [ -x "$daemon" ]; then exec "$daemon" "$@"; fi
+    done ;;
+esac
+exec "$codex" "$@"

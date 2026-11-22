@@ -3,13 +3,17 @@
 CLAUDE.md: the rules live between BEGIN/END markers. A missing file is created; an existing file keeps everything
 outside the markers (the block is appended when absent, replaced when it differs). Any change to an existing file
 is backed up first. Local worker: the deployment path becomes a symlink to agents/local-worker in this checkout;
-an existing directory or foreign link there is left alone and reported. Never needs sudo; --check writes nothing.
+an existing directory or foreign link there is left alone and reported. llm-collab bridge: see
+tools/llm_collab_bridge.py (pinned checkouts, launcher, MCP registration; --no-bridge skips it).
+Never needs sudo; --check and --dry-run write nothing. --home installs into another home directory (tests).
 """
 import argparse
 import os
 import shutil
 import time
 from pathlib import Path
+
+import llm_collab_bridge
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "agents/claude-code/global-CLAUDE.md"
@@ -76,29 +80,50 @@ def link_worker(target, check=False):
 
 
 def main():
-    home = Path.home()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--claude-md", type=Path, default=home / ".claude/CLAUDE.md")
-    p.add_argument("--worker-path", type=Path, default=home / "llm-serving/platform/agent-bridge/local-worker")
-    p.add_argument("--backup-dir", type=Path, default=home / "llm-serving/.backup")
-    p.add_argument("--no-worker", action="store_true", help="Only install the CLAUDE.md rules")
+    p.add_argument("--home", type=Path, help="Home directory to install into (default: yours); sets the defaults below")
+    p.add_argument("--claude-md", type=Path, help="Default: <home>/.claude/CLAUDE.md")
+    p.add_argument("--worker-path", type=Path, help="Default: <home>/llm-serving/platform/agent-bridge/local-worker")
+    p.add_argument("--backup-dir", type=Path, help="Default: <home>/llm-serving/.backup")
+    p.add_argument("--no-worker", action="store_true", help="Skip the local worker link")
+    p.add_argument("--no-bridge", action="store_true", help="Skip the llm-collab bridge (checkouts, launcher, MCP)")
+    p.add_argument("--no-register", action="store_true", help="Skip registering llm-collab in the MCP clients")
+    p.add_argument("--source", action="append", default=[], metavar="NAME=URL",
+                   help="Clone/fetch a pinned checkout from another URL or path (llm-collab, local-agent-bridge)")
     p.add_argument("--check", action="store_true", help="Report what would change; exit 1 if anything would")
+    p.add_argument("--dry-run", action="store_true", help="Report what would change; exit 0")
     a = p.parse_args()
+    home = (a.home or Path.home()).absolute()
+    a.claude_md = a.claude_md or home / ".claude/CLAUDE.md"
+    a.worker_path = a.worker_path or home / "llm-serving/platform/agent-bridge/local-worker"
+    a.backup_dir = a.backup_dir or home / "llm-serving/.backup"
+    report = a.check or a.dry_run
     try:
-        action, saved = install_claude_md(a.claude_md, a.backup_dir, home, a.check)
+        action, saved = install_claude_md(a.claude_md, a.backup_dir, home, report)
     except ValueError as e:
         p.error(f"{a.claude_md}: {e}")
-    if a.check:
+    if report:
         print(f"CLAUDE.md rules: {'up to date' if action == 'unchanged' else 'would be ' + action}")
     else:
         print(f"CLAUDE.md rules: {action}" + (f" (previous file saved to {saved})" if saved else ""))
     pending = action != "unchanged"
     if not a.no_worker:
-        state = link_worker(a.worker_path, a.check)
-        print(f"local worker: {'would be linked' if a.check and state == 'linked' else state} ({a.worker_path} -> {WORKER})")
+        state = link_worker(a.worker_path, report)
+        print(f"local worker: {'would be linked' if report and state == 'linked' else state} ({a.worker_path} -> {WORKER})")
         if state.startswith("kept"):
             print("  Move its runtime state (logs/, claude-config/, codex-home/) into the checkout, remove it, then rerun.")
         pending |= state != "unchanged"
+    if not a.no_bridge:
+        try:
+            sources = dict(item.split("=", 1) for item in a.source)
+            lines, bridge_pending = llm_collab_bridge.install(
+                home, a.backup_dir, "check" if a.check else "dry-run" if a.dry_run else "apply", sources,
+                register_clients=not a.no_register)
+        except (ValueError, llm_collab_bridge.BridgeError) as e:
+            print(f"llm-collab bridge: FAILED: {e}")
+            raise SystemExit(1)
+        print("\n".join(lines))
+        pending |= bridge_pending
     raise SystemExit(int(a.check and pending))
 
 
