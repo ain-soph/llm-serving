@@ -253,6 +253,10 @@ def cases():
                     path="/v1/images/generations", expect="revised_prompt",
                     needs=["qwen3.8-flash-next"]))   # the prompt is rewritten by the chat model
     out.append(case("image-minimax-h3-image", "image", "minimax-h3-image", img, order=1))
+    # official PE (2026-11-23): the expansion samples (T 1.0), so only success, revised_prompt and the size are checked;
+    # it unloads Flash-Next (order 3: after the cases that run beside it)
+    out.append(case("smoke-minimax-h3-image-pe", "smoke", "minimax-h3-image-pe", img, order=3,
+                    path="/v1/images/generations", expect="revised_prompt", image_size=(512, 512)))
     out.append(case("image-z-image-turbo", "image", "z-image-turbo", img, order=1))
     out.append(case("image1024-z-image-turbo", "image", "z-image-turbo", {**img, "size": "1024x1024"},
                     quick=False, order=1))
@@ -497,7 +501,13 @@ def compare(c, out):
         p = video_psnr(out, (d / "golden.mp4").read_bytes())
         return ("WARN" if p >= 40 else "FAIL"), f"PSNR {p:.1f} dB"
     if k == "smoke":
-        return ("PASS", "ok") if out.get(c["expect"]) else ("FAIL", f"missing {c['expect']}")
+        if not out.get(c["expect"]):
+            return "FAIL", f"missing {c['expect']}"
+        if c.get("image_size"):
+            size = Image.open(io.BytesIO(base64.b64decode(out["b64_json"]))).size
+            if size != tuple(c["image_size"]):
+                return "FAIL", f"size {size} vs {tuple(c['image_size'])}"
+        return "PASS", "ok"
     raise ValueError(k)
 
 

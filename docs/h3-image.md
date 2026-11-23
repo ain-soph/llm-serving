@@ -1,7 +1,8 @@
 # MiniMax H3 Image：权重准备与开关
 
 服务 `services/image/h3-image-mlx/server.py` 调用 [h3-image-mlx fork](https://github.com/ain-soph/h3-image-mlx/tree/serving)（commit 固定在
-`uv.lock`），一个入口 `minimax-h3-image`，所有尺寸都与聊天模型共存。路由在 `platform/llama-swap/config.yaml`。
+`uv.lock`），入口 `minimax-h3-image`，所有尺寸都与聊天模型共存，路由在 `platform/llama-swap/config.yaml`；可选入口
+`minimax-h3-image-pe` 先做官方提示词扩写（见文末），路由在 `platform/llama-swap/conf.d/h3-image-pe.yaml`。
 速度与内存：[性能与资源报告](performance.md#图片minimax-h3-image)。
 
 ## 权重
@@ -39,3 +40,26 @@ M="$HOME/models/minimax-h3-image"     # Comfy-Org 打包的 MiniMax H3 Image
 未命中不变慢；缓存在磁盘上，进程重启后仍有效，删除目录即清空。里面是提示词的文本编码器输出和参考图的 VAE 潜变量，
 不是原文或原图，但仍属于用户数据，只放在本机（`data/` 不进仓库）。切片只在 35000 行以上（约 2048² + 16 张参考图）启用，
 把 DiT footprint 压回 10000 MB 以内，代价约 +5% 耗时，输出逐字节相同。数字见 [性能与资源报告](performance.md#图片minimax-h3-image)。
+
+## 官方提示词扩写（`minimax-h3-image-pe`）
+
+```sh
+hf download MiniMaxAI/MiniMax-H3-Image-PE --revision 35603d4b63949afa12cb098227fffefedf081afa \
+  --local-dir "$HOME/models/minimax-h3-image-pe"     # 官方 NVFP4，17.9 GB，附带 prompt/ 模板
+```
+
+`minimax-h3-image-pe-expander` 用 `mlx_vlm.server` 直接加载官方 NVFP4（W4A16，BF16 KV，前缀缓存开），
+`minimax-h3-image-pe` 是同一个图片服务加 `--default-enhance official`：文生图按官方 T2I 模板、编辑按官方 edit 模板
+（附参考图）先扩写，`size=auto` 用扩写给的比例，每项返回 `revised_prompt`。请求可用 `prompt_enhance`
+（`off` / `official` / `llm`）覆盖默认值。
+
+| 变量 | 模板值 | 作用 |
+| --- | --- | --- |
+| `H3_PE_EFFORT` | `low` | 官方模板的 `reasoning_effort`（`xhigh` / `medium` / `low`；Bench 上三档无差别，`low` token 最少） |
+| `H3_PE_MODEL` | 不设（= `minimax-h3-image-pe-expander`） | 扩写用的 llama-swap 模型 |
+| `H3_PE_URL` | 不设（= `http://127.0.0.1:8080/v1/chat/completions`） | 扩写请求地址 |
+| `H3_PE_DIR` | 不设（= `~/models/minimax-h3-image-pe`） | 官方 `prompt/` 模板所在目录 |
+
+扩写模型约占 20–24 GB wired（容量 30000），放不下时路由器卸下聊天模型；出图入口 `evict_cost` 1，保证让位的是聊天模型
+而不是正在等扩写结果的出图进程。`mlx_vlm.server` 在权重加载完之前 `/health` 就返回 200，加载中的请求得到 503
+`model_loading`，服务端按 `Retry-After` 等待（最多 600 s）。

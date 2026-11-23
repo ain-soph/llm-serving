@@ -40,6 +40,7 @@ import socketserver
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -65,6 +66,7 @@ PE_LLM_MODEL = os.environ.get("H3_PE_LLM_MODEL") or "qwen3.8-flash-next"
 API_KEY_FILE = Path(os.environ.get("H3_API_KEY_FILE") or Path(__file__).resolve().parents[3] / "platform/llama-swap/.api_key")
 ENHANCE_MODES = ("off", "official", "llm")
 PE_ATTEMPTS = 3
+PE_LOAD_WAIT_S = 600    # mlx_vlm.server loading the PE weights (17.9 GB) after llama-swap already saw /health
 T2I_RATIOS = ("1:1", "5:4", "4:3", "3:2", "16:9", "21:9", "4:5", "3:4", "2:3", "9:16")
 # Every generated image is also kept as PNG under MEDIA_DIR (id returned as "id" next to b64_json) so that links
 # such as http://127.0.0.1:8080/media/<id> work; the read-only video instance serves /media for both. Kept
@@ -165,11 +167,23 @@ def parse_pe_json(text, keys):
 
 
 def pe_request(payload):
-    req = urllib.request.Request(PE_URL, data=json.dumps(payload).encode(), headers={
-        "Content-Type": "application/json", "Authorization": "Bearer " + API_KEY_FILE.read_text().strip()})
-    with urllib.request.urlopen(req, timeout=1200) as r:
-        reply = json.load(r)
-    return reply["choices"][0], reply.get("usage") or {}
+    """One chat completion from the expansion model. mlx_vlm.server answers /health (llama-swap's readiness check)
+    while it is still loading the weights and refuses requests with 503 "model_loading" + Retry-After meanwhile
+    (2026-11-23 go-live: the first -pe request failed so); wait for the load, up to PE_LOAD_WAIT_S."""
+    data = json.dumps(payload).encode()
+    deadline = time.time() + PE_LOAD_WAIT_S
+    while True:
+        req = urllib.request.Request(PE_URL, data=data, headers={
+            "Content-Type": "application/json", "Authorization": "Bearer " + API_KEY_FILE.read_text().strip()})
+        try:
+            with urllib.request.urlopen(req, timeout=1200) as r:
+                reply = json.load(r)
+            return reply["choices"][0], reply.get("usage") or {}
+        except urllib.error.HTTPError as e:
+            body = e.read()
+            if e.code != 503 or b"model_loading" not in body or time.time() > deadline:
+                raise
+            time.sleep(min(float(e.headers.get("Retry-After") or 1), 5))
 
 
 def expand_prompt(prompt, mode, references=(), ratio_selection="auto", effort=None):

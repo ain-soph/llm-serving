@@ -26,6 +26,7 @@
 | 语音转写 | `whisper-large-v3` | [mlx-whisper fork](https://github.com/ain-soph/mlx-examples/tree/serving/whisper) | 多语种 |
 | 语音合成 | `qwen3-tts`、`-clone`、`-design` | mlx-audio fork | `/v1/audio/speech`：预设音色（含四川话、北京话）、声音克隆、声音设计；边生成边输出 |
 | 图片生成／编辑 | `minimax-h3-image` | [h3-image-mlx fork](https://github.com/ain-soph/h3-image-mlx/tree/serving) | W8A8，零拷贝，融合内核；各尺寸与聊天模型共存 |
+| 图片生成／编辑 | `minimax-h3-image-pe` | 同上 + mlx-vlm 跑官方 [MiniMax-H3-Image-PE](https://huggingface.co/MiniMaxAI/MiniMax-H3-Image-PE) | 可选：先用官方 PE（NVFP4，effort low）扩写提示词，返回 `revised_prompt`；每请求多约 15–35 s，调用时卸下聊天模型 |
 | 图片生成／编辑 | `qwen-image-2.1-turbo`、`qwen-image-2.1-turbo-pe`、`qwen-image-2.1` | [mflux fork](https://github.com/ain-soph/mflux/tree/serving) | W8A8 DiT + W8A16 文本编码器；8／40 步；最多 10 张参考图、遮罩、透明 PNG、提示词增强；非商用许可 |
 | 图片生成 | `z-image-turbo` | [mflux fork](https://github.com/ain-soph/mflux/tree/serving) | W8A8 DiT + BF16 文本编码器；9 步文生图；与聊天模型共存；Apache-2.0 |
 | 视频＋音频 | `minimax-h3-video` | [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving) | `best`／`standard`／`turbo`／`fast` 四档（`turbo` 需另备 22 GB 权重，限 8 s），最长 15 s；INT8 DiT 零拷贝、按 block 释放；文本编码器与 H3 图片共用 INT8 文件 |

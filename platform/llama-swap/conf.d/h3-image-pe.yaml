@@ -1,0 +1,62 @@
+# MiniMax-H3-Image with the official prompt expansion (PE), optional entry, live since 2026-11-23 (user: "要上线").
+# Owner: h3-image. Report: ~/llm-serving/reports/h3-image.md (section 提示词扩写); handoff docs/handoff/h3-image-pe.md.
+# Why: Qwen-Image-Bench s23 (23 prompts, W8A16 judge): official PE +7.75 per image at effort low vs no expansion
+# (95% CI +2.6..+13.4, Holm p 0.016); xhigh / medium / low are indistinguishable, low uses the fewest tokens.
+# The plain entry minimax-h3-image (config.yaml) is unchanged: no expansion, min_generation_area 0.
+#
+# minimax-h3-image-pe = the same image server (services/image/h3-image-mlx/server.py) with --default-enhance official,
+# H3_PE_EFFORT=low: a T2I prompt (or an edit instruction + its pictures, with the official edit task prompt) first goes to
+# minimax-h3-image-pe-expander through :8080; the caption it returns is rendered, size "auto" takes its aspect ratio, and
+# every data item carries "revised_prompt". A request may still send prompt_enhance off|official|llm.
+# minimax-h3-image-pe-expander = MiniMaxAI/MiniMax-H3-Image-PE (Qwen3.8-27B fine-tune, official ModelOpt NVFP4 only,
+# revision 35603d4b, 17.9 GB, MiniMax-H3-Image Community License) on mlx_vlm.server 0.8.0 (W4A16, BF16 KV; S1
+# 2026-11-18: 46.8 tok/s decode, prefix cache hit 0.13-0.19 s prefill). Capacity 30000 = wired peak +28.5 GB at 8
+# concurrent requests with the prefix cache (+23.2 GB single) + margin; --max-num-seqs 8 keeps it there.
+# It does not fit next to Flash-Next (69500): an expansion unloads the chat model, which reloads on its next request.
+# The -pe image entry gets evict_cost 1: room for the expander then costs least as {Flash-Next} (100) and never
+# {Flash-Next + the image entry} (101), so the image entry whose request waits on the expansion stays loaded. Above
+# Flash-Next (tried 150 on 2026-11-23) it made other loads evict Flash-Next instead, and qwen-image-2.1-turbo-pe, which
+# waits on Flash-Next, then deadlocked for 600 s.
+# Expander evict_cost 10: a returning chat model unloads it first.
+# Own stage-cache dirs (no two processes writing one cache). Weights not archived (no ~/models/*.archive manifest).
+models:
+  "minimax-h3-image-pe-expander":
+    name: "MiniMax H3 Image PE (prompt expansion model)"
+    description: "Official prompt expansion for MiniMax H3 Image (used by minimax-h3-image-pe); unloads Flash-Next"
+    ttl: 300
+    checkEndpoint: /health
+    useModelName: "${env.LLM_MODELS}/minimax-h3-image-pe"   # mlx_vlm.server serves the model under its path
+    env:
+      - "APC_ENABLED=1"          # the released task prompt is a fixed prefix: reuse its KV (exact)
+      - "APC_DISK_ENABLED=0"
+    cmd: >
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model minimax-h3-image-pe -- ${env.LLM_SERVING}/.venv/bin/python
+      -m mlx_vlm.server --host 127.0.0.1 --port ${PORT} --model ${env.LLM_MODELS}/minimax-h3-image-pe
+      --enable-thinking --max-tokens 4096 --max-num-seqs 8
+    capacities:
+      gpu: 30000
+    evict_cost: 10
+
+  "minimax-h3-image-pe":
+    name: "MiniMax H3 Image + official prompt expansion"
+    description: "Expands the prompt with the official MiniMax-H3-Image-PE first (+~20 s per request; unloads the chat model while it runs); returns revised_prompt"
+    ttl: 600
+    capabilities:
+      in: [text, image]
+      out: [image]
+    checkEndpoint: /health
+    env:
+      - "H3_ZERO_COPY=1"
+      - "H3_ASYNC=1"
+      - "H3_GPU_BUDGET_MB=8000"
+      - "H3_PE_EFFORT=low"
+      - "H3_EMBED_CACHE=${env.LLM_SERVING}/data/cache/h3-image-pe/text"
+      - "H3_REF_CACHE=${env.LLM_SERVING}/data/cache/h3-image-pe/refs"
+    cmd: >
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model minimax-h3-image --model minimax-h3-image-pe --
+      ${env.LLM_SERVING}/.venv/bin/python ${env.LLM_SERVING}/services/image/h3-image-mlx/server.py
+      --port ${PORT} --models ${env.LLM_MODELS}/minimax-h3-image --model-id minimax-h3-image-pe
+      --default-enhance official
+    capacities:
+      gpu: 10000
+    evict_cost: 1
