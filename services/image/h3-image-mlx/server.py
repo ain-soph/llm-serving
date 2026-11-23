@@ -4,7 +4,8 @@ Endpoints:
   GET  /health                  readiness probe for llama-swap's checkEndpoint
   GET  /v1/models               lists the single model ID
   POST /v1/images/generations   JSON: prompt, size ("WxH" or "auto"), n, seed, output_format
-  POST /v1/images/edits         multipart: prompt, image[] (up to 16, referenced as <Picture 1>...), size, n, seed
+  POST /v1/images/edits         multipart: prompt, image[] (up to 16, referenced as <Picture 1>..., each at most 12.25:1),
+                                size, n, seed
 
 Requests block until the image is done, so llama-swap counts them as in flight and never swaps
 the model out mid-generation. Generations run one at a time; concurrent requests queue on a lock.
@@ -57,6 +58,12 @@ DEFAULT_SIDE = 1024
 PIPELINE_MAX_SIDE = 4096
 MAX_SIDE = min(int(os.environ.get("H3_MAX_SIDE") or PIPELINE_MAX_SIDE), PIPELINE_MAX_SIDE)
 MAX_AREA = int(os.environ.get("H3_MAX_AREA") or 17_000_000)
+# h3_image_mlx.pipeline.generate also refuses (ValueError, a 500 here before 2026-11-23) a reference whose
+# max(w, h) / min(w, h) * 1024**2 exceeds 12_845_056: the vision encoder sees each picture with its short side at 1024,
+# and 12_845_056 (= 16384 * 28², Qwen-VL's max_pixels) caps the long side at 12544, i.e. a ratio of 12.25:1.
+# Upstream (Anionex/h3-image-mlx) refuses rather than pads or crops, and so does this entry, with 400 before any work.
+REF_PIXEL_BUDGET = 12_845_056
+MAX_REF_RATIO = REF_PIXEL_BUDGET / 1024**2      # 12.25
 MIN_GENERATION_AREA = int(os.environ.get("H3_MIN_GENERATION_AREA") or 0)
 OUTPUT_FORMATS = {"png": "PNG", "jpeg": "JPEG", "webp": "WEBP"}
 
@@ -157,6 +164,14 @@ def check_render_size(width, height, min_area):
         raise BadRequest(f"min_generation_area {min_area} would render {width}x{height} on a {rw}x{rh} canvas; "
                          f"MiniMax-H3-Image renders at most {MAX_SIDE} pixels per side: lower min_generation_area "
                          f"(0 = off) or the size")
+
+
+def check_reference_ratio(index, width, height):
+    """BadRequest for a reference the pipeline would refuse (the same expression as h3_image_mlx.pipeline.generate)."""
+    if max(width, height) / min(width, height) * 1024**2 > REF_PIXEL_BUDGET:
+        raise BadRequest(f"image {index + 1} is {width}x{height}, aspect ratio "
+                         f"{max(width, height) / min(width, height):.3f}:1; MiniMax-H3-Image accepts reference images "
+                         f"up to {MAX_REF_RATIO:g}:1 (vision encoder pixel budget): crop or pad it to that ratio")
 
 
 def reduced_ratio(width, height):
@@ -403,9 +418,11 @@ class Handler(BaseHTTPRequestHandler):
                 path = Path(tmp) / f"ref{i}.png"
                 try:
                     with Image.open(io.BytesIO(raw)) as im:
+                        size = im.size
                         im.convert("RGB").save(path)
                 except Exception:
                     raise BadRequest(f"image {i + 1} is not a readable image")
+                check_reference_ratio(i, *size)     # before the prompt expansion and the render
                 refs.append(path)
             return run_generation(self.server.models, fields.get("prompt"), parse_size(fields.get("size")),
                                   parse_int(fields.get("n"), "n", 1, 1, MAX_N),
