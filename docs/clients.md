@@ -5,12 +5,14 @@
 
 | 客户端 | 功能 | 设置 |
 | --- | --- | --- |
-| Open WebUI | 对话 | OpenAI 连接 → 网关；模型 `qwen3.8-flash-next` |
+| Open WebUI | 对话 | OpenAI 连接 → 网关；模型 `qwen3.8-flash-next`；两个 Flash-Next 模型的高级参数设 `top_k = 20`（Open WebUI 原样转发；服务端看到采样字段后按思考状态补齐其余项，不设则是贪心解码） |
 | Open WebUI | 朗读（TTS） | 引擎 OpenAI，地址网关，模型 `qwen3-tts`，音色 `vivian` |
 | Open WebUI | 语音转文字 | 引擎 OpenAI，模型 `qwen3-asr-1.7b`（或更快的 `qwen3-asr-1.7b-int8`） |
 | Open WebUI | 出图／编辑 | 图片连接 → 网关；默认 `qwen-image-2.1-turbo`，可选 `-turbo-pe`、`qwen-image-2.1`、`minimax-h3-image` |
 | Open WebUI | 检索 | 嵌入 `embeddinggemma-2`；混合检索 + 重排 `qwen3-reranker-4b`（TOP_K 20 → 6） |
 | LobeChat | 对话、出图、TTS、ASR | 自定义 OpenAI 兼容提供方指向网关，按类型添加模型 ID（图片、`qwen3-tts`、`qwen3-tts-design`） |
+| LobeChat | 决策 | 不支持：LobeChat 只对内置模型目录里的决策模型 ID 走 `/decisions`，自定义 ID 退化为 `/chat/completions` 模拟，而网关上的决策模型只提供 `/v1/decisions` 和 SystemOne，没有对话接口；用 MCP `decide` |
+| OpenClaw | 对话采样 | `agents.defaults.models["<provider>/qwen3.8-flash-next"].params.extra_body.top_k = 20`（同 Open WebUI） |
 | OpenClaw | TTS | `tts.provider = openai`，`baseUrl` 网关，`model` `qwen3-tts`，`speakerVoice` `vivian`，`responseFormat` mp3 |
 | 任何 MCP 客户端 | 工具 | `clients/mcp/server.py`（见下） |
 
