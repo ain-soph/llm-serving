@@ -2,7 +2,7 @@
 quantized at load (as the server did), then save it (decider_mlx.MLXDecider.save_mix) so the server maps it zero-copy
 and the official checkpoint need not stay on disk.
 
-usage: decisions/decider/save_mix.py SOURCE OUT [--w8a8-names a,b,...] [--dtype float16] [--revision REPO@SHA]
+usage: services/decisions/decider/save_mix.py SOURCE OUT [--w8a8-names a,b,...] [--dtype float16] [--revision REPO@SHA]
 Default classes: every W8A8 class except down_proj (its W8A8 was most of the error for 2-5% of the time,
 reports/optimization-audit-20261117.md section 3). Rebuild: hf download perplexity-ai/pplx-decider-flash-v1.3
 --local-dir SOURCE, run this, delete SOURCE.

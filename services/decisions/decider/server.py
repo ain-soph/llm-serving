@@ -1,6 +1,6 @@
 """SystemOne server (POST /v1/systemone) for Perplexity Decider checkpoints on MLX, run by llama-swap (2026-11-16).
 
-  .venv/bin/python decisions/decider/server.py --port PORT --model CHECKPOINT [--model-id ID] [--no-vision] [--dtype float16]
+  .venv/bin/python services/decisions/decider/server.py --port PORT --model CHECKPOINT [--model-id ID] [--no-vision] [--dtype float16]
 
 Request: {"model"?, "state", "questions": {id: {"type": "noul"|"choice"|"score", "instructions"?, "criteria"?}},
 "images"?: ["data:image/...;base64,..."], "temperature"?} or {"requests": [...]} (answered in order, as "results").
@@ -18,8 +18,9 @@ import mlx.core as mx
 import sys
 from pathlib import Path
 
-# The official pplx_decider package ships inside the checkpoint (source/src, Apache-2.0). It pins older
-# torch / transformers than this environment, so it is imported from there instead of being installed.
+# The official pplx_decider package ships inside the checkpoint (source/src, Apache-2.0). Its pins (torch==2.14.0,
+# transformers==5.17.0) are for the official PyTorch inference; we only use its prompt / answer code, so it is
+# imported from there under the shared environment's latest transformers instead of being installed (2026-11-17).
 if "--model" in sys.argv:
     sys.path.insert(0, str(Path(sys.argv[sys.argv.index("--model") + 1]) / "source/src"))
 

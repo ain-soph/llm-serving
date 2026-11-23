@@ -23,7 +23,7 @@ from transformers import Qwen3VLProcessor
 from pplx_decider.protocol import MAX_OPTIONS, MIN_PIXELS, PROTOCOL, Encoder, RequestError, answer, load_json
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "shared/common"))
 import mlx_q8  # noqa: E402
 import mlx_w8a8  # noqa: E402
 

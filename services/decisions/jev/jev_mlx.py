@@ -25,7 +25,7 @@ import mlx.core as mx
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "OneJev"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "shared/common"))
 from qev import readout as ro                                      # noqa: E402
 from qev.calibrate import Calibration                              # noqa: E402
 from qev.engine import BranchResult, DecisionEngine, EngineInfo    # noqa: E402
@@ -186,7 +186,7 @@ class MLXJev(DecisionEngine):
         """8-bit weights at load, one decoder layer at a time from the lazily mapped bfloat16 file, so the bfloat16
         copy never exists in full: "q8" = MLX affine 8-bit, group 32, scales in the activation dtype (weight-only,
         like Q8_0); "w8a8" = per-row int8 weights of the Hadamard-rotated projections with int8 activations on the
-        M5 INT8 TensorOps GEMM (common/mlx_w8a8.py). The token embedding is not in MLX (`_rows`)."""
+        M5 INT8 TensorOps GEMM (shared/common/mlx_w8a8.py). The token embedding is not in MLX (`_rows`)."""
         import mlx.nn as nn
         if quant == "q8":
             def pred(path, m):

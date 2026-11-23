@@ -1,7 +1,7 @@
 """SystemOne server (POST /v1/systemone) for Base Labs decision checkpoints (elephant-1 etc.) on MLX, run by llama-swap
 (2026-11-17).
 
-  .venv/bin/python decisions/jev/server.py --port PORT --model CHECKPOINT [--model-id ID] [--dtype float16] [--quant q8|w8a8]
+  .venv/bin/python services/decisions/jev/server.py --port PORT --model CHECKPOINT [--model-id ID] [--dtype float16] [--quant q8|w8a8]
 
 Request: {"model"?, "state", "questions": {id: {"type": "noul"|"choice"|"score", "instructions"?, "criteria"?}}} or
 {"requests": [...]} (answered in order, as "results"). Answers are qev's (OneJev) format: noul = P(yes); choice =

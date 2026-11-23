@@ -2,7 +2,7 @@
 then save the result (jev_mlx.MLXJev.save_mix) so the server maps it zero-copy instead of re-quantizing the bfloat16
 checkpoint on every load, and the bfloat16 checkpoint need not stay on disk.
 
-usage: decisions/jev/save_mix.py SOURCE OUT --quant {q8,w8a8} [--w8a8-skip a,b] [--dtype bfloat16]
+usage: services/decisions/jev/save_mix.py SOURCE OUT --quant {q8,w8a8} [--w8a8-skip a,b] [--dtype bfloat16]
 Rebuild: download the official checkpoint (hf download baselabs/<model> --local-dir SOURCE), run this, delete SOURCE.
 """
 import argparse
