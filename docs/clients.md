@@ -28,11 +28,20 @@
 | `generate_image`／`edit_image` | `/v1/images/*` | `prompt_enhance`、`background=transparent` 只对 `qwen-image-*` 生效，返回 `revised_prompt` |
 
 环境变量：`LLAMA_SWAP_URL`（网关，默认 `http://127.0.0.1:8080`）、`LLAMA_SWAP_KEY`、`MCP_TOKENS`（逗号分隔，每个客户端一个）、
-`PUBLIC_BASE`（媒体链接前缀）、`ALLOWED_HOSTS`、`INPUT_HOSTS`（允许下载输入文件的内网主机）、`SEARXNG_URL`；
-与 Open WebUI 的附件联动另需 `OWUI_URL`、`OWUI_API_KEY`、`CONTEXT_TOKENS`。
+`PUBLIC_BASE`（媒体链接前缀）、`ALLOWED_HOSTS`、`INPUT_HOSTS`（允许下载输入文件的内网主机）、`API_BASES`（`list_models`
+里给出的 HTTP API 地址）、`SEARXNG_URL`；与 Open WebUI 的附件联动另需 `OWUI_URL`、`OWUI_API_KEY`、`CONTEXT_TOKENS`。
+代码里的默认值都是本机 127.0.0.1；服务不和网关在同一台机器上时，env 文件至少要设下面 5 项（示例值，换成自己的）：
 
 ```sh
-docker build -t llm-mcp mcp && docker run --env-file <your env file> -p 8000:8000 llm-mcp
+LLAMA_SWAP_URL=http://<gateway-lan-ip>:8080
+PUBLIC_BASE=https://<public-domain>
+INPUT_HOSTS=<chat-ui-s3-host>
+API_BASES=LAN http://<gateway-lan-ip>:8080/v1, public https://<public-domain>/v1
+ALLOWED_HOSTS=<public-domain>,llm-mcp:8000,localhost:8000,127.0.0.1:8000
+```
+
+```sh
+docker build -t llm-mcp clients/mcp && docker run --env-file <your env file> -p 8000:8000 llm-mcp
 python clients/mcp-tests/mcp_call.py http://127.0.0.1:8000/mcp <token> '[["list_models", {}]]'     # 冒烟测试
 ```
 
