@@ -181,6 +181,20 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("private literal", privacy_check.inspect_file(name, b"value=private-value", [b"private-value"]))
         self.assertIn("private/runtime file", privacy_check.inspect_file(Path(".local/config/machine.json"), b"{}"))
 
+    def test_privacy_rules_for_the_production_layout(self):
+        ok = privacy_check.inspect_file
+        self.assertEqual(ok(Path("bin/gpu-lock"), b"#!/bin/zsh\n"), [])
+        self.assertEqual(ok(Path("platform/agent-bridge/mcp"), b"#!/bin/sh\n"), [])
+        self.assertEqual(ok(Path("platform/agent-bridge/llm-collab.env"), b"X=1\n"), [])
+        self.assertEqual(ok(Path("clients/mcp/server.py"), b"x = 1\n"), [])
+        self.assertEqual(ok(Path("services/text/strata/configs/a.json.in"), b"{}\n"), [])
+        self.assertEqual(ok(Path("platform/launchd/com.local.x.plist.in"), b"<plist/>\n"), [])
+        self.assertIn("private/runtime file", ok(Path("clients/mcp/compose.yaml"), b"x: 1\n"))
+        self.assertIn("private/runtime file", ok(Path(".local/serving.env"), b"X=1\n"))
+        self.assertIn("private/runtime file", ok(Path("platform/agent-bridge/llm-collab.local.env"), b"X=1\n"))
+        self.assertIn("unexpected file type", ok(Path("bin/tool"), b"no shebang\n"))
+        self.assertIn("unexpected file type", ok(Path("services/x/tool.bin.in"), b"\n"))
+
     def test_agent_files_pass_privacy_rules(self):
         self.assertEqual(privacy_check.inspect_file(Path("agents/local-worker/run"), b"#!/bin/zsh\n"), [])
         self.assertEqual(privacy_check.inspect_file(Path("agents/local-worker/lib/sandbox.sb"), b"(version 1)"), [])

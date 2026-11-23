@@ -14,23 +14,37 @@ RULES = {
     "credential-bearing URL": re.compile(rb"https?://[^\s/:]+:[^\s/@]+@"),
     "literal Bearer credential": re.compile(rb"Bearer\s+[A-Za-z0-9_=-]{24,}"),
 }
-FORBIDDEN = {".env", ".api_key", "api_key", "AGENTS.md", "WORKLOG.md", "serving-values.json"}
+FORBIDDEN = {".env", ".api_key", "api_key", "AGENTS.md", "WORKLOG.md", "serving-values.json", "serving.env",
+             "private-literals", "llm-collab.local.env"}
 EXTENSIONS = {".py", ".md", ".json", ".toml", ".lock", ".sh", ".yaml", ".yml", ".txt", ".metal", ".jsonl",
               ".sb", ".rules", ".plist"}  # .sb/.rules: the local worker's sandbox profile and Codex execpolicy
 
 
 # The MCP server code is published (neutral defaults, configured by environment); its deployment files are not.
-PUBLIC_IN_PRIVATE_DIRS = {"mcp/server.py", "mcp/requirements.txt", "mcp/Dockerfile", "mcp/mcp_call.py"}
+PUBLIC_IN_PRIVATE_DIRS = {"mcp/server.py", "mcp/requirements.txt", "mcp/Dockerfile", "mcp/mcp_call.py",
+                          "clients/mcp/server.py", "clients/mcp/requirements.txt", "clients/mcp/Dockerfile",
+                          "clients/mcp-tests/mcp_call.py"}
+PRIVATE_DIRS = {".venv", ".local", "logs", "outputs", "media", "models", "reports", "clients", "mcp"}
+# Extension-less public files that are sourced rather than executed.
+PUBLIC_NAMES = {"platform/agent-bridge/llm-collab.env"}
+# Directories whose executables (with a #! line) are published.
+SCRIPT_DIRS = {("tools",), ("bin",), ("agents",), ("serving", "bin"), ("platform", "agent-bridge")}
+
+
+def template_suffix(path):
+    """`x.json.in` is a template of `x.json`: judge it by the rendered file's suffix."""
+    return Path(path.stem).suffix if path.suffix == ".in" else path.suffix
 
 
 def inspect_file(path, data, extra_literals=()):
     problems = []
     public = path.as_posix() in PUBLIC_IN_PRIVATE_DIRS
-    if path.name in FORBIDDEN or (not public and any(p in {".venv", ".local", "logs", "outputs", "media", "models", "reports", "clients", "mcp"} for p in path.parts)):
+    if path.name in FORBIDDEN or (not public and any(p in PRIVATE_DIRS for p in path.parts[:-1])):
         problems.append("private/runtime file")
-    # serving/bin: the published GPU lock scripts (tools/install_serving.py)
-    script_dir = path.parent.name == "tools" or path.parts[:1] == ("agents",) or path.parts[:2] == ("serving", "bin")
-    if path.suffix not in EXTENSIONS and path.name not in {"Brewfile", "LICENSE", ".gitignore", ".python-version", "Dockerfile", ".keep", "Caddyfile"} \
+    # bin/ (serving/bin before the merge): the published GPU lock and serving scripts (tools/install_serving.py)
+    script_dir = path.parent.name == "tools" or any(path.parts[:len(d)] == d for d in SCRIPT_DIRS)
+    if template_suffix(path) not in EXTENSIONS and path.as_posix() not in PUBLIC_NAMES \
+            and path.name not in {"Brewfile", "LICENSE", ".gitignore", ".python-version", "Dockerfile", ".keep", "Caddyfile"} \
             and not (script_dir and data.startswith(b"#!")):
         problems.append("unexpected file type")
     if len(data) > 2_000_000 or b"\x00" in data:
