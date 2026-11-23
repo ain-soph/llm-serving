@@ -1,0 +1,8 @@
+#!/bin/sh
+# Privacy gate on what is about to be committed (the index). Enabled by: git config core.hooksPath tools/git-hooks
+root=$(git rev-parse --show-toplevel) || exit 1
+py="$root/.venv/bin/python"; [ -x "$py" ] || py=python3
+set -- --private-literals-file "$root/.local/private-literals"
+[ -f "$root/.local/private-literals" ] || set --
+"$py" "$root/tools/gen_gitignore.py" --check >/dev/null || { echo "pre-commit: .gitignore is not generated from public-paths.txt (run tools/gen_gitignore.py)"; exit 1; }
+exec "$py" "$root/tools/privacy_check.py" "$@"

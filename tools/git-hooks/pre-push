@@ -1,0 +1,7 @@
+#!/bin/sh
+# Privacy gate before anything leaves the machine: the index and every commit's metadata (--check-history).
+root=$(git rev-parse --show-toplevel) || exit 1
+py="$root/.venv/bin/python"; [ -x "$py" ] || py=python3
+set -- --check-history --private-literals-file "$root/.local/private-literals"
+[ -f "$root/.local/private-literals" ] || set -- --check-history
+exec "$py" "$root/tools/privacy_check.py" "$@"
