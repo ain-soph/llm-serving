@@ -1269,7 +1269,11 @@ def main():
     server = Server((args.host, args.port), Handler)
     server.models, server.model_id, server.mode, server.out_dir = args.models, args.model_id, args.mode, out
     server.files_only = args.files_only
-    server.has_ref2va = (Path(args.models) / "Ref2VA/transformer/model.safetensors.index.json").is_file()
+    # Same choice as h3 (h3_dit_relative): the packed INT8 Ref2VA DiT when its marker exists, else the BF16 one;
+    # h3 enables Ref2VA when that directory has config.json (the BF16 Ref2VA/transformer may be deleted once packed).
+    ref2va = Path(args.models) / "Ref2VA"
+    ref2va_dit = ref2va / ("transformer-int8" if (ref2va / "transformer-int8/h3-int8-pack.json").is_file() else "transformer")
+    server.has_ref2va = (ref2va_dit / "config.json").is_file()
 
     def stop(signum, _frame):
         if Render.current:
