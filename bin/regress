@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Regression check of every live entry through the :8080 gateway against stored golden outputs (2026-11-17).
 
-  .venv/bin/python tools/regress --record [--only PAT]   (re)write the golden outputs from the current deployment
-  .venv/bin/python tools/regress --quick                 one fixed request per entry (after every change)
-  .venv/bin/python tools/regress                         full set (after big changes: MLX / env / engine upgrades)
+  bin/regress --record [--only PAT]   (re)write the golden outputs from the current deployment
+  bin/regress --quick                 one fixed request per entry (after every change)
+  bin/regress                         full set (after big changes: MLX / env / engine upgrades, directory moves)
   options: --only LIST (comma list of exact case ids or model ids; "embed-*" matches a prefix), --no-lock (caller already holds the gpu-lock and
            has llama-swap running), --list
 
@@ -21,15 +21,29 @@ Speed (2026-11-18): chat / embed / rerank / decide / asr cases are sent a second
 meta.json "warm_seconds" (stored by --record, or by the first passing run when missing). A later warm time above
 SLOWER x that (and at least SLOWER_MIN_S more) turns PASS into WARN "slower", so speed regressions show up too;
 the decide-long-* cases (32K / 16K tokens) exist for this.
-Entries missing from /v1/models are SKIPped. Golden outputs: $LLM_GOLDEN_DIR or <state>/golden/<case>/ (golden.*,
-meta.json; the two ASR clips in <golden>/inputs/). They are recorded on each machine with --record and never
-committed. Results: <state>/logs/regress/<time>.{txt,json}; exit 1 if anything FAILed.
+Entries missing from /v1/models are SKIPped. Archived entries (2026-11-23, user rule) are SKIP(archived) and get no
+request at all, so a regression run never makes bin/archive-restore copy weights back from the Mac mini: an entry is
+archived when one of the ~/models directories its llama-swap cmd passes to archive-restore (--model A --model B) has
+a manifest ~/models/<dir>.archive and the local copy is missing or incomplete (archive-restore's own load_manifest /
+problems checks). The summary counts PASS / WARN / FAIL / SKIP / SKIP(archived) separately; --list shows them too.
+Golden outputs: evals/golden/<case>/ or $LLM_GOLDEN_DIR (input copies,
+golden.*, meta.json; recorded on each machine with --record, never committed). Results: logs/regress/<time>.{txt,json}; exit 1 if anything FAILed.
 
-GPU (multi-agent setups only, when $GPU_LOCK names the gpu-lock tool): unless --no-lock, the run takes the whole pool as "regress" (retrying exit 1, giving up on exit 4),
+GPU: unless --no-lock, the run takes the whole gpu-lock pool as "regress" (retrying exit 1, giving up on exit 4),
 resumes llama-swap (gpu-lock pauses it for the first holder) so requests are served through it as for clients, and
 releases the lock on exit. Models are loaded by llama-swap's own servers, so memguard has nothing to wrap here.
 Cases run in an order that keeps model swaps low: resident and coexisting entries first, exclusive ones last.
 """
+
+import os
+import sys
+from pathlib import Path
+
+# Run with the deployment's Python environment (<checkout>/.venv) whatever python3 the shebang found.
+_VENV = Path(__file__).resolve().parents[1] / ".venv"
+if Path(sys.prefix).resolve() != _VENV.resolve() and (_VENV / "bin/python").is_file():
+    os.execv(str(_VENV / "bin/python"), [str(_VENV / "bin/python"), __file__, *sys.argv[1:]])
+
 import argparse
 import base64
 import hashlib
@@ -37,6 +51,7 @@ import io
 import json
 import math
 import os
+import shlex
 import signal
 import struct
 import subprocess
@@ -50,13 +65,81 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-STATE = Path(os.environ.get("LLM_STATE_DIR") or Path.home() / "Library/Application Support/llm-serving")
-GOLDEN = Path(os.environ.get("LLM_GOLDEN_DIR") or STATE / "golden")
-LOGS = STATE / "logs" / "regress"
+ROOT = Path(__file__).resolve().parents[1]
+GOLDEN = Path(os.environ.get("LLM_GOLDEN_DIR") or ROOT / "evals" / "golden")
+LOGS = ROOT / "logs" / "regress"
 GATEWAY = os.environ.get("LLM_GATEWAY", "http://127.0.0.1:8080")
-KEY = (STATE / "api_key").read_text().strip() if (STATE / "api_key").is_file() else ""
-GPU_LOCK = os.environ.get("GPU_LOCK")   # optional gpu-lock tool; without it the run behaves as --no-lock
-ASR = GOLDEN / "inputs"   # the two ASR clips (LibriSpeech, AISHELL-1) the cases below name
+KEY_FILE = ROOT / "platform" / "llama-swap" / ".api_key"
+KEY = KEY_FILE.read_text().strip() if KEY_FILE.is_file() else ""
+GPU_LOCK = ROOT / "bin" / "gpu-lock"
+ASR = GOLDEN / "inputs"   # copies of two asr/eval clips, so the reorg cannot break them
+LSW = ROOT / "platform" / "llama-swap"
+ARCHIVE_RESTORE = ROOT / "bin" / "archive-restore"
+
+
+# ---------------------------------------------------------------- archived entries (2026-11-23)
+
+
+def _archive_restore():
+    """bin/archive-restore as a module, so the archived / complete decision is its own code, not a second copy."""
+    import importlib.util
+    from importlib.machinery import SourceFileLoader
+    loader = SourceFileLoader("archive_restore", str(ARCHIVE_RESTORE))
+    spec = importlib.util.spec_from_loader("archive_restore", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+_AR, _ENTRY_DIRS, _DIR_STATE = None, None, {}
+
+
+def entry_dirs():
+    """llama-swap model id (and alias) -> the ~/models directories its cmd hands to bin/archive-restore."""
+    global _AR, _ENTRY_DIRS
+    if _ENTRY_DIRS is None:
+        import yaml
+        _AR = _AR or _archive_restore()
+        _ENTRY_DIRS = {}
+        for f in [LSW / "config.yaml", *sorted((LSW / "conf.d").glob("*.yaml"))]:
+            for mid, m in ((yaml.safe_load(f.read_text()) or {}).get("models") or {}).items():
+                argv = shlex.split(str((m or {}).get("cmd", "")).replace("${PORT}", "0"))
+                at = [i for i, x in enumerate(argv) if Path(x).name == "archive-restore"]
+                if not at:
+                    continue
+                args = argv[at[0] + 1:]
+                if "--" in args:
+                    args = args[:args.index("--") + 1]   # archive-restore's own options only (parse needs no command)
+                _, _, dirs, _ = _AR.parse(args)
+                for name in [mid, *((m or {}).get("aliases") or [])]:
+                    _ENTRY_DIRS[name] = dirs
+    return _ENTRY_DIRS
+
+
+def dir_archived(name):
+    """None if usable; else why: archived (~/models/<name>.archive) and the local copy is missing or incomplete."""
+    if name not in _DIR_STATE:
+        ar = _AR or _archive_restore()
+        local, shortcut = ar.MODELS / name, ar.MODELS / f"{name}.archive"
+        why = None
+        if shortcut.is_file():
+            if not os.path.lexists(local):
+                why = "missing"
+            else:
+                bad = ar.problems(local, ar.load_manifest(shortcut)[2])
+                why = f"incomplete ({len(bad)}: {', '.join(bad[:2])})" if bad else None
+        _DIR_STATE[name] = why
+    return _DIR_STATE[name]
+
+
+def archived(model):
+    """['dir (missing)', ...] for an entry whose weights are archived and not usable here; [] otherwise."""
+    out = []
+    for d in entry_dirs().get(model, []):
+        why = dir_archived(d)
+        if why:
+            out.append(f"{d} ({why})")
+    return out
 
 DECIDE = {"state": "My integration keeps failing with a 401 since we rotated our API key. Please help.",
           "questions": {"team": {"type": "choice", "instructions": "Which team should handle this request?",
@@ -92,6 +175,11 @@ TIMED = ("chat", "embed", "rerank", "decide", "asr")   # cheap enough to send tw
 SLOWER, SLOWER_MIN_S = 1.3, 0.2
 
 
+def strata_image():
+    """The Flash-Next vision cases' picture as a data URL (read when the cases are built)."""
+    return "data:image/png;base64," + base64.b64encode((ASR / "strata-vision.png").read_bytes()).decode()
+
+
 def case(cid, kind, model, body, quick=True, order=1, **extra):
     return {"id": cid, "kind": kind, "model": model, "body": body, "quick": quick, "order": order,
             "timed": kind in TIMED, **extra}
@@ -116,6 +204,14 @@ def cases():
         # adds a request long enough to reach the answer
         out.append(case(f"chat-{m}", "chat", m, chat, order=order))
         out.append(case(f"chatlong-{m}", "chat", m, {**chat, "max_tokens": 1024}, quick=False, order=order))
+        # vision (2026-11-22): the picture path (evals/golden/inputs/strata-vision.png = services/text/strata/bench/test.png:
+        # the number 7391 and a red circle), temperature 0, thinking off; the description depends on the vision tower
+        for vid, q, n, quick in (("vision", "What number is written in the image, and what color is the circle?", 40, True),
+                                 ("visiondesc", "Describe this image in two sentences.", 80, False)):
+            vis = {"messages": [{"role": "user", "content": [{"type": "text", "text": q},
+                                                             {"type": "image_url", "image_url": {"url": strata_image()}}]}],
+                   "temperature": 0, "seed": 1, "max_tokens": n, "chat_template_kwargs": {"enable_thinking": False}}
+            out.append(case(f"{vid}-{m}", "chat", m, vis, quick=quick, order=order))
     for m in ("embeddinggemma-2", "embeddinggemma-2-multimodal", "qwen3-embedding-0.6b", "qwen3-embedding-4b",
               "qwen3-embedding-8b", "voyage-4-nano"):
         out.append(case(f"embed-{m}", "embed", m, {"input": EMBED_IN}, order=0 if m == "embeddinggemma-2" else 1))
@@ -154,13 +250,27 @@ def cases():
     out.append(case("image1024-qwen-image-2.1-turbo", "image", "qwen-image-2.1-turbo", {**img, "size": "1024x1024"},
                     quick=False, order=1))
     out.append(case("smoke-qwen-image-2.1-turbo-pe", "smoke", "qwen-image-2.1-turbo-pe", img, order=1,
-                    path="/v1/images/generations", expect="revised_prompt"))
+                    path="/v1/images/generations", expect="revised_prompt",
+                    needs=["qwen3.8-flash-next"]))   # the prompt is rewritten by the chat model
     out.append(case("image-minimax-h3-image", "image", "minimax-h3-image", img, order=1))
+    out.append(case("image-z-image-turbo", "image", "z-image-turbo", img, order=1))
+    out.append(case("image1024-z-image-turbo", "image", "z-image-turbo", {**img, "size": "1024x1024"},
+                    quick=False, order=1))
     vid = {"prompt": "A paper boat drifting on a calm pond, gentle ripples", "size": "512x512", "seconds": 1,
            "seed": 42, "response_format": "mp4"}
     out.append(case("video-minimax-h3-video", "video", "minimax-h3-video", vid, order=4))
     out.append(case("videofast-minimax-h3-video", "video", "minimax-h3-video", {**vid, "preset": "fast"},
                     quick=False, order=4))
+    out.append(case("videoturbo-minimax-h3-video", "video", "minimax-h3-video", {**vid, "preset": "turbo"},
+                    quick=False, order=4))
+    # Ref2VA (2026-11-22): a reference picture (evals/golden/inputs/h3-ref-fox.png = services/video/h3-video/bench/cc/
+    # inputs/first-fox.png) runs the separate Ref2VA DiT (Ref2VA/transformer-int8). The API refused every reference
+    # request (stale has_ref2va check) and no case noticed. Same request as the fork-cleanup CLI A/B (refimg, 512x288,
+    # 56 frames, seed 42, standard): golden md5 01fb991b... there.
+    ref = {"prompt": "The fox from <Picture 1> walks slowly through a snowy forest at dawn, soft wind, crunching snow",
+           "size": "512x288", "frames": 56, "seed": 42, "preset": "standard", "response_format": "mp4",
+           "reference_images": ["data:image/png;base64," + base64.b64encode((ASR / "h3-ref-fox.png").read_bytes()).decode()]}
+    out.append(case("videoref-minimax-h3-video", "video", "minimax-h3-video", ref, order=4))
     return out
 
 
@@ -279,6 +389,8 @@ def wav_seconds(data):
 
 
 def transcribe(wav):
+    if archived("qwen3-asr-1.7b"):   # never trigger a copy-back from the TTS comparison either
+        return None
     code, raw, _ = post("/v1/audio/transcriptions", {"model": "qwen3-asr-1.7b", "response_format": "json"},
                         {"file": ("tts.wav", wav)})
     return json.loads(raw)["text"].strip() if code == 200 else None
@@ -296,7 +408,7 @@ def video_psnr(a, b):
         pa, pb = Path(t, "a.mp4"), Path(t, "b.mp4")
         pa.write_bytes(a)
         pb.write_bytes(b)
-        r = subprocess.run([os.environ.get("FFMPEG", "ffmpeg"), "-hide_banner", "-i", str(pa), "-i", str(pb), "-lavfi", "psnr",
+        r = subprocess.run(["/opt/homebrew/bin/ffmpeg", "-hide_banner", "-i", str(pa), "-i", str(pb), "-lavfi", "psnr",
                             "-f", "null", "-"], capture_output=True, text=True)
         for line in r.stderr.splitlines()[::-1]:
             if "average:" in line:
@@ -395,10 +507,13 @@ def compare(c, out):
 class Lock:
     def __init__(self):
         self.held = False
+        # one lock name per run (2026-11-18): with a shared "regress" name a second run joined the first one's share,
+        # and when the first released, the next queued holder paused llama-swap under the second run's video case
+        self.name = f"regress.{os.getpid()}"
 
     def acquire(self):
         while True:
-            rc = subprocess.run([str(GPU_LOCK), "acquire", "regress"], capture_output=True, text=True).returncode
+            rc = subprocess.run([str(GPU_LOCK), "acquire", self.name], capture_output=True, text=True).returncode
             if rc == 0:
                 self.held = True
                 break
@@ -406,11 +521,11 @@ class Lock:
                 sys.exit(f"gpu-lock acquire refused (exit {rc}); not retrying")
         # gpu-lock pauses llama-swap for its first holder; the regression goes through llama-swap like a client
         code, _, _ = post("/api/models/resume", {})
-        print(f"gpu-lock 'regress' held; llama-swap resume: http {code}", flush=True)
+        print(f"gpu-lock '{self.name}' held; llama-swap resume: http {code}", flush=True)
 
     def release(self, *_):
         if self.held:
-            subprocess.run([str(GPU_LOCK), "release", "regress"], capture_output=True)
+            subprocess.run([str(GPU_LOCK), "release", self.name], capture_output=True)
             self.held = False
 
 
@@ -430,21 +545,29 @@ def main():
         todo = [c for c in todo if any(c["id"].startswith(p[:-1]) if p.endswith("*") else p in (c["id"], c["model"])
                                        for p in pats)]
     todo.sort(key=lambda c: c["order"])
+    for c in todo:   # local files only (manifests, stat calls): nothing is loaded or copied back
+        c["archived"] = [x for m in [c["model"], *c.get("needs", [])] for x in archived(m)]
     if a.list:
         for c in todo:
-            print(f"{c['id']:45s} {c['kind']:7s} quick={c['quick']}")
+            arch = f"  SKIP(archived): {'; '.join(c['archived'])}" if c["archived"] else ""
+            print(f"{c['id']:45s} {c['kind']:7s} quick={c['quick']}{arch}")
         return 0
 
     code, raw, _ = post("/v1/models")
     live = {m["id"] for m in json.loads(raw)["data"]} if code == 200 else set()
     lock = Lock()
-    if not a.no_lock and GPU_LOCK:
+    if not a.no_lock:
         for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             signal.signal(sig, lambda *_: (lock.release(), sys.exit(130)))
         lock.acquire()
     rows = []
     try:
         for c in todo:
+            if c["archived"]:   # no request: it would make archive-restore copy the weights back
+                rows.append({"id": c["id"], "status": "SKIP(archived)", "detail": "; ".join(c["archived"]),
+                             "seconds": 0})
+                print(f"{'SKIP(archived)':14s} {c['id']:45s}  {rows[-1]['detail']}", flush=True)
+                continue
             if c["model"] not in live:
                 rows.append({"id": c["id"], "status": "SKIP", "detail": "not in /v1/models", "seconds": 0})
                 continue
@@ -479,11 +602,16 @@ def main():
         lock.release()
 
     LOGS.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
+    stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}"  # two runs ending in the same second overwrote each other
     mode = "record" if a.record else "quick" if a.quick else "full"
-    counts = {s: sum(r["status"] == s for r in rows) for s in ("PASS", "WARN", "FAIL", "SKIP", "RECORDED")}
+    counts = {s: sum(r["status"] == s for r in rows)
+              for s in ("PASS", "WARN", "FAIL", "SKIP", "SKIP(archived)", "RECORDED")}
     summary = f"regress {mode} {stamp}: " + ", ".join(f"{v} {k}" for k, v in counts.items() if v)
-    text = "\n".join([summary] + [f"{r['status']:8s} {r['id']:45s} {r['seconds']:7.1f}s  {r['detail']}" for r in rows])
+    ran = [r for r in rows if r["status"] != "SKIP(archived)"]
+    arch = [r for r in rows if r["status"] == "SKIP(archived)"]
+    text = "\n".join([summary] + [f"{r['status']:8s} {r['id']:45s} {r['seconds']:7.1f}s  {r['detail']}" for r in ran]
+                     + ([f"SKIP(archived) {len(arch)} (weights archived, local copy missing or incomplete; not requested):"]
+                        + [f"  {r['id']:45s} {r['detail']}" for r in arch] if arch else []))
     (LOGS / f"{stamp}-{mode}.txt").write_text(text + "\n")
     (LOGS / f"{stamp}-{mode}.json").write_text(json.dumps({"mode": mode, "summary": counts, "rows": rows}, indent=1))
     print(summary)

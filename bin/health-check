@@ -1,7 +1,7 @@
-#!/usr/bin/env python3
-"""One health-check round of the model server; run every 10 minutes by the LaunchAgent app.llm-serving.health.
+#!/usr/bin/python3
+"""One health-check round for the Mac Studio model server; run every 10 minutes by LaunchAgent com.local.health.
 
-Logs only (no alerts): one JSON line per round is appended to <state>/logs/health/health.jsonl
+Logs only (nobody watches this machine): one JSON line per round is appended to logs/health/health.jsonl
 (rotated daily to health-YYYYMMDD.jsonl, 30 days kept), and logs/health/STATUS holds a short summary of the latest
 round: first line "OK|WARN|FAIL <time>", then one line per problem. Agents check service state there first.
 
@@ -26,12 +26,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-STATE = Path(os.environ.get("LLM_STATE_DIR") or Path.home() / "Library/Application Support/llm-serving")
-LOG_DIR = STATE / "logs" / "health"
-ROUND = LOG_DIR / "state.json"
-KEY_FILE = STATE / "api_key"
-# optional: the gpu-lock holder directory of a multi-agent setup (not part of this repository)
-HOLDERS = Path(os.environ["GPU_LOCK_HOLDERS"]) if os.environ.get("GPU_LOCK_HOLDERS") else None
+ROOT = Path(__file__).resolve().parents[1]
+LOG_DIR = ROOT / "logs" / "health"
+STATE = LOG_DIR / "state.json"
+KEY_FILE = ROOT / "platform" / "llama-swap" / ".api_key"
+HOLDERS = ROOT / ".locks" / "holders"
 GATEWAY = os.environ.get("LLM_GATEWAY", "http://127.0.0.1:8080")
 KEEP_DAYS = 30
 RANK = {"OK": 0, "INFO": 0, "WARN": 1, "FAIL": 2}
@@ -55,8 +54,6 @@ def http(path, body=None, key=None, timeout=20):
 
 def holders():
     out = []
-    if HOLDERS is None or not HOLDERS.is_dir():
-        return out
     for f in HOLDERS.glob("*"):
         if not f.is_file() or f.name.endswith(".tmp"):
             continue
@@ -123,7 +120,7 @@ def check():
     # boot / panic
     out = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True, text=True).stdout
     boot = int(out.split("sec = ")[1].split(",")[0]) if "sec = " in out else 0
-    prev = json.loads(ROUND.read_text()) if ROUND.exists() else {}
+    prev = json.loads(STATE.read_text()) if STATE.exists() else {}
     if prev.get("boot") and boot != prev["boot"]:
         panics = [p for p in glob.glob("/Library/Logs/DiagnosticReports/panic-full-*.panic")
                   if os.path.getmtime(p) > prev.get("time", 0)]
@@ -132,7 +129,7 @@ def check():
             + (f"; panic report {os.path.basename(latest)}" if latest else "; no new panic report"))
     else:
         put("boot", "OK", "up since " + time.strftime("%F %T", time.localtime(boot)))
-    ROUND.write_text(json.dumps({"boot": boot, "time": time.time()}))
+    STATE.write_text(json.dumps({"boot": boot, "time": time.time()}))
 
     # gpu-lock
     now = datetime.datetime.now()
