@@ -16,7 +16,7 @@ is refused with 400. `prompt` is the vocabulary/context hint ("Contextual vocabu
 
 One worker thread owns the MLX model (MLX streams are per thread); requests queue behind it.
 
-Usage: .venv/bin/python asr/sov/server.py --port PORT --model DIR --aligner DIR [--model-id ID]"""
+Usage: .venv/bin/python standby/asr/sov/server.py --port PORT --model DIR --aligner DIR [--model-id ID]"""
 import argparse
 import concurrent.futures as cf
 import logging

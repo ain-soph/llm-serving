@@ -1,10 +1,10 @@
 """Per-class W8A8 / W8A16 conversion of the MLX ASR models (Whisper large-v3, Qwen3-ASR 1.7B), 2026-11-17.
 
 A plan maps module-path regexes to a mode:
-  w8a8: int8 convrot weights + per-row int8 activations on the M5 TensorOps GEMM (common/mlx_w8a8.py);
+  w8a8: int8 convrot weights + per-row int8 activations on the M5 TensorOps GEMM (shared/common/mlx_w8a8.py);
         a bias, if the layer has one, is added in the activation dtype afterwards.
   q8:   8-bit weights (Q8_0-style symmetric blocks of 32) with float activations through MLX's quantized_matmul
-        (common/mlx_q8.py), i.e. W8A16. Meant for the token-by-token decoders, which read every
+        (shared/common/mlx_q8.py), i.e. W8A16. Meant for the token-by-token decoders, which read every
         weight once per token and are bandwidth bound.
 Conversion runs in-process from the float weights (no files); quantize on the GPU, the CPU kernels round differently.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 import mlx.core as mx
 from mlx import nn
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "shared/common"))
 import mlx_q8  # noqa: E402
 import mlx_w8a8  # noqa: E402
 
@@ -67,6 +67,10 @@ WHISPER = {
                (r"^decoder\.blocks\.\d+\.mlp[12]$", "q8")],
 }
 WHISPER["enc_all"] = sum((WHISPER[k] for k in ("enc_q", "enc_kv", "enc_out", "enc_mlp1", "enc_mlp2")), [])
+# 2026-11-18 (PA2): W8A16 storage for the classes W8A8 does not speed up (user rule: smaller with tiny error counts too)
+WHISPER["enc_q8"] = [(r"^encoder\.blocks\.\d+\.(attn\.(query|key|value|out)|mlp[12])$", "q8")]
+WHISPER["dec_xkv_q8"] = [(r"^decoder\.blocks\.\d+\.cross_attn\.(key|value)$", "q8")]
+WHISPER["emb_q8"] = [(r"^decoder\.token_embedding$", "q8emb")]
 
 # Qwen3-ASR: audio encoder (13 tokens per second of audio), text decoder (prompt prefill with the audio tokens, then
 # one token per step; the same layers serve both), lm_head tied to the embedding.
@@ -85,6 +89,10 @@ QWEN = {
 }
 QWEN["enc_all"] = sum((QWEN[k] for k in ("enc_qkv", "enc_out", "enc_fc1", "enc_fc2")), [])
 QWEN["dec_q8"] = sum((QWEN[k] for k in ("dec_q8_attn", "dec_q8_gateup", "dec_q8_down")), [])
+# 2026-11-18 (PA2): audio encoder and token embedding in 8-bit weights for storage
+QWEN["enc_q8"] = [(r"^audio_tower\.layers\.\d+\.(self_attn\.(q|k|v|out)_proj|fc1|fc2)$", "q8"),
+                  (r"^audio_tower\.(proj1|proj2|conv_out)$", "q8")]
+QWEN["emb_q8"] = [(r"^model\.embed_tokens$", "q8emb")]
 
 
 def plan(table, names):
@@ -96,12 +104,28 @@ def plan(table, names):
     return out
 
 
+def _q8emb(emb, dtype):
+    n, d = emb.weight.shape
+    m = nn.QuantizedEmbedding(n, d, group_size=mlx_q8.GROUP, bits=8)
+    m.weight, m.scales, m.biases = mlx_q8.quantize_weight(emb.weight, dtype)
+    return m
+
+
 def convert(model, rules, dtype):
-    """Swap every nn.Linear whose path matches a rule; returns {mode: count}. The first matching rule wins."""
+    """Swap every nn.Linear (or nn.Embedding for q8emb) whose path matches a rule; returns {mode: count}.
+    The first matching rule wins."""
     from mlx.utils import tree_unflatten
     compiled = [(re.compile(r), m) for r, m in rules]
     swaps, counts = [], {}
     for path, mod in model.named_modules():
+        if type(mod) is nn.Embedding:
+            mode = next((m for r, m in compiled if r.search(path)), None)
+            if mode == "q8emb":
+                new = _q8emb(mod, dtype)
+                mx.eval(new.parameters())
+                swaps.append((path, new))
+                counts[mode] = counts.get(mode, 0) + 1
+            continue
         if type(mod) is not nn.Linear:
             continue
         mode = next((m for r, m in compiled if r.search(path)), None)

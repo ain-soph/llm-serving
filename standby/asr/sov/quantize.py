@@ -1,7 +1,7 @@
 """Write SOV-Transcribe-1 for mlx-audio with symmetric 8-bit decoder weights (Q8_0-style, bf16 scales).
 
-  .venv/bin/python -I asr/sov/quantize.py MODELS/sov-transcribe-1/official MODELS/sov-transcribe-1/mlx-q8
-  .venv/bin/python -I asr/sov/quantize.py MODELS/sov-transcribe-1/official MODELS/sov-transcribe-1/mlx-q4 --bits 4
+  .venv/bin/python -I standby/asr/sov/quantize.py MODELS/sov-transcribe-1/official MODELS/sov-transcribe-1/mlx-q8
+  .venv/bin/python -I standby/asr/sov/quantize.py MODELS/sov-transcribe-1/official MODELS/sov-transcribe-1/mlx-q4 --bits 4
 
 Every decoder Linear, expert (SwitchLinear) and the tied embedding / output head is stored as blocks of 32 inputs
 with d = max|w| / 127 and q = round(w / d) in [-127, 127], like llama.cpp Q8_0 (rerank/q8_0_to_mlx.py). MLX's 8-bit

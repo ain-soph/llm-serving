@@ -14,7 +14,7 @@ kept resident) for word timestamps; segments are subtitle-style cues grouped fro
 `prompt` is passed to Qwen3-ASR as its context (domain terms / hotwords).
 
 --q8: the text decoder's linear layers and lm_head become 8-bit weights with float16 activations (W8A16, Q8_0-style
-blocks of 32; asr/w8a8/asr_quant.py, converted at load). Decoding reads every weight once per token, so
+blocks of 32; services/asr/w8a8/asr_quant.py, converted at load). Decoding reads every weight once per token, so
 this is 1.27-1.31x faster end to end with the same error rates (reports/asr.md); the audio encoder stays float16
 (W8A8 gave no speed-up there). Used by the qwen3-asr-1.7b-int8 entry; the default entry stays exact.
 
