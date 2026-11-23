@@ -1,7 +1,7 @@
 # Qwen-Image-2.1：权重准备与服务
 
-服务 `qwen-image/server.py` 用 [mflux fork](https://github.com/ain-soph/mflux/tree/serving)（commit 固定在 `uv.lock`）运行
-Qwen-Image-2.1，提供 OpenAI 兼容的 `/v1/images/generations` 和 `/v1/images/edits`。路由模板：`templates/conf.d/qwen-image.yaml`。
+服务 `services/image/qwen-image/server.py` 用 [mflux fork](https://github.com/ain-soph/mflux/tree/serving)（commit 固定在 `uv.lock`）运行
+Qwen-Image-2.1，提供 OpenAI 兼容的 `/v1/images/generations` 和 `/v1/images/edits`。路由模板：`platform/llama-swap/conf.d/qwen-image.yaml`。
 速度与内存：[性能与资源报告](performance.md#图片qwen-image-21)。
 
 **许可**：Qwen Research License，仅限非商用研究；商用需另行向 Qwen 申请授权。
@@ -24,10 +24,10 @@ Qwen-Image-2.1，提供 OpenAI 兼容的 `/v1/images/generations` 和 `/v1/image
   需要先下载官方系统提示词（上游未写许可证，所以本仓库不附带）：
 
   ```sh
-  mkdir -p qwen-image/prompt_rewrite/prompts
+  mkdir -p services/image/qwen-image/prompt_rewrite/prompts
   for f in system_prompt_t2i.txt system_prompt_edit.txt; do
     curl -fsSL "https://raw.githubusercontent.com/QwenLM/Qwen-Image-2.1/main/prompt_rewrite/prompts/$f" \
-      -o "qwen-image/prompt_rewrite/prompts/$f"
+      -o "services/image/qwen-image/prompt_rewrite/prompts/$f"
   done
   ```
   其他位置可用 `QWEN_IMAGE_SYSTEM_PROMPTS` 指定；聊天地址和模型用 `QWEN_IMAGE_LLM_URL`、`QWEN_IMAGE_LLM_MODEL`。

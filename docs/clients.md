@@ -12,9 +12,9 @@
 | Open WebUI | 检索 | 嵌入 `embeddinggemma-2`；混合检索 + 重排 `qwen3-reranker-4b`（TOP_K 20 → 6） |
 | LobeChat | 对话、出图、TTS、ASR | 自定义 OpenAI 兼容提供方指向网关，按类型添加模型 ID（图片、`qwen3-tts`、`qwen3-tts-design`） |
 | OpenClaw | TTS | `tts.provider = openai`，`baseUrl` 网关，`model` `qwen3-tts`，`speakerVoice` `vivian`，`responseFormat` mp3 |
-| 任何 MCP 客户端 | 工具 | `mcp/server.py`（见下） |
+| 任何 MCP 客户端 | 工具 | `clients/mcp/server.py`（见下） |
 
-## MCP 服务（`mcp/server.py`）
+## MCP 服务（`clients/mcp/server.py`）
 
 把本机模型包装成 MCP 工具（streamable HTTP，`/mcp`，Bearer 令牌）。工具：`list_models`、`chat`、`web_search`、`fetch_url`、
 `generate_image`／`edit_image`、`generate_video`／`extend_video`／`get_video`、`transcribe`、`speak`、`embed`、`rerank`、`decide`、
@@ -33,7 +33,7 @@
 
 ```sh
 docker build -t llm-mcp mcp && docker run --env-file <your env file> -p 8000:8000 llm-mcp
-python mcp/mcp_call.py http://127.0.0.1:8000/mcp <token> '[["list_models", {}]]'     # 冒烟测试
+python clients/mcp-tests/mcp_call.py http://127.0.0.1:8000/mcp <token> '[["list_models", {}]]'     # 冒烟测试
 ```
 
-MCP 服务在容器里运行（Python 3.12，`mcp/requirements.txt`），不用部署环境 `.venv`。
+MCP 服务在容器里运行（Python 3.12，`clients/mcp/requirements.txt`），不用部署环境 `.venv`。

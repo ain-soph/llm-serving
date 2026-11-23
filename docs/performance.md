@@ -31,11 +31,13 @@
 | 图片 | `z-image-turbo` | mflux fork | W8A8 DiT（注意力＋前馈），文本编码器／VAE BF16 | 1024² 5.6 s；2048² 36.1 s（经 API，9 步） | 生成期 wired 8.0–8.8 GiB | 14.51 GB |
 | 视频＋音频 | `minimax-h3-video`（旧名 `-stream` 为别名） | h3.c fork | INT8 DiT（零拷贝）、W8A16 文本编码器、BF16 VAE 计算 | fast 768p：5 s 片段 165–170 s；15 s 片段 758 s | standard 768p wired +14.3 GB（按 block 释放）；DiT GPU 峰值 22.20／33.00 GiB（fast） | 58.90 GB² |
 
-¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享 VAE；文本编码器链接到 H3 图片的 INT8 文件，不另计。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。⁶ 2026-11-18（pa1b）起每个尺寸一个入口：原精确入口与 `-int8` 入口合并为 `common/qwen3_w8a8.py mix` 写出的预量化混合副本（`mix.json`，零拷贝），见 [w8a8.md](w8a8.md)；下文 11-16／11-17 的 `-int8` 数据保留作记录。
+¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享 VAE；文本编码器链接到 H3 图片的 INT8 文件，不另计。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `services/decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `services/decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。⁶ 2026-11-18（pa1b）起每个尺寸一个入口：原精确入口与 `-int8` 入口合并为 `shared/common/qwen3_w8a8.py mix` 写出的预量化混合副本（`mix.json`，零拷贝），见 [w8a8.md](w8a8.md)；下文 11-16／11-17 的 `-int8` 数据保留作记录。
 
 ## 文本：Qwen3.8 Flash-Next（Strata）
 
-**现行：Strata `82d63e19e`，2026-11-22**。fork `serving` 改为上游 main `6e38f588a`（v0.2.18 之后）+ 我们的提交（rebase）。配置同下面的省内存双槽：262144 ctx × 2，AD-4.27，INT8 KV，MTP Q2_0（spec 3），两项改变精度的开关关闭。按上游默认：Strata 自有 Qwen 视觉塔、draft-cost 表开（每台机器从前约 100 个真实请求被动学到）、GPU keep-alive 开。M5 Ultra 独占；c=1 为 36–62 token 提示各解码 400 token，c=2 为两路各 400 token 合计，prefill 为服务端计时，均为三次中位数。
+**现行：Strata `53a6becb8`，2026-11-23**。fork `serving` 改为上游 main `73d4f4196`（v0.2.20+13）+ 我们的提交（rebase），配置不变。与 `82d63e19e` 同场对比（独占，AtomicChat AD-4.27，主体约 3.57 bpw、MTP Q2_0，INT8 KV，262144 ctx × 2）：温度 0 的 36 个固定输出逐字节相同；单路 decode 151.63 → 151.78 tok/s，2 并发合计 155.1 → 154.1，prefill 26–28K 2,758 → 2,747、104–116K 2,696 → 2,687 tok/s，短提示 TTFT 0.146 → 0.134 s，wired 峰值增量 66,330 → 66,338 MiB，都在噪声内。不带采样字段的请求按上游改为贪心解码（d35353903）。下面是 `82d63e19e` 的完整实测。
+
+**上一版：Strata `82d63e19e`，2026-11-22**。fork `serving` 改为上游 main `6e38f588a`（v0.2.18 之后）+ 我们的提交（rebase）。配置同下面的省内存双槽：262144 ctx × 2，AD-4.27，INT8 KV，MTP Q2_0（spec 3），两项改变精度的开关关闭。按上游默认：Strata 自有 Qwen 视觉塔、draft-cost 表开（每台机器从前约 100 个真实请求被动学到）、GPU keep-alive 开。M5 Ultra 独占；c=1 为 36–62 token 提示各解码 400 token，c=2 为两路各 400 token 合计，prefill 为服务端计时，均为三次中位数。
 
 | 权重 | 设置 | c=1 decode tok/s | c=2 合计 tok/s | prefill 26,106／115,856 token tok/s | 峰值 wired 增量 MiB | RSS GB |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -123,7 +125,7 @@
 - 多模态（中位）：图片 0.123 s（1.1 MB）／0.038 s；5 s 音频 0.035 s；4 s 视频 0.342 s。
 - 权重 BF16 GGUF，投影器 BF16；无生成 KV（llama.cpp 对非因果模型不建 KV），无 decode。内存主要是按 `-ub 8192` 预分配的计算缓冲。
 - 我们的修改只在适配层（维度、输入前缀、base64、多模态请求），不改引擎；2026-11-17 修正 `GET /` 返回 404（llama-swap 预加载钩子会报错）。
-- MLX 移植（`embedding/gemma2_mlx.py`，`server.py --backend mlx`）读同一个 GGUF：比 llama.cpp 更接近官方（余弦 1.000000 vs 0.999994），支持 32K 输入，但慢 3.7–6.7 倍（FP32 激活用不上 BF16 TensorOps），所以不上线。
+- MLX 移植（`services/embedding/gemma2_mlx.py`，`server.py --backend mlx`）读同一个 GGUF：比 llama.cpp 更接近官方（余弦 1.000000 vs 0.999994），支持 32K 输入，但慢 3.7–6.7 倍（FP32 激活用不上 BF16 TensorOps），所以不上线。
 **MLX 激活精度：FP32／BF16／W8A8**（EP；`gemma2_mlx.py` 的 `dtype`／`w8a8`，服务 `--backend mlx --mlx-dtype bfloat16 --mlx-w8a8`；结论：**继续用 llama.cpp**）
 
 | 后端 | 短查询 | 单条 8000 token | 64 × 400 token | 4 × 8000 token | SciFact 全库（165 万 token） | wired 空闲／峰值 | footprint 空闲 |
@@ -328,7 +330,7 @@
 量化结果预先存盘（`~/models/elephant-1-mix8`，11.07 GB，原官方 BF16 18.84 GB 已删），服务零拷贝映射：加载 2.2 s → 0.4 s，16K wired 峰值 +9151 → +8730 MiB（容量 10500 → 10000），
 答案与加载时量化逐位相同（DQ）；与官方 FP32 最大概率差 0.0077（全部 8-bit 0.0023–0.0048，全部 W8A8 0.0193），无答案变化。以下为 11-17 的测量。
 
-**条件**：MLX 移植（Qwen3.5-9B 骨干，块内双向注意力；mlx-vlm qwen3_5），官方 OneJev `qev`（@81ce62f + serve.patch）做提示词、答案槽和校准；参照官方 qev FP32（CPU）；`decisions/cases.py` 7 个请求、13 个问题（含 12.9K token 长日志）；独占 GPU，预热后。
+**条件**：MLX 移植（Qwen3.5-9B 骨干，块内双向注意力；mlx-vlm qwen3_5），官方 OneJev `qev`（@81ce62f + serve.patch）做提示词、答案槽和校准；参照官方 qev FP32（CPU）；`services/decisions/cases.py` 7 个请求、13 个问题（含 12.9K token 长日志）；独占 GPU，预热后。
 
 | 变体 | 与官方 FP32 最大概率差 | 答案变化 | 答对 | 短请求（138–243 token） | 12.9K | 16.1K | 31.1K | MLX 峰值（短／16K／31K） |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
@@ -526,7 +528,7 @@ Qwen3-ASR 分阶段测量（英文前 20 条、122.2 s 音频、c1、1892 个 pr
 
 | 修改 | 对照 | 前 → 后 | 速度 | 内存 |
 | --- | --- | --- | --- | --- |
-| 16 kHz 单声道 PCM WAV 直读，不启动 ffmpeg（`asr/http_api.py`） | Qwen en100 c1 | 21.6 → 18.8 s | 每请求省约 30 ms | — |
+| 16 kHz 单声道 PCM WAV 直读，不启动 ffmpeg（`services/asr/http_api.py`） | Qwen en100 c1 | 21.6 → 18.8 s | 每请求省约 30 ms | — |
 | 贪心解码先排下一步再读当前 token（mlx-qwen3-asr fork） | Qwen en100／long_en | 16.7 → 15.0 s；18.1 → 16.2 s | 1.11× | — |
 | 同上（mlx-audio fork） | SOV decode | 105 → 116 tok/s；en100 35.2 → 33.0 s | 1.07× | — |
 | Whisper 融合注意力，logits 只在要词级时间戳时算（mlx-examples fork） | en100／zh100／long_en | 28.9 → 22.8 s；26.6 → 21.1 s；20.0 → 15.4 s | 1.26–1.31× | — |
@@ -726,7 +728,7 @@ M5 Ultra 独占 GPU，六步、INT8 ConvRot、流式零拷贝，缓存预算 800
 - `llm` 改写的思考约 2068–3810 token（中位 3631），`llm_rewrite` 的 `max_tokens` 因此从 4096 提到 8192。
 
 - 改写明显提升提示词遵循，`llm` 最好、比 `mflux` 快；改写每次多 18–36 s，所以默认关，另设入口 `qwen-image-2.1-turbo-pe`（默认 `llm`）给只能选模型、不能传参数的客户端。INT8 文本编码器与 BF16 打平，但不提速，2026-11-17 撤下；base 40 步在这组提示词上不比 Turbo 好。
-- 人工抽查（9 条 × 4 个变体）与评判方向一致；评判可能偏爱细节更丰富的画面，改写本来就会让画面更丰富。评测脚本见 `qwen-image/eval/`。
+- 人工抽查（9 条 × 4 个变体）与评判方向一致；评判可能偏爱细节更丰富的画面，改写本来就会让画面更丰富。评测脚本见 `services/image/qwen-image/eval/`。
 - `mflux` 改写和 `auto_mask` 时 Qwen 进程 wired 峰值 4.7–8.0 GB（容量 11000 内）。
 
 ## 图片：Z-Image-Turbo
@@ -1082,7 +1084,7 @@ M5 Ultra，独占 GPU，9 步，seed 0；部署 = DiT 注意力＋前馈 W8A8（
 - MLX 8-bit 的 scale 必须与激活同 dtype（否则走 float32 慢路径）；CPU 上的 quantized_matmul 按 scale 的 dtype 计算，BF16 scale 相对误差 7%，GPU 只多约 0.12%，所以精度只能在 GPU 上测。
 
 - DiT：全 INT8 激活的 latent 误差 0.00105，任一类单独 0.0008–0.0011，没有哪类主导。文本编码器 down_proj 改 W8A16 试做（短提示词误差 0.0106 → 0.0044），但普通 MLX 实现文本阶段 1.09 → 2.12 s（约 1500 token 时 1.06 → 3.14 s），未上线。
-- `common/mlx_w8a8.py` 的 128×64 分块与 64×128 只差 ±5%，不改；MLX 自带 8-bit qmm 作 W8A16 多数类比 BF16 还慢（0.67–0.96×）。
+- `shared/common/mlx_w8a8.py` 的 128×64 分块与 64×128 只差 ±5%，不改；MLX 自带 8-bit qmm 作 W8A16 多数类比 BF16 还慢（0.67–0.96×）。
 
 ## 运行时：MLX fork（ain-soph/mlx `serving`）
 
@@ -1098,15 +1100,15 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 
 | Qwen3-Reranker 4B 加载方式（8.04 GB，399 个张量） | MLX | 加载 | 加载后 footprint | 跑完后 footprint | 打分 |
 | --- | --- | ---: | ---: | ---: | --- |
-| `common/mlx_w8a8.load`（原自写零拷贝） | PyPI 0.32.4 | 0.33 s | 437 MB | 1542 MB | 基准 |
+| `shared/common/mlx_w8a8.load`（原自写零拷贝） | PyPI 0.32.4 | 0.33 s | 437 MB | 1542 MB | 基准 |
 | 同上 | fork | 0.33 s | 436 MB | 1543 MB | 逐位相同 |
 | `mx.load(zero_copy=True)` | fork | 0.32 s | 435 MB | 1541 MB | 逐位相同 |
 | `MLX_ZERO_COPY_LOAD=1` + `mx.load` | fork | 0.32 s | 432 MB | 1539 MB | 逐位相同 |
 | `mx.load(zero_copy=False)`（拷贝） | fork | 0.62 s | 8114 MB | 9221 MB | 逐位相同 |
 
 - 稳态每次请求 0.40 s，几种方式一样；`MLX_CACHE_LIMIT_MB=256` 时请求后缓存 309 MB（默认 873 MB），打分不变。
-- 切换前后完整 `tools/regress` 都是 52 PASS／1 SKIP；`common/mlx_w8a8.py` 的 `save`／`load` 改调本体接口（241 → 190 行），新旧文件互读逐字节相同。
-- **ConvRot W8A8 进本体**（`mx.fast.convrot_quantize`／`convrot_quantize_weight`／`convrot_matmul`／`convrot_matmul_quantized`，M5 TensorOps INT8，非 M5 浮点回退）：mflux、h3-image-mlx 和本仓库 `common/` 的三份内核副本删除，改调本体。与旧副本对比，量化值、scale、输出逐字节相同，速度相同（例 4096×3072×12288：2.095 → 2.080 ms；16384×12288×3072：9.479 → 9.489 ms）；完整 regress 切换前后都是 55 PASS／1 SKIP。
+- 切换前后完整 `bin/regress` 都是 52 PASS／1 SKIP；`shared/common/mlx_w8a8.py` 的 `save`／`load` 改调本体接口（241 → 190 行），新旧文件互读逐字节相同。
+- **ConvRot W8A8 进本体**（`mx.fast.convrot_quantize`／`convrot_quantize_weight`／`convrot_matmul`／`convrot_matmul_quantized`，M5 TensorOps INT8，非 M5 浮点回退）：mflux、h3-image-mlx 和本仓库 `shared/common/` 的三份内核副本删除，改调本体。与旧副本对比，量化值、scale、输出逐字节相同，速度相同（例 4096×3072×12288：2.095 → 2.080 ms；16384×12288×3072：9.479 → 9.489 ms）；完整 regress 切换前后都是 55 PASS／1 SKIP。
 - 计划中（未实现）：head_dim 256 的融合注意力。
 
 ## 遗漏检查的完成情况（2026-11-18）
@@ -1115,8 +1117,8 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 
 | 项目 | 状态 |
 | --- | --- |
-| 回归测试（一键对比每个入口的黄金输出） | **完成**：`tools/regress`，统一环境切换时 46 个用例与切换前一致（[operations.md](operations.md)） |
-| 健康检查 | **完成**：`tools/health-check` 每 10 分钟一轮，只写日志（磁盘、内存、进程、网关、重启／panic） |
+| 回归测试（一键对比每个入口的黄金输出） | **完成**：`bin/regress`，统一环境切换时 46 个用例与切换前一致（[operations.md](operations.md)） |
+| 健康检查 | **完成**：`bin/health-check` 每 10 分钟一轮，只写日志（磁盘、内存、进程、网关、重启／panic） |
 | 新入口接入客户端／MCP | **完成**：MCP 新增 `speak`／`rerank`／`decide`；Open WebUI 朗读用 `qwen3-tts`、出图默认 `qwen-image-2.1-turbo`；LobeChat、OpenClaw 同步（[clients.md](clients.md)） |
 | 统一 Python 环境 | **完成**（UE），CosyVoice3 随之下线 |
 | H3 图片尺寸规则（官方 4–20 MP、生成面积下限 2048²）与官方 PE | 进行中，未上线 |
@@ -1163,10 +1165,10 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 - **耗时**：不含首次下载和权重准备；图片阶段计时含子进程启动；Strata 热 shader 数据不含首次编译。
 - **样本**：大多是单次测量，没有方差或置信区间。
 - **收益计算**：倍数 = 旧耗时 ÷ 新耗时；吞吐增幅 = 新 ÷ 旧 − 1；耗时变化 = 新 ÷ 旧 − 1。没有同口径基线的项不计算收益；“原版”指各行写明的本机基线，没有同口径实测就不写“比官方快”。
-- **环境**：2026-11-17 及以前的数据来自各组件当时的环境（Strata／ASR 为 Python 3.12，图片、视频包装器为 3.15）。2026-11-18 起参照部署的所有 Python 入口运行在同一个统一环境（Python 3.15.2，本仓库的 `uv.lock`，只写下限），切换前后 `tools/regress` 全部用例一致（UE），所以旧数字仍然适用。
+- **环境**：2026-11-17 及以前的数据来自各组件当时的环境（Strata／ASR 为 Python 3.12，图片、视频包装器为 3.15）。2026-11-18 起参照部署的所有 Python 入口运行在同一个统一环境（Python 3.15.2，本仓库的 `uv.lock`，只写下限），切换前后 `bin/regress` 全部用例一致（UE），所以旧数字仍然适用。
 - **错误率**：英文 WER（Whisper EnglishTextNormalizer），中文 CER（转简体、数字转汉字、去标点），混合 MER；按语料整体计算。TTS 用 Qwen3-ASR 回写后算错误率。
 - **W8A8 原则**：INT8 权重与激活只用在实测能提速的层或模型；不提速、只省内存的部分保持 BF16／FP16（例如撤下的 Qwen-Image INT8 文本编码器，以及不做 W8A8 的 0.6B 重排、0.6B 嵌入、voyage）。
-- **W8A8 GEMM 边缘分块**：2026-11-17 修了最后一个不满分块的越界读（`common/`、mflux `4c740d3`、h3-image-mlx `02a645c`），输出逐字节不变，本报告的数字不受影响。
+- **W8A8 GEMM 边缘分块**：2026-11-17 修了最后一个不满分块的越界读（`shared/common/`、mflux `4c740d3`、h3-image-mlx `02a645c`），输出逐字节不变，本报告的数字不受影响。
 - **检索质量**：SciFact（BEIR，300 个问题、5,183 篇摘要）nDCG@10；W8A8 与原版同时与官方用例比较，以原版误差为参照。
 - **磁盘**：`stat().st_size` 逻辑大小；`model-storage.json` 另记 `st_blocks × 512`，APFS 共享 extent 未去重，不能用来精确计算可回收空间。不含源码、venv、Homebrew、uv 缓存和生成的媒体。
 
@@ -1192,32 +1194,32 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 | ZC | 11-17，`zc-1117-0010`；上线验证 `h3-video-zc-deploy-1117-0033` | T2V standard、VAE BF16；512² 56 帧与 1344×768 124 帧；原常驻 / 零拷贝常驻 / 原 SSD 流式 |
 | OA | 11-17，优化普查 `evals/w8a8/s1`～`s3` | 重排、Qwen3 嵌入、voyage、Decider 的零拷贝与 W8A8 |
 | QE | 11-16，Qwen3-Embedding 部署 | 64 × 450 token、8 × 3,600 token、32K 单条；官方 FP32 参照 |
-| AS | 11-17，ASR 复查与 SOV 部署 `asr/review/1117*`、`asr/sov/runs/` | en100／zh100／mix60／long_en／long_zh |
-| T | 11-17，TTS `tts/eval/out/s1`、`s2`，上线 `tts-deploy-1117-0229` | 16 句短文本、1449 字中文、3621 字符英文 |
-| T2 | 11-17，CosyVoice3 `tts/cosyvoice/eval/out/m1-1117-0643`，上线 `cosyvoice3-deploy-1117-0649` | 同上 + 方言 4 句 |
+| AS | 11-17，ASR 复查与 SOV 部署 `services/asr/review/1117*`、`standby/asr/sov/runs/` | en100／zh100／mix60／long_en／long_zh |
+| T | 11-17，TTS `services/tts/eval/out/s1`、`s2`，上线 `tts-deploy-1117-0229` | 16 句短文本、1449 字中文、3621 字符英文 |
+| T2 | 11-17，CosyVoice3 `services/tts/cosyvoice/eval/out/m1-1117-0643`，上线 `cosyvoice3-deploy-1117-0649` | 同上 + 方言 4 句 |
 | EG | 11-17，EmbeddingGemma 复查 `embedding-review-1117-0053` | 短查询、64 × 400、4 × 8000 token |
 | QB | 11-18，官方 Qwen-Image-Bench 小规模评测（s23，`evals/qwen-image-bench/`） | 23 条提示词、3 个变体、每变体 94 次评判 |
 | QF | 11-17，Qwen-Image 融合 `bench-fusion/results/f1-1117-0023`、提示词评测 `eval/runs/` | Turbo W8A8，1024²／2048² |
-| EL | 11-17，elephant-1 `decisions/jev/results/s2`～`s4` | `decisions/cases.py` 13 个问题；12.9K／16.1K／31.1K token |
-| EC | 11-17，elephant-1 缓存 `decisions/jev/results/e1-*`、`e2-*` | 16,342 token + 6 个短请求 |
-| MM | 11-17，mammoth-1 `decisions/jev/results/p1`～`p8` | `decisions/cases.py` + 16.1K 长日志 |
-| DQB | 11-18，Decider 长输入二分 `decisions/decider/results/bisect-1118` | MLX PyPI／fork × mlx-vlm 0.7.12／0.8.0 × 零拷贝／复制 × 缓存默认／256 MB；2085／8085／32585 token |
-| DQ3 | 11-18，Decider 缓存大小 `decisions/decider/results/dq3-*` | 256–8192 MB，直接服务，同 DQ2 的请求 |
-| DQ2 | 11-18，Decider 预量化存盘 `decisions/decider/results/dq2-1118-0116` | 7 个文本用例 + 2K／8K／32.6K + 3 个图片用例（加载时量化 vs 存盘逐位比较；FP16 对照） |
-| DQ | 11-18，预量化存盘 `decisions/jev/results/dq1-1118-0056` | `decisions/cases.py` + 16.1K 长日志（加载时量化 vs 存盘，逐位比较）；16,342 token 直接服务 |
+| EL | 11-17，elephant-1 `services/decisions/jev/results/s2`～`s4` | `services/decisions/cases.py` 13 个问题；12.9K／16.1K／31.1K token |
+| EC | 11-17，elephant-1 缓存 `services/decisions/jev/results/e1-*`、`e2-*` | 16,342 token + 6 个短请求 |
+| MM | 11-17，mammoth-1 `services/decisions/jev/results/p1`～`p8` | `services/decisions/cases.py` + 16.1K 长日志 |
+| DQB | 11-18，Decider 长输入二分 `services/decisions/decider/results/bisect-1118` | MLX PyPI／fork × mlx-vlm 0.7.12／0.8.0 × 零拷贝／复制 × 缓存默认／256 MB；2085／8085／32585 token |
+| DQ3 | 11-18，Decider 缓存大小 `services/decisions/decider/results/dq3-*` | 256–8192 MB，直接服务，同 DQ2 的请求 |
+| DQ2 | 11-18，Decider 预量化存盘 `services/decisions/decider/results/dq2-1118-0116` | 7 个文本用例 + 2K／8K／32.6K + 3 个图片用例（加载时量化 vs 存盘逐位比较；FP16 对照） |
+| DQ | 11-18，预量化存盘 `services/decisions/jev/results/dq1-1118-0056` | `services/decisions/cases.py` + 16.1K 长日志（加载时量化 vs 存盘，逐位比较）；16,342 token 直接服务 |
 | DC | 11-17，Decider 逐类 `evals/w8a8/decider-prof/p1`～`p3`、`deploy-1` | 2K／8K／32.6K token |
 | IA | 11-17，INT8 逐类复查 `evals/int8-principle/u3`～`u6` | 重排／嵌入 4B 与 8B、elephant、Qwen-Image、H3 图片与视频 |
-| HT | 11-18，H3 视频文本编码器 INT8 `h3-video/te-int8/runs/` | 3 条提示词逐层类；768p 124 帧端到端 |
+| HT | 11-18，H3 视频文本编码器 INT8 `services/video/h3-video/te-int8/runs/` | 3 条提示词逐层类；768p 124 帧端到端 |
 | BS | 11-17，H3 视频按 block 释放 `bench/streamw/s1-1117-1612`，上线 `h3-video-streamw-deploy-1117-1629` | 512² 56 帧、768p 124 帧，standard |
 | CC | 11-21，H3 视频密集评估 MPS + 提示词条件磁盘缓存 `bench/cc/s1-1121-1624` | 768p 124 帧 standard／turbo／fast ABBA；512² T2V、首帧、Ref2VA |
 | EP | 11-17，EmbeddingGemma 精度 `deploy/embedding-dtype-1117/` | 短查询、8000 token、64 × 400、4 × 8000、SciFact 全库 |
-| AQ | 11-17，ASR 逐类检查 `asr/w8a8/results/whisper-1117-2105`、`qwen-1117-2128`，上线 `deploy-1117-2150` | en100／zh100／mix60／long_en／long_zh |
-| UE | 11-18，统一 Python 环境切换（`tools/regress` 完整一套） | 46 个用例 |
+| AQ | 11-17，ASR 逐类检查 `services/asr/w8a8/results/whisper-1117-2105`、`qwen-1117-2128`，上线 `deploy-1117-2150` | en100／zh100／mix60／long_en／long_zh |
+| UE | 11-18，统一 Python 环境切换（`bin/regress` 完整一套） | 46 个用例 |
 | GA | 11-17，遗漏检查（只读调研） | 官方配套资产、功能、接入、运维、报告 |
 | MF | 11-18，MLX fork 验证 `mlx/verify/v1-1118-0036`、`install-1118-0038`、`common-1118-0050` | 重排 4B 加载方式对比、完整 regress |
-| WX | 11-17，W8A16 `qwen-image/bench/results/sq8-1117-1655`、`eval/runs/turbo-q8-off`、`evals/int8-principle/x3-1117-1734`，上线 `qwen-image-teq8-deploy-1117-1747` | Qwen-Image 文本编码器、Decider／重排／嵌入 down_proj |
-| HI | 11-17，H3 图片 `h3-image-mlx/opt/k1-1117-0617`、`k2-1117-0621`，上线 `k-deploy-1117-0627` | 6 步、seed 42、预算 8000 |
-| HC | 11-23，H3 图片缓存与切片 `h3-image-mlx/opt/cache-20261123/s1`、`s2`、`s3-block.txt`、`s4`，上线 `deploy/` | 6 步、seed 42、预算 8000；文生图 1024²／2048²／4096²，编辑 1／4／16 张参考图 |
+| WX | 11-17，W8A16 `services/image/qwen-image/bench/results/sq8-1117-1655`、`eval/runs/turbo-q8-off`、`evals/int8-principle/x3-1117-1734`，上线 `qwen-image-teq8-deploy-1117-1747` | Qwen-Image 文本编码器、Decider／重排／嵌入 down_proj |
+| HI | 11-17，H3 图片 `services/image/h3-image-mlx/opt/k1-1117-0617`、`k2-1117-0621`，上线 `k-deploy-1117-0627` | 6 步、seed 42、预算 8000 |
+| HC | 11-23，H3 图片缓存与切片 `services/image/h3-image-mlx/opt/cache-20261123/s1`、`s2`、`s3-block.txt`、`s4`，上线 `deploy/` | 6 步、seed 42、预算 8000；文生图 1024²／2048²／4096²，编辑 1／4／16 张参考图 |
 | HV | 11-17，H3 视频 `bench/repro/*`，上线 `h3-video-racefix-deploy-1117-0631` | 512×288、25 帧、standard、seed 42／7 |
 | VG | 11-17，`bench/vae-gemm/sweep-2805.txt`、`render-1117-0703`，上线 `h3-video-vaegemm-deploy-1117-0716` | VAE 线性层分块扫描与端到端 |
 | SP | 11-17，`bench/sparse-study/s3-pan-exit`、`s4-first-best`、`s6-best`、`s7-long` | 4 个难例 × 注意力变体；best 档与 15 秒长镜头补测 |

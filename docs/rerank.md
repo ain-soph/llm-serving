@@ -1,7 +1,7 @@
 # Qwen3 重排部署
 
 当前三个模型 ID 保持兼容，后端由 llama.cpp GGUF 改为 MLX。服务代码在
-[`rerank/server.py`](../rerank/server.py)，没有修改 MLX 或 MLX-LM 的库源码。
+[`services/rerank/server.py`](../services/rerank/server.py)，没有修改 MLX 或 MLX-LM 的库源码。
 所有进程使用部署仓库统一的 Python 3.15 环境：MLX 0.32.4、MLX-LM 0.32.2、
 Transformers 5.23.0，具体依赖由 `uv.lock` 固定。
 
@@ -14,7 +14,7 @@ Transformers 5.23.0，具体依赖由 `uv.lock` 固定。
 2026-11-18（pa1b）起每种尺寸只有一个入口，目录是按层类选精度的预量化混合副本（`mix.json` 记录每类精度，页对齐、零拷贝映射）；
 原来的精确入口与 `-int8` 入口（`zc-*`、`w8a8-*` 目录）已合并，不留别名。与原精确入口相比：0.6B 平均分数差 0.0068、top-1 98.3%；
 4B 文档批量快 1.35×、单篇短文档 33.5 → 20.5 ms，平均差 0.0074、top-1 96.7%；8B 快 1.63×，与原 8B W8A8 入口数值相同。
-生成步骤（零拷贝浮点副本 → `common/qwen3_w8a8.py mix`）见 [零拷贝与 W8A8 副本](w8a8.md)。
+生成步骤（零拷贝浮点副本 → `shared/common/qwen3_w8a8.py mix`）见 [零拷贝与 W8A8 副本](w8a8.md)。
 RAG 前端（例如 Open WebUI 的重排设置）用 `qwen3-reranker-4b`。
 
 迁移应复制这些已验证目录。`models.required.json` 检查必需文件，避免空目录被误判为完整模型。权重不上传 GitHub。
@@ -33,13 +33,13 @@ RAG 前端（例如 Open WebUI 的重排设置）用 `qwen3-reranker-4b`。
 
 ## 8B 转换与代价
 
-[`q8_0_to_mlx.py`](../rerank/q8_0_to_mlx.py) 将原始浮点权重按 Q8_0 的
+[`q8_0_to_mlx.py`](../services/rerank/q8_0_to_mlx.py) 将原始浮点权重按 Q8_0 的
 32 元素分组和 FP16 scale 舍入，编码为 MLX affine 8-bit。
 额外的 `bias = -128 * scale` 使反量化权重对应 Q8_0；它不是把 GGUF 直接改名。
 保存原始浮点来源、固定转换代码和参数，才能重新生成同一套准备权重。
 
 ```sh
-.venv/bin/python rerank/q8_0_to_mlx.py "$SOURCE_HF_DIR" "$OUTPUT_MLX_DIR" --act-dtype float16
+.venv/bin/python services/rerank/q8_0_to_mlx.py "$SOURCE_HF_DIR" "$OUTPUT_MLX_DIR" --act-dtype float16
 ```
 
 转换会加载完整浮点来源及中间张量，应先预留足够 GPU 内存，输出到新目录再验证。
@@ -53,7 +53,7 @@ RAG 前端（例如 Open WebUI 的重排设置）用 `qwen3-reranker-4b`。
 先预留 GPU 内存，再在测试端口启动单个模型：
 
 ```sh
-.venv/bin/python rerank/server.py --port 18189 \
+.venv/bin/python services/rerank/server.py --port 18189 \
   --model-id qwen3-reranker-8b --model "$MODELS/qwen3-reranker/mlx-8b-q8_0"
 ```
 

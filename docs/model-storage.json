@@ -62,7 +62,7 @@
       "bytes": 851988219,
       "GB": 0.851988,
       "allocated_bytes": 852013056,
-      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
+      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by shared/common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
     },
     "qwen3-reranker-4b": {
       "relative_paths": [
@@ -73,7 +73,7 @@
       "bytes": 5322342136,
       "GB": 5.322342,
       "allocated_bytes": 5322366976,
-      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
+      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by shared/common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
     },
     "qwen3-reranker-8b": {
       "relative_paths": [
@@ -84,7 +84,7 @@
       "bytes": 7666859431,
       "GB": 7.666859,
       "allocated_bytes": 7666884608,
-      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
+      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by shared/common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
     },
     "whisper-large-v3": {
       "relative_paths": [
@@ -185,7 +185,7 @@
       "bytes": 7892754942,
       "GB": 7.892755,
       "allocated_bytes": 7892787200,
-      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
+      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by shared/common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
     },
     "voyage-4-nano": {
       "relative_paths": [
@@ -205,7 +205,7 @@
       "files": 33,
       "bytes": 6294239339,
       "GB": 6.294239,
-      "note": "Pre-quantized per-class mix (decisions/decider/save_mix.py), one entry for text and images; the official checkpoint is only needed to rebuild it."
+      "note": "Pre-quantized per-class mix (services/decisions/decider/save_mix.py), one entry for text and images; the official checkpoint is only needed to rebuild it."
     },
     "qwen3-tts": {
       "relative_paths": [
@@ -228,7 +228,7 @@
       "files": 16,
       "bytes": 11073275344,
       "GB": 11.073275,
-      "note": "Pre-quantized per-class mix (decisions/jev/save_mix.py); the official BF16 file is only needed to rebuild it."
+      "note": "Pre-quantized per-class mix (services/decisions/jev/save_mix.py); the official BF16 file is only needed to rebuild it."
     },
     "mammoth-1": {
       "relative_paths": [
@@ -238,7 +238,7 @@
       "files": 16,
       "bytes": 29689004742,
       "GB": 29.689005,
-      "note": "Pre-quantized per-class mix (decisions/jev/save_mix.py); the official BF16 shards are only needed to rebuild it."
+      "note": "Pre-quantized per-class mix (services/decisions/jev/save_mix.py); the official BF16 shards are only needed to rebuild it."
     },
     "minimax-h3-video": {
       "relative_paths": [

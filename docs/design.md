@@ -2,15 +2,15 @@
 
 ## 路径
 
-源代码、模型权重、运行状态分别管理。源码根目录由工具自己的位置推导；模型位置由 `--models` 指定；状态目录与生成配置由 `--state`、`--output` 指定。仓库内只有模板，绝对路径只出现在本机生成的 `.local/config` 中。
+仓库就是部署目录（`~/llm-serving`），模型权重另放（默认 `~/models`）。代码里的默认路径都由文件自己的位置推导；配置里的本机路径写成环境变量（llama-swap `${env.NAME}`、Caddy `{$NAME}`），取值只在本机的 `.local/serving.env`；不展开环境变量的文件（Strata 引擎 JSON、LaunchAgent）由 `*.in` 模板渲染。绝对路径只出现在本机生成的文件里，运行数据（key、日志、媒体）在仓库目录里但被忽略。
 
-LaunchAgent 使用解释器与脚本的完整路径和参数数组，由 `plistlib` 写入。不同用户名、代码位置、空格和非英文目录名不需要手动替换。环境变量由统一的服务启动器传入，不依赖交互 shell 或 Homebrew 的固定安装前缀。
+LaunchAgent 使用解释器与脚本的完整路径和参数数组。不同用户名不需要手动替换；路径取值限定为不含空格的字符（llama-swap 的 `cmd` 不加引号）。服务的 PATH 由 LaunchAgent 给出（含 Homebrew 前缀），代码里不写 `/opt/homebrew` 路径。
 
 ## 一个 uv 环境
 
-**线上只有一个环境**：部署的 Python 依赖统一声明在 `pyproject.toml`，解析结果保存在 `uv.lock`。部署使用 **Homebrew Python 3.15**，`requires-python` 限定 3.15 系列，`.python-version` 记录该系列；所有服务进程都使用根目录 `.venv/bin/python`。参照部署（M5 Ultra）2026-11-18 起所有 Python 入口都运行在这同一个环境里，用 `uv sync --frozen` 从本仓库的 `uv.lock` 同步，切换前后 `tools/regress` 全部用例一致。独立进程仍各自管理模型和 GPU 内存，共享 venv 只统一解释器及库版本。
+**线上只有一个环境**：部署的 Python 依赖统一声明在 `pyproject.toml`，解析结果保存在 `uv.lock`。部署使用 **Homebrew Python 3.15**，`requires-python` 限定 3.15 系列，`.python-version` 记录该系列；所有服务进程都使用根目录 `.venv/bin/python`。参照部署（M5 Ultra）2026-11-18 起所有 Python 入口都运行在这同一个环境里，用 `uv sync --frozen` 从本仓库的 `uv.lock` 同步，切换前后 `bin/regress` 全部用例一致。独立进程仍各自管理模型和 GPU 内存，共享 venv 只统一解释器及库版本。
 
-**依赖只写下限**：`pyproject.toml` 不写 `==` 或 `<X` 上限，`uv.lock` 负责精确锁定；升级时重新 `uv lock`，用 `tools/regress` 检查。只有遇到确实修不了的不兼容才加上限，并写明原因。我们的 fork 同样去掉了版本上限。
+**依赖只写下限**：`pyproject.toml` 不写 `==` 或 `<X` 上限，`uv.lock` 负责精确锁定；升级时重新 `uv lock`，用 `bin/regress` 检查。只有遇到确实修不了的不兼容才加上限，并写明原因。我们的 fork 同样去掉了版本上限。
 
 **开发用 `.venv-dev`**：新模型在部署前先在它自己的 `<模型目录>/.venv-dev` 里开发和测试，避免影响线上环境；上线时把依赖并进统一的 `pyproject.toml`／`uv.lock`，改模板入口，跑回归，然后删掉开发环境。
 

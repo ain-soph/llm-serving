@@ -1,8 +1,8 @@
 # Z-Image-Turbo：权重准备与服务
 
-服务 `z-image/server.py` 用 [mflux fork](https://github.com/ain-soph/mflux/tree/serving)（commit 固定在 `uv.lock`）运行
+服务 `services/image/z-image/server.py` 用 [mflux fork](https://github.com/ain-soph/mflux/tree/serving)（commit 固定在 `uv.lock`）运行
 Tongyi-MAI 的 Z-Image-Turbo（6.15 B 单流 DiT，蒸馏 9 步文生图），提供 OpenAI 兼容的 `/v1/images/generations`。
-路由模板：`templates/conf.d/z-image.yaml`。速度与内存：[性能与资源报告](performance.md#图片z-image-turbo)。
+路由模板：`platform/llama-swap/conf.d/z-image.yaml`。速度与内存：[性能与资源报告](performance.md#图片z-image-turbo)。
 
 **许可**：Apache-2.0。
 

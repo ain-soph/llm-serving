@@ -1,8 +1,7 @@
 # GPU 锁（gpu-lock）使用规则
 
-几个 agent 同时在一台 Mac 上工作时，用 `~/llm-serving/bin/gpu-lock` 按显存预约共享 GPU。脚本本身在
-[`serving/bin/gpu-lock`](../serving/bin/gpu-lock)，由 `tools/install_serving.py` 装到 `~/llm-serving/bin/`（见
-[serving-restore.md](serving-restore.md)）。本页是部署目录 `AGENTS.md` 中规则 1（gpu-lock v2）的公开版；规则正文以
+几个 agent 同时在一台 Mac 上工作时，用 `~/llm-serving/bin/gpu-lock` 按显存预约共享 GPU。脚本就是本仓库的
+[`bin/gpu-lock`](../bin/gpu-lock)（仓库即部署目录，见 [serving-restore.md](serving-restore.md)）。本页是部署目录 `AGENTS.md` 中规则 1（gpu-lock v2）的公开版；规则正文以
 生产 `AGENTS.md` 为准，两边改动要同步。
 
 ## 规则 1：GPU 锁 = 显存预约
@@ -60,7 +59,7 @@ llama-swap 配置改动。调研、下载、编译、写文件和只用 CPU 的�
 
 ## 查看占用：gpu-top
 
-`~/llm-serving/bin/gpu-top`（源码 [`serving/bin/gpu-top`](../serving/bin/gpu-top)，同样由 `install_serving.py` 安装）像
+`~/llm-serving/bin/gpu-top`（[`bin/gpu-top`](../bin/gpu-top)）像
 `top` / `nvidia-smi` 一样显示池子、持有者、队列、llama-swap 和系统实测内存。**严格只读**：不调用 gpu-lock、不写
 `.locks`、不拿 gpu-lock 的状态互斥锁，也就不能代替 acquire/release，等待时也不要用它轮询。
 
@@ -122,4 +121,4 @@ QUEUE (6)
 
 - 规则 2：只有持有份额时才能为直接测试（在 llama-swap 之外起服务）腾内存。脚本已替你暂停 llama-swap，再暂停一次无害；
   别人持有份额时不要自己 resume llama-swap。自测服务用 18100–18199 端口，释放份额前先停掉。
-- 大内存任务用 `tools/memguard` 包一层（见 [operations.md](operations.md)）：gpu-lock 只记账，不限制实际占用。
+- 大内存任务用 `bin/memguard` 包一层（见 [operations.md](operations.md)）：gpu-lock 只记账，不限制实际占用。

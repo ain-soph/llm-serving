@@ -1,10 +1,10 @@
 # SOV-Transcribe-1：权重准备与服务
 
-> 2026-11-18 起已下线（不在路由模板里，权重已删）。代码保留；重新上线：按下文下载并转换权重，再把入口加回 `templates/conf.d/asr.yaml`。
+> 2026-11-18 起已下线（不在路由模板里，权重已删）。代码保留；重新上线：按下文下载并转换权重，再把入口加回 `platform/llama-swap/conf.d/asr.yaml`。
 
-服务 `asr/sov/server.py` 用 mlx-audio fork（commit 固定在 `uv.lock`）运行 Salesforce SOV-Transcribe-1（Apache-2.0；
+服务 `standby/asr/sov/server.py` 用 mlx-audio fork（commit 固定在 `uv.lock`）运行 Salesforce SOV-Transcribe-1（Apache-2.0；
 Whisper large-v3 编码器 + Gemma 4 26B-A4B MoE 解码器），接口与其他语音转写模型相同：`POST /v1/audio/transcriptions`，
-json / text / srt / vtt / verbose_json。路由模板：`templates/conf.d/asr.yaml` 的 `sov-transcribe-1`。
+json / text / srt / vtt / verbose_json。路由模板：`platform/llama-swap/conf.d/asr.yaml` 的 `sov-transcribe-1`。
 速度、内存、准确率：[性能与资源报告](performance.md#语音转写)。
 
 - 只支持英文和 fr / de / es / it / pt / nl；中文音频会被译成英文或输出乱码，服务对 `language=zh` 返回 400（中文请用 `qwen3-asr-1.7b`）。
@@ -16,7 +16,7 @@ json / text / srt / vtt / verbose_json。路由模板：`templates/conf.d/asr.ya
 ```sh
 M="$HOME/models/sov-transcribe-1"     # 换成实际的模型目录
 hf download salesforce-sovereign-intelligence/SOV-Transcribe-1 --local-dir "$M/official"   # BF16，53.3 GB
-.venv/bin/python -I asr/sov/quantize.py "$M/official" "$M/mlx-q8"                           # 29.8 GB
+.venv/bin/python -I standby/asr/sov/quantize.py "$M/official" "$M/mlx-q8"                           # 29.8 GB
 ```
 
 - `quantize.py` 把解码器写成对称 8-bit（每 32 个权重一组，d = max|w|/127，与 llama.cpp Q8_0 同样舍入，scale 用 BF16）；

@@ -1,8 +1,8 @@
 # MiniMax H3 Video：权重准备与服务
 
-服务 `h3-video/server.py` 调用 [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving)（commit 固定在 `native.lock.json`，
+服务 `services/video/h3-video/server.py` 调用 [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving)（commit 固定在 `native.lock.json`，
 `tools/native.py h3` 构建 `h3` 和 `h3_pack_int8`），每次渲染启动一个 `h3` 子进程，空闲时不占模型内存。
-路由模板：`templates/conf.d/h3-video.yaml`。速度与内存：[性能与资源报告](performance.md#视频音频minimax-h3-video)。
+路由模板：`platform/llama-swap/conf.d/h3-video.yaml`。速度与内存：[性能与资源报告](performance.md#视频音频minimax-h3-video)。
 
 2026-11-22 fork 整理：`serving` 重建为上游 `8974cc0` + 24 个签名提交（不再带未使用的上游 PR #77），渲染输出逐字节不变；本文提到的旧 commit（`0ff19ee`、`67a014a`、`0feaa4c` 等）在 tag `serving-pre-cleanup-20261122` 下仍可取。
 
@@ -54,7 +54,7 @@ h3.c `243d6ab` 起，单张图（首／尾帧）编码只跑因果 3x3x3 卷积�
 
 | 变量 | 默认 | 作用 |
 | --- | --- | --- |
-| `H3_COND_CACHE_DIR` | 关（包装器设为 `$LLM_STATE_DIR/h3-video/cond-cache`，可用 `H3_VIDEO_COND_CACHE` 改） | 缓存目录 |
+| `H3_COND_CACHE_DIR` | 关（包装器设为 `services/video/h3-video/cond-cache`，可用 `H3_VIDEO_COND_CACHE` 改） | 缓存目录 |
 | `H3_COND_CACHE_MAX_MB` | 2048 | 总大小上限，按最近使用淘汰 |
 
 键是 SHA-256：提示词与条件参数、首帧／参考文件内容、文本编码器／tokenizer／VAE 文件身份、着色器源码、可执行文件内容、系统版本、GPU、

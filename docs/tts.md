@@ -1,7 +1,7 @@
 # 语音合成：Qwen3-TTS
 
-服务 `tts/server.py` 用 mlx-audio fork（commit 固定在 `uv.lock`）运行 Qwen3-TTS 12Hz 1.7B（Apache-2.0，BF16），
-接口 `POST /v1/audio/speech`（OpenAI 字段，音频边生成边发送）和 `GET /v1/audio/voices`。路由模板：`templates/conf.d/tts.yaml`。
+服务 `services/tts/server.py` 用 mlx-audio fork（commit 固定在 `uv.lock`）运行 Qwen3-TTS 12Hz 1.7B（Apache-2.0，BF16），
+接口 `POST /v1/audio/speech`（OpenAI 字段，音频边生成边发送）和 `GET /v1/audio/voices`。路由模板：`platform/llama-swap/conf.d/tts.yaml`。
 速度与内存：[性能与资源报告](performance.md#语音合成qwen3-tts)。
 
 | 模型 ID | 官方仓库 | 用法 |
@@ -35,7 +35,7 @@ cmp "$M/1.7B-Base/speech_tokenizer/model.safetensors" "$M/1.7B-CustomVoice/speec
 - `qwen3-tts` 的预设音色 `eric`（四川话）、`dylan`（北京话）；
 - `qwen3-tts-design`，在 `instructions` 里描述口音（例如粤语）。
 
-`tts/server.py` 里的 CosyVoice3 分支（`--voices`、`--s3tokenizer`）保留，以后要恢复时重新下载权重：
+`services/tts/server.py` 里的 CosyVoice3 分支（`--voices`、`--s3tokenizer`）保留，以后要恢复时重新下载权重：
 
 ```sh
 hf download mlx-community/Fun-CosyVoice3-0.5B-2512-fp16 --local-dir "$HOME/models/cosyvoice3/mlx-fp16"

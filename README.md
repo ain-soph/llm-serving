@@ -30,7 +30,7 @@
 | 图片生成 | `z-image-turbo` | [mflux fork](https://github.com/ain-soph/mflux/tree/serving) | W8A8 DiT + BF16 文本编码器；9 步文生图；与聊天模型共存；Apache-2.0 |
 | 视频＋音频 | `minimax-h3-video` | [h3.c fork](https://github.com/ain-soph/h3.c/tree/serving) | `best`／`standard`／`turbo`／`fast` 四档（`turbo` 需另备 22 GB 权重，限 8 s），最长 15 s；INT8 DiT 零拷贝、按 block 释放；文本编码器与 H3 图片共用 INT8 文件 |
 
-MLX 本身用 [ain-soph/mlx fork](https://github.com/ain-soph/mlx/tree/serving) 的 wheel（零拷贝加载、页对齐保存、`MLX_CACHE_LIMIT_MB`）。完整 commit 固定在 `native.lock.json`（原生引擎）和 `uv.lock`（Python 包）；[原生构建脚本](tools/native.py)、[模型路由模板](templates/conf.d/)、[Strata 配置](templates/strata/) 和自写接口都在本仓库。权重准备与服务说明：[Strata](docs/strata.md)、[重排](docs/rerank.md)、[零拷贝与 W8A8 副本](docs/w8a8.md)、[决策模型](docs/decisions.md)、[SOV 语音转写](docs/sov.md)、[语音合成](docs/tts.md)、[H3 图片](docs/h3-image.md)、[Qwen-Image](docs/qwen-image.md)、[Z-Image](docs/z-image.md)、[H3 视频](docs/h3-video.md)。
+MLX 本身用 [ain-soph/mlx fork](https://github.com/ain-soph/mlx/tree/serving) 的 wheel（零拷贝加载、页对齐保存、`MLX_CACHE_LIMIT_MB`）。完整 commit 固定在 `native.lock.json`（原生引擎）和 `uv.lock`（Python 包）；[原生构建脚本](tools/native.py)、[模型路由模板](platform/llama-swap/conf.d/)、[Strata 配置模板](services/text/strata/configs/) 和自写接口都在本仓库。权重准备与服务说明：[Strata](docs/strata.md)、[重排](docs/rerank.md)、[零拷贝与 W8A8 副本](docs/w8a8.md)、[决策模型](docs/decisions.md)、[SOV 语音转写](docs/sov.md)、[语音合成](docs/tts.md)、[H3 图片](docs/h3-image.md)、[Qwen-Image](docs/qwen-image.md)、[Z-Image](docs/z-image.md)、[H3 视频](docs/h3-video.md)。
 
 ## 上游贡献
 
@@ -50,54 +50,84 @@ MLX 本身用 [ain-soph/mlx fork](https://github.com/ain-soph/mlx/tree/serving) 
 | Neywa-Labs/mlx-audio | [#1206](https://github.com/Neywa-Labs/mlx-audio/pull/1206) | SOV-Transcribe-1 解码同样的流水线 |
 | Niko1221/Strata | issue [#6182](https://github.com/Niko1221/Strata/issues/6182) + draft PR [#6183](https://github.com/Niko1221/Strata/pull/6183) | Metal `--prefill auto` 让主机行与 GPU 重叠 |
 
+## 目录结构
+
+仓库就是部署：clone 到 `~/llm-serving`，线上运行的脚本、服务代码和 llama-swap／网关配置就是仓库里的文件。
+同一棵树里还有本机私有的东西（权重链接、venv、日志、密钥、fork 子仓库、实验），它们被 `.gitignore` 默认忽略：
+只有 [`public-paths.txt`](public-paths.txt) 列出的路径公开（`tools/gen_gitignore.py` 由它生成 `.gitignore`）。
+
+| 目录 | 内容 |
+| --- | --- |
+| `bin/` | gpu-lock（显存预约、排队、托管运行）、gpu-top、gpu-pool、memguard、lsw-apply、archive-restore／model-archive、regress、health-check |
+| `platform/llama-swap/` | `config.yaml`、`conf.d/*.yaml`（本机路径写成 `${env.LLM_SERVING}` 等）、`env.sh`、`serve.sh` |
+| `platform/gateway/` | Caddyfile（`{$LLM_SERVING}`、`{$LLM_TRUSTED_PROXY}`） |
+| `platform/launchd/` | 各 LaunchAgent 模板（`*.plist.in`，渲染到 `~/Library/LaunchAgents`） |
+| `platform/agent-bridge/` | llm-collab MCP 启动器与配置、多 agent 规则、本地 worker |
+| `services/<类别>/` | 各模型的接口服务：text/strata（引擎配置模板）、embedding、rerank、decisions、asr、tts、image、video |
+| `shared/common/` | MLX W8A8／8-bit 公共代码 |
+| `standby/` | 已下线但保留的代码（`standby/asr/sov/`） |
+| `clients/` | MCP 服务（`clients/mcp/`）与测试脚本 |
+| `docs/`、`tools/`、`tests/` | 文档、安装与检查工具、单元测试 |
+
+本机私有、不进库：`.venv/`、`.local/`（本机取值、`serving.env`、原生构建）、`.backup/`、`.locks/`、`logs/`、`data/`、`evals/`、
+`reports/`、`upstream/`、`archive/`、`platform/llama-swap/.api_key` 与活动数据库、`platform/agent-bridge/{state,runtime,workspace,release}/`、
+各服务目录里的 fork 子仓库、实验、结果和输出。
+
+**在 `~/llm-serving` 里不要运行** `git clean`、`git reset --hard`、`git checkout .`／`git restore .`、`git stash -u/-a`：
+被忽略的线上数据没有别的保护。改动只提交自己的路径（`git commit -o -- <paths>`），未上线的开发放在 `git worktree` 里。
+
 ## 安装与迁移
 
 需要 Apple Silicon、macOS 及适用的 Apple Command Line Tools。先安装 [Homebrew](https://brew.sh)，再执行：
 
 ```sh
-git clone https://github.com/ain-soph/llm-serving.git
-cd llm-serving
+git clone https://github.com/ain-soph/llm-serving.git ~/llm-serving
+cd ~/llm-serving
 ./tools/bootstrap.sh
 .venv/bin/python tools/native.py all
 ```
 
-`bootstrap.sh` 最后还会把多 agent 分工规则装进 `~/.claude/CLAUDE.md`（标记块合并，不覆盖原有内容）并链接本地 worker，见[多 agent 分工与恢复](docs/multi-agent.md)。
+`bootstrap.sh` 安装 Homebrew 依赖和 `.venv`，启用隐私检查的 git 钩子，把多 agent 分工规则装进 `~/.claude/CLAUDE.md`
+（标记块合并，不覆盖原有内容），最后运行 `tools/install_serving.py`，见[多 agent 分工与恢复](docs/multi-agent.md)。
 
 `Brewfile` 统一安装 **Homebrew Python 3.15**、uv、Caddy、llama-swap、llama.cpp、FFmpeg、CMake、Ninja。uv 使用 Homebrew 的 Python 3.15 创建项目唯一的 `.venv`：**线上只有这一个环境**，所有 Python 服务使用同一个解释器；开发新模型时用它自己的 `.venv-dev`，上线时并进来。`pyproject.toml` 只写版本下限，`uv.lock` 精确锁定全部依赖，包括各 fork 的完整 commit。
+在 `~/llm-serving` 下没有自己 `pyproject.toml` 的子目录里运行 `uv run`／`uv sync` 会同步这个线上环境；实验目录用自己的项目或 `uv run --no-project`。
 
 原生引擎从 `native.lock.json` 的完整 commit 构建到 `.local/src/`。编译后的可执行文件、动态库、Metal shader 和构建信息留在同一个本地构建树，不能只搬一个可执行文件。
 
-将已验证的模型目录复制到新机器上的任意位置，再生成本机配置：
+本机取值写在 `.local/serving-values.json`（不进库；缺省时：权重在 `~/models`，Strata 用 `native.py` 的构建，网关前没有受信代理）：
+
+| 键 | 含义 |
+| --- | --- |
+| `MODELS` | 模型权重目录 |
+| `STRATA_RELEASE`、`STRATA_EXE`、`STRATA_VISION_EXE` | 部署的 Strata 构建树与两个可执行文件 |
+| `TRUSTED_PROXY` | 网关前唯一受信的反向代理 IPv4（它的 `X-Real-IP` 成为客户端地址） |
+| `SHARE_BASE`、`FETCH_HOSTS` | `/media` 链接的公开地址；视频渲染可下载输入文件的主机（逗号分隔） |
 
 ```sh
-.venv/bin/python tools/configure.py --models "$HOME/models"
-.venv/bin/python tools/doctor.py
-.venv/bin/python tools/install.py --activate
+.venv/bin/python tools/install_serving.py          # .local/serving.env、Strata 引擎 JSON、LaunchAgents、API key（只建缺失的）
+.venv/bin/python tools/doctor.py                   # 不加载模型：llama-swap -validate、caddy validate、可执行文件、权重
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.local.llama-server.plist   # 其余 LaunchAgent 同理
 ```
 
-`configure.py` 只生成本机文件，不启动服务。默认监听 `127.0.0.1:8080`；提供局域网接口时添加 `--listen 0.0.0.0`。可用 `--state`、`--output` 自定义运行数据和配置目录。代码可以放在任意目录，路径含空格也支持。
+`install_serving.py` 不启动、不重启任何东西，只打印加载命令；`--check` 只比较，`--update` 先备份到 `.backup/` 再替换。
+llama-swap 的配置不渲染：`platform/llama-swap/env.sh` 读取 `.local/serving.env`，缺任一变量时 llama-swap 拒绝启动并给出变量名。
+网关监听 `0.0.0.0:8080`，llama-swap 只监听 `127.0.0.1:8081`。
 
-当前完整聊天配置要求 GPU 池至少 **65200 MiB**。默认从当前 `iogpu.wired_limit_mb` 减去系统与常驻嵌入预留的 6032 MiB；系统上限为 0 时要求显式给出已验证的 `--pool-mb`。工具不会因为识别出一台 Mac 就自动提高内存上限，也不会把这台机器的上下文/并发参数缩放成未经验证的其他机型参数。
-
-若迁移机器需要持久化 GPU 内存上限，可以显式指定，例如针对已经验证过的 96 GiB 机器：
-
-```sh
-.venv/bin/python tools/configure.py --models "$HOME/models" --pool-mb 82032
-.venv/bin/python tools/install.py --wired-limit-mb 88064 --activate
-```
-
-此选项通过 `sudo` 安装 root 拥有的 LaunchDaemon；普通模型服务由当前用户的 LaunchAgent 运行，在用户登录后启动。若旧部署仍占用 8080/8081/8090，应先停掉旧部署，再激活新服务。
+GPU 池由 `bin/gpu-pool` 按当前 `iogpu.wired_limit_mb` 计算（减去系统与常驻嵌入的预留）；当前完整聊天配置要求池至少 **65200 MiB**。
+工具不会因为识别出一台 Mac 就提高内存上限，也不会把这台机器的上下文／并发参数缩放成未经验证的其他机型参数。
 
 ## 模型与状态
 
 - 模型目录完全独立，必要布局见 `models.required.json`。转换过的 Strata pack、INT8 视频权重（[准备步骤](docs/h3-video.md)）和页对齐图片权重（Qwen-Image 见[准备步骤](docs/qwen-image.md)）应一并迁移；原始 Hub 权重不一定能直接替代这些文件。
-- 运行数据默认在 `~/Library/Application Support/llm-serving`：API key、活动数据库、日志、图片与视频。模型权重和运行数据都不提交到 Git。
-- 迁移时可以保留旧 API key，放到新状态目录的 `api_key` 文件，权限设为 `0600`；否则配置工具会生成一个新凭证，供客户端使用。不要将密钥放到命令行参数或公开配置中。
+  归档到另一台机器的模型由 `bin/archive-restore` 在第一次请求时按清单拷回并校验（`<MODELS>/<名>.archive`）。
+- 运行数据在仓库目录里，全部被忽略：API key `platform/llama-swap/.api_key`（0600）、活动数据库、`logs/`、图片 `data/media/images`、视频 `services/video/h3-video/outputs`。模型权重和运行数据都不提交到 Git。
+- 迁移时可以保留旧 API key，放到 `platform/llama-swap/.api_key`，权限设为 `0600`；否则 `install_serving.py` 会生成一个新凭证，供客户端使用。不要将密钥放到命令行参数或公开配置中。
 - 有权重文件后，推理不需要外部 API key 或下载 token。个别模型首次下载可能需要模型托管站点的授权；这属于准备阶段。
 
 ## 验证范围
 
-已在开发机器使用 Python **3.15.2** 完成统一依赖安装与导入，以及 Numba JIT、PyTorch/SciPy CPU 和日语对齐 tokenizer 基础调用检查；同时完成配置生成、llama-swap/Caddy 配置校验、FFmpeg 编码器检查，以及安装路径和隐私扫描测试。重排的 Python 3.15 真实模型/API 检查见[专项说明](docs/rerank.md)。参照部署 2026-11-18 起所有 Python 入口都运行在这个统一环境里（同一份 `uv.lock`），切换前后 `tools/regress` 全部用例一致；公开仓库本身的生成配置仍只做了静态检查。
+已在开发机器使用 Python **3.15.2** 完成统一依赖安装与导入，以及 Numba JIT、PyTorch/SciPy CPU 和日语对齐 tokenizer 基础调用检查；同时完成 llama-swap/Caddy 配置校验、FFmpeg 编码器检查，以及安装路径和隐私扫描测试。重排的 Python 3.15 真实模型/API 检查见[专项说明](docs/rerank.md)。参照部署 2026-11-18 起所有 Python 入口都运行在这个统一环境里（同一份 `uv.lock`），切换前后 `bin/regress` 全部用例一致；入库的 llama-swap 配置展开后与线上文件逐字节相同。
 
 尚未在干净系统完成全套原生重编译和端到端推理恢复演练。本仓库提供可审查的迁移工具和当前配置，首次切换前仍需运行真实 API 冒烟检查。`doctor.py` 不加载模型，不替代正确性/性能验证。
 
