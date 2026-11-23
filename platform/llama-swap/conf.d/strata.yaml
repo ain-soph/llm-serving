@@ -1,11 +1,16 @@
-# Flash-Next via ain-soph/Strata serving at 7a4bbc527 (upstream main 73d4f4196 = v0.2.20+13, + our 9; release worktree
-# serving-20261123, 2026-11-23). Upstream defaults kept (user 2026-11-23): a request with no sampling field is decoded
-# greedily with MTP drafts (d35353903; before: the model card's sampling); the server adds --conversation-cache-min-tokens 1024
-# (#6463); a 'model' naming another Strata catalogue id gets 404 model_not_found (#6621; our IDs are aliases in the configs).
-# Rollback: .backup/platform/llama-swap/conf.d/strata.yaml.20261123-pre-rebase (+ configs/*.20261123-pre-rebase).
-# 262144 tokens per slot, two physical states, Q2_0 MTP, INT8 KV, 1024 MiB conversation cache.
-# Compact dual-slot qualification on M5 Ultra peaked at +67695 MiB wired; serving-next peaked at +66763 (2026-11-21).
-# Reserve 69500 MiB for either weight variant. See reports/strata-compact-dual-20261119.md.
+# Flash-Next via ain-soph/Strata serving at 53a6becb8 (upstream main 73d4f4196 = v0.2.20+13, + our 9 + README; release
+# worktree serving-20261123, 2026-11-23). Upstream defaults kept (user 2026-11-23): a request with no sampling field is decoded
+# greedily with MTP drafts (d35353903; before: the model card's sampling); a 'model' naming another Strata catalogue id gets
+# 404 model_not_found (#6621; our IDs are aliases in the configs); the conversation cache has no --conversation-cache-mib
+# (user 2026-11-23: upstream default, #3493): the engine sizes it once the model is loaded, 40% of the RAM left above 2560 MiB,
+# at most 8192 MiB (the engine log says the value); without the flag the server does not add --conversation-cache-min-tokens
+# 1024 (#6463 applies to an explicit size only), so every conversation may park; the SSD tier takes what the RAM cache evicts.
+# Rollback: .backup/platform/llama-swap/conf.d/strata.yaml.20261123-pre-convcache (+ configs/*.json.in of the same tag,
+# then tools/install_serving.py --update; the rebase rollback: *.20261123-pre-rebase).
+# 262144 tokens per slot, two physical states, Q2_0 MTP, INT8 KV. See services/text/strata/conv-cache-default-20261123/.
+# Compact dual-slot qualification on M5 Ultra peaked at +67695 MiB wired; 82d63e19e (serving-20261121) peaked at +66763
+# (2026-11-21); the parked conversations are host RAM, not wired. Reserve 69500 MiB for either weight variant.
+# See reports/strata-compact-dual-20261119.md.
 # Local worker alias (2026-11-23, user): "<id>:worker" is the same loaded model for agents/local-worker (Claude Code
 # /v1/messages, Codex /v1/responses, both always ask for thinking). setParamsByID "?" keys fill the model card's
 # thinking sampling (Strata MODEL_CARD_SAMPLING qwen4exp "thinking": 1.0 / 0.95 / 20) only where the request has no value;

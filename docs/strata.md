@@ -6,7 +6,7 @@
 
 源码在自己的 [ain-soph/Strata](https://github.com/ain-soph/Strata/tree/serving) fork 的 `serving` 分支维护。部署实际固定到 [53a6becb8ab0a9d6f4955b72e0651888cde0e363](https://github.com/ain-soph/Strata/commit/53a6becb8ab0a9d6f4955b72e0651888cde0e363)（2026-11-23 起；上游 main `73d4f4196`（v0.2.20+13）+ 我们的提交，rebase 后覆盖 `serving`，上一版 `82d63e19e` 留有标签 `serving-pre-rebase-20261122`），由主仓库的 `native.lock.json` 记录，不会在每次安装时跟随分支移动。
 
-该快照包含 Metal `--prefill auto` 修复。引擎 JSON 的 `parallel: 2` 生成 `--batch 2`，`STRATA_METAL_COMPACT_BATCH=1` 让预填与解码共用两套序列状态。单请求使用 Q2_0 MTP，KV 为 INT8。其余按上游默认：图片由 Strata 自有的 Qwen 视觉塔处理；draft-cost 表开启，每台机器从前约 100 个真实请求被动学到（存于 `XDG_CONFIG_HOME/strata/draft-costs/`）；GPU keep-alive 开启。上游的 SSD 对话溢出层会在权重目录下建 `conversation-spill/`，但本配置下从不写盘（会话指纹要求 `--mtp` 目录有 `dense.bin`，Metal MTP 目录没有）。后续经过验证的 macOS 性能改动应先提交到引擎 fork，再更新部署锁定的 commit。本仓库不复制第三方引擎代码。
+该快照包含 Metal `--prefill auto` 修复。引擎 JSON 的 `parallel: 2` 生成 `--batch 2`，`STRATA_METAL_COMPACT_BATCH=1` 让预填与解码共用两套序列状态。单请求使用 Q2_0 MTP，KV 为 INT8。其余按上游默认：图片由 Strata 自有的 Qwen 视觉塔处理；draft-cost 表开启，每台机器从前约 100 个真实请求被动学到（存于 `XDG_CONFIG_HOME/strata/draft-costs/`）；GPU keep-alive 开启。对话缓存不设 `--conversation-cache-mib`，由引擎在模型加载后按空闲内存自动定大小（可用内存减 2560 MiB 后的 40%，最多 8192 MiB，以 256 取整；本机常规加载为 7680–8192 MiB，引擎日志会写出取值）。不设大小时，服务端不加 `--conversation-cache-min-tokens 1024`，短会话也会停放。从内存缓存挤出的会话会写进权重目录下的 `conversation-spill/`（SSD 层，上限为 min(32 GiB, 空闲盘的 ¼)），续问时再读回。后续经过验证的 macOS 性能改动应先提交到引擎 fork，再更新部署锁定的 commit。本仓库不复制第三方引擎代码。
 
 Strata 自带 `terminal/serve/server.py`，主仓库直接复用它提供 HTTP 接口；无需再写一个 Python 包装服务器。其 Python 运行依赖纳入主仓库的统一 uv 环境。
 

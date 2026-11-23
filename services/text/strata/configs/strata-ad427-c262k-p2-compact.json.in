@@ -22,9 +22,7 @@
   "--max-context",
   "262144",
   "--mmap-experts",
-  "--vision",
-  "--conversation-cache-mib",
-  "1024"
+  "--vision"
  ],
  "cwd": "@STRATA_RELEASE@",
  "tokenizer": "@MODELS@/strata-ad427/packs/ad427/tokenizer",
