@@ -1,6 +1,6 @@
 """Call an llm-mcp instance: list tools, then one call per entry.
 
-  python mcp/mcp_call.py URL TOKEN '[["rerank", {"query": "...", "documents": ["..."]}]]'
+  python clients/mcp-tests/mcp_call.py URL TOKEN '[["rerank", {"query": "...", "documents": ["..."]}]]'
 """
 import asyncio, json, sys
 import httpx

@@ -60,11 +60,32 @@ VIDEO_POST = VIDEO_GET = f"{LSW}/v1/videos"       # the Mac Studio gateway route
 VIDEO_ID = re.compile(r"video_[0-9a-f]{24}")
 MEDIA_ID = re.compile(r"(video_[0-9a-f]{24}|img_[0-9a-f]{16})")
 CONTEXT_HEADERS = (b"x-chat-id", b"x-user-id", b"x-user-message-id")
-PRESET_MODEL = {"fast": "minimax-h3-video-fast", "standard": "minimax-h3-video", "best": "minimax-h3-video-best"}
+PRESET_MODEL = {"fast": "minimax-h3-video-fast", "turbo": "minimax-h3-video-turbo", "standard": "minimax-h3-video",
+                "best": "minimax-h3-video-best"}
 DEFAULT_MODEL = {"chat": "qwen3.8-flash-next", "asr": "qwen3-asr-1.7b", "embedding": "embeddinggemma-2",
                  "image": "minimax-h3-image", "tts": "qwen3-tts", "rerank": "qwen3-reranker-4b",
                  "decision": "elephant-1"}
 KINDS = ("chat", "image", "video", "asr", "tts", "embedding", "rerank", "decision")
+# The model card's sampling ("Best Practices") per thinking state, as Strata's MODEL_CARD_SAMPLING["qwen4exp"]
+# (terminal/serve/server_parts/http_api.py) has it. Strata decodes a Flash-Next request without any sampling field
+# greedily (upstream d35353903), so chat sends the set for the request's thinking state; the caller's values win.
+CARD_SAMPLING = {"qwen3.8-flash-next": {True: {"temperature": 1.0, "top_p": 0.95, "top_k": 20},
+                                        False: {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "presence_penalty": 1.5}}}
+CARD_PENALTIES = ("presence_penalty", "frequency_penalty", "repetition_penalty")
+
+
+def card_sampling(model: str, thinking: bool, temperature: float = -1) -> dict:
+    """The sampling fields chat sends: the card's set for `model` (its family: the id up to "-uncensored"/":") and
+    the thinking state, with the caller's temperature (>= 0) in place of the card's; temperature 0 drops the
+    penalties, which would make the engine sample (Strata's own rule for a greedy request). {} for other models."""
+    card = next((dict(sets[bool(thinking)]) for fam, sets in CARD_SAMPLING.items()
+                 if model == fam or model.startswith((fam + "-", fam + ":"))), {})
+    if temperature >= 0:
+        card["temperature"] = min(2.0, temperature)
+        if temperature == 0:
+            for k in CARD_PENALTIES:
+                card.pop(k, None)
+    return card
 CHAT_ENDPOINTS = "/v1/chat/completions (OpenAI), /v1/messages (Anthropic), /v1/responses (OpenAI Responses)"
 API_BASES = os.environ.get("API_BASES", "local http://127.0.0.1:8080/v1")
 log = logging.getLogger("llm-mcp")
@@ -296,9 +317,18 @@ def describe_video(job):
             f"rendered in {(job.get('timings') or {}).get('render_s')} s")
 
 
+def fallback_note(job):
+    """The server's reason when it rendered another preset than the one asked for (turbo -> standard), else ""."""
+    st = job.get("settings") or {}
+    if not st.get("fallback"):
+        return ""
+    return (f"Note: {st.get('requested_preset')} was asked for, but the server rendered it as {st.get('preset')}: "
+            f"{st['fallback']}. Tell the user this.\n")
+
+
 def video_done_text(job):
     page, file = links(job["id"])
-    return (f"Video ready: {describe_video(job)}.\n"
+    return (f"Video ready: {describe_video(job)}.\n{fallback_note(job)}"
             f"To show it in the chat, put this line on its own line in your reply: <video>{file}</video>\n"
             f"Watch/download page: {page} (download: {file}).\n"
             f"Tell the user what was made, give the page link, and offer to continue it: extend_video adds up to about "
@@ -368,7 +398,7 @@ async def list_models() -> str:
 @mcp.tool()
 @friendly
 async def chat(prompt: str, model: str = "", system: str = "", images: list[str] = [],
-               json_schema: dict = {}, temperature: float = -1, max_tokens: int = 4096,
+               json_schema: dict = {}, temperature: float = -1, max_tokens: int = 4096, thinking: bool = True,
                ctx: Context = None) -> str:
     """Ask a local chat model (Qwen3.8 Flash-Next on the Mac Studio, 262k context, vision; the -uncensored variant
     answers without refusals). Useful for a second opinion, for private text that should stay local, or to delegate.
@@ -379,8 +409,9 @@ async def chat(prompt: str, model: str = "", system: str = "", images: list[str]
         system: optional system prompt
         images: images for the model to look at: attachments ("" is not allowed here; use "att:N"), media ids, URLs
         json_schema: a JSON Schema object to force a structured JSON answer; {} for free text
-        temperature: 0-2, or -1 for the model default
-        max_tokens: answer length limit, up to 32768
+        temperature: 0-2 (0 = greedy), or -1 for the model card's value (1.0 thinking, 0.7 without)
+        max_tokens: answer length limit, up to 32768 (thinking counts towards it)
+        thinking: let the model think before answering (slower, better on hard tasks); false answers directly
     """
     model = await pick_model("chat", model)
     content = prompt
@@ -390,9 +421,9 @@ async def chat(prompt: str, model: str = "", system: str = "", images: list[str]
             data, _, ctype = await resolve_input(ref, ctx, "image", f"images[{i}]")
             content.append({"type": "image_url", "image_url": {"url": data_url(data, ctype or "image/png")}})
     msgs = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": content}]
-    body = {"model": model, "messages": msgs, "max_tokens": max(16, min(32768, max_tokens))}
-    if temperature >= 0:
-        body["temperature"] = min(2.0, temperature)
+    body = {"model": model, "messages": msgs, "max_tokens": max(16, min(32768, max_tokens)),
+            "chat_template_kwargs": {"enable_thinking": bool(thinking)}}
+    body.update(card_sampling(model, thinking, temperature))
     if json_schema:
         body["response_format"] = {"type": "json_schema", "json_schema": {"name": "result", "schema": json_schema}}
     async with httpx.AsyncClient(timeout=1800) as c:
@@ -578,12 +609,13 @@ async def edit_image(prompt: str, images: list[str] = [], size: str = "auto", se
 @friendly
 async def generate_video(prompt: str, seconds: float = 5,
                          size: Literal["1344x768", "768x1344", "768x768", "512x512"] = "1344x768",
-                         quality: Literal["fast", "standard", "best"] = "standard",
+                         quality: Literal["fast", "turbo", "standard", "best"] = "standard",
                          first_frame: str = "none", ctx: Context = None) -> str:
     """Generate a video WITH synchronized sound (MiniMax-H3), up to 15 s. Before calling: agree on content, length,
-    orientation and quality with the user and tell them the expected time. Render time at 1344x768 "standard":
-    5 s ~4.5 min (15 s not measured yet with the new sparse layout; roughly 30-40 min); "fast" 5 s ~3 min, 15 s
-    ~13 min; "best" 5 s ~12 min (~2.7x standard); 512x512 is ~4x faster. The call waits
+    orientation and quality with the user and tell them the expected time. Render time at 1344x768, 5 s: "fast"
+    ~3 min, "turbo" ~3.3-3.6 min, "standard" ~4.5-5 min, "best" ~11.5-12.5 min; 512x512 is ~4x faster. 15 s:
+    "fast" ~13 min, "standard" not measured at 1344x768 (480p 15 s took ~7.5 min), "best" ~2.6x
+    standard. The call waits
     for the render. For longer videos generate up to 15 s, then use extend_video. To continue a video the user
     uploaded, use extend_video instead.
 
@@ -594,8 +626,10 @@ async def generate_video(prompt: str, seconds: float = 5,
             Put spoken lines with who says them in the description.
         seconds: 1-15
         size: 1344x768 landscape, 768x1344 portrait, 768x768 square, 512x512 small and fast
-        quality: fast (token reduction, composition may drift), standard (default), best (exact full
-            computation, slowest)
+        quality: fast (token reduction, composition may drift); turbo (6-step distilled: sharp, close to best,
+            but the same prompt gives a different picture than the other tiers; text or first_frame only, up to
+            8 s, otherwise the server renders it as standard and says why); standard (default, relaxed sparse
+            attention); best (exact full computation, slowest)
         first_frame: "none", or an image to start from: "" = the newest image in this chat, "att:N", an image id,
             a URL
     """
@@ -604,7 +638,11 @@ async def generate_video(prompt: str, seconds: float = 5,
         data, _, ctype = await resolve_input(first_frame, ctx, "image", "first_frame")
         req["input_reference"] = data_url(data, ctype or "image/png")
     t0 = time.time()
-    return await wait_video(ctx, await post_video(req), t0)
+    job = await post_video(req)
+    note = fallback_note(job)
+    if note and ctx:
+        await ctx.info(note.strip())
+    return await wait_video(ctx, job, t0)
 
 
 @mcp.tool()
