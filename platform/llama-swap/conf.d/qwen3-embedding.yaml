@@ -1,54 +1,56 @@
-# Qwen3-Embedding 0.6B / 4B / 8B and voyage-4-nano on MLX behind embedding/qwen3/server.py: OpenAI /v1/embeddings
-# (input_type, dimensions = Matryoshka truncation or zero padding, base64), like embeddinggemma-2.
-# MLX cache 4096 MB during a request, cleared after it.
-# One entry per model (2026-11-18; the -int8 entries are gone, no aliases). Short queries (~36 tokens with the
-# instruction) are the main traffic, and there W8A8 and MLX 8-bit quantized_matmul are slower than 16-bit:
-#   0.6B, 4B: exact FP16 zero-copy copies (common/qwen3_w8a8.py --float)
-#   voyage-4-nano: exact BF16 (float16 activations overflow on some 300+ token inputs)
-#   8B: per-class copy (common/qwen3_w8a8.py mix, mix.json): q/k/v, o, gate/up W8A8, down 8-bit weights (exact Q8_0),
-#       FP16 activations. Its vectors differ from the old Q8_0 8B (an index built with one cannot be queried with the other).
-# Capacities = wired peak of one ~32K-token input + ~0.5 GB; see docs/w8a8.md and docs/performance.md.
+# Qwen3-Embedding 0.6B / 4B / 8B (Qwen, Apache 2.0) and voyage-4-nano (MongoDB/Voyage AI, Apache 2.0) on MLX behind
+# ~/llm-serving/services/embedding/qwen3/server.py: OpenAI /v1/embeddings with the same extras as embeddinggemma-2
+# (input_type -> each model's query/document prompt, dimensions = Matryoshka truncation or zero padding, base64).
+# Owner: embedding (2026-11-16). Report: ~/llm-serving/reports/embedding-qwen3.md.
+# MLX instead of llama-server: 1.5-2.2x the throughput. MLX cache 4096 MB during a request, cleared after it.
+# 2026-11-18 (agent PA1, evals/precision/pa1-1118-1050, per-class W8A8 / W8A16 / BF16 / FP16 on speed, error and disk):
+# ONE entry per model (the -int8 entries are gone, no aliases). Short queries (one 8-32 word query per request, ~36 tokens
+# with the instruction) are the main traffic, and there W8A8 and MLX's 8-bit quantized_matmul are SLOWER than 16-bit:
+#   0.6B, 4B: exact FP16 (zero-copy copies; 4B short query 11.3 ms vs W8A8 19.8 / W8A16 24.1 ms)
+#   voyage-4-nano: exact BF16 (FP16 overflows on some 300+ token inputs)
+#   8B: per-class copy (shared/common/qwen3_w8a8.py mix): q/k/v, o, gate/up W8A8, down 8-bit weights (exact Q8_0) with
+#       FP16 activations, 7.88 GB (was Q8_0 8.51 + W8A8 7.65): short query 34.7 -> 29.1 ms, 1300 SciFact texts 62.6 -> 45.6 s,
+#       32K input 9.2 -> 7.7 s; cosine to the Q8_0 vectors min 0.9988 / mean 0.99967, top-10 overlap 98.9%
+# The 8B vectors differ from the old qwen3-embedding-8b (an index built with one cannot be queried with the other).
+# Capacities = wired peak of one ~32K-token input (measured at apply time) + ~0.5 GB. Not used by any client yet.
 macros:
   "qe-cmd": >
-    @PYTHON@ @ROOT@/embedding/qwen3/server.py --host 127.0.0.1 --port ${PORT} --cache-mb 4096
-
+    ${env.LLM_SERVING}/.venv/bin/python ${env.LLM_SERVING}/services/embedding/qwen3/server.py
+    --host 127.0.0.1 --port ${PORT} --cache-mb 4096
 models:
   "qwen3-embedding-0.6b":
     name: "Qwen3 Embedding 0.6B (1024d)"
     description: "Text embeddings, 32K context; dimensions 32-1024 (Matryoshka)"
-    cmd: ${qe-cmd} --model-id qwen3-embedding-0.6b --model @MODELS@/qwen3-embedding/zc-0.6b-fp16
+    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen3-embedding -- ${qe-cmd} --model-id qwen3-embedding-0.6b --model ${env.LLM_MODELS}/qwen3-embedding/zc-0.6b-fp16
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 3500             # wired peak +2729 MiB, one 32K-token input
+      gpu: 3500             # wired peak +2729 MiB, one 32K-token input (lc1)
     evict_cost: 0
-
   "qwen3-embedding-4b":
     name: "Qwen3 Embedding 4B (2560d)"
     description: "Text embeddings, 32K context; dimensions 32-2560 (Matryoshka)"
-    cmd: ${qe-cmd} --model-id qwen3-embedding-4b --model @MODELS@/qwen3-embedding/zc-4b-fp16
+    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen3-embedding -- ${qe-cmd} --model-id qwen3-embedding-4b --model ${env.LLM_MODELS}/qwen3-embedding/zc-4b-fp16
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 12000            # wired peak +11218 MiB, one 32K-token input
+      gpu: 12000            # wired peak +11218 MiB, one 32K-token input (lc1)
     evict_cost: 0
-
   "qwen3-embedding-8b":
     name: "Qwen3 Embedding 8B (4096d)"
     description: "Most accurate text embeddings, 32K context; dimensions 32-4096 (Matryoshka); per-class W8A8 / 8-bit"
-    cmd: ${qe-cmd} --model-id qwen3-embedding-8b --model @MODELS@/qwen3-embedding/mix-8b
+    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen3-embedding -- ${qe-cmd} --model-id qwen3-embedding-8b --model ${env.LLM_MODELS}/qwen3-embedding/mix-8b
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 10500            # wired peak 9983 MiB, one 32K-token input
+      gpu: 10500            # wired peak 9983 MiB, one 32K-token input (pa1b)
     evict_cost: 0
-
   "voyage-4-nano":
     name: "voyage-4-nano (2048d)"
     description: "Small fast text embeddings, 32K context; dimensions 2048/1024/512/256"
-    cmd: ${qe-cmd} --model-id voyage-4-nano --model @MODELS@/voyage-4-nano/zc-bf16
+    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model voyage-4-nano -- ${qe-cmd} --model-id voyage-4-nano --model ${env.LLM_MODELS}/voyage-4-nano/zc-bf16
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 3000             # wired peak +2263 MiB, one 32K-token input
+      gpu: 3000             # wired peak +2263 MiB, one 32K-token input (lc1)
     evict_cost: 0

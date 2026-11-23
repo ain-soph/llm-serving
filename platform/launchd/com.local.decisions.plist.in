@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- OpenAI Decisions API translator (2026-11-16): POST /v1/decisions -> llama-swap /v1/systemone (models in
+     conf.d/decisions.yaml), behind the Caddy gateway (:8080), which checks the API key with llama-swap first
+     (forward_auth). Stateless, CPU only, loads no weights. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>com.local.decisions</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/homebrew/bin/python3.15</string>
+		<string>@SERVING_ROOT@/services/decisions/server.py</string>
+		<string>--host</string><string>127.0.0.1</string>
+		<string>--port</string><string>8095</string>
+		<string>--upstream</string><string>http://127.0.0.1:8081</string>
+	</array>
+	<key>WorkingDirectory</key><string>@SERVING_ROOT@/services/decisions</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>RunAtLoad</key><true/>
+	<key>KeepAlive</key><true/>
+	<key>StandardOutPath</key><string>@SERVING_ROOT@/services/decisions/logs/stdout.log</string>
+	<key>StandardErrorPath</key><string>@SERVING_ROOT@/services/decisions/logs/stderr.log</string>
+</dict>
+</plist>

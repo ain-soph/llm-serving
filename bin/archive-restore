@@ -1,0 +1,320 @@
+#!/usr/bin/python3
+"""Start a llama-swap entry after making sure its weight directories under ~/models are there.
+
+  archive-restore [--port PORT] [--min-free-gib 100] --model A [--model B ...] [-- COMMAND ...]
+  (models may also be given as positional names or comma lists: archive-restore A,B -- COMMAND)
+
+Every llama-swap entry runs its server through this wrapper (2026-11-22), so archiving a model never needs a config
+change. For each model directory ~/models/<name>:
+- No manifest ~/models/<name>.archive (never archived): directory present -> fine; missing -> fail at once with
+  "找不到权重、也没有归档记录".
+- Manifest present (same JSON format as bin/model-archive: {"archive": "mac:/Volumes/SSD/model-archive/<name>",
+  "entries": {relpath: ["dir"] | ["file", size, sha256] | ...}}; a copy sits next to the archive on the mini):
+  - local copy complete (every entry present, sizes equal) -> fine; present but different -> WARN, use it as it is
+    (never overwritten);
+  - local copy missing -> restore only if (free space - bytes to copy) > --min-free-gib (user rule 2026-11-22: more than
+    100 GiB must stay free afterwards) and the mini answers within a few seconds: rsync into
+    ~/models/.model-archive/<name>.restoring (resumable), verify every SHA-256 against the manifest, rename into place.
+    A failed verification deletes the staging copy. A restored copy stays local (never re-archived automatically).
+When all models are fine, exec COMMAND (the fast path costs one Python start plus a few stat calls).
+Otherwise fail at once with a message naming the archive, the space needed and free, and the manual restore command:
+on stderr (llama-swap log) and, with --port, on PORT so the client sees it (/health 200, every other request a 503
+OpenAI-style error with the message, then exit). During a restore with --port, /health answers 503
+{"progress": f, "message": ...}; llama-swap (v275+) restarts its healthCheckTimeout countdown whenever the progress
+changes, so a long copy is not cut off. Without COMMAND: check / restore only (manual use).
+
+Locks are shared with bin/model-archive: ~/models/.model-archive/<name>.transfer.lock (exclusive while copying) and
+<name>.use.lock (shared, kept open across exec, so `model-archive archive --evict` refuses while the model runs).
+"""
+
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import sys
+import time
+
+MODELS = Path(os.environ.get("ARCHIVE_RESTORE_MODELS", str(Path.home() / "models")))
+SSH = ["/usr/bin/ssh", "-oBatchMode=yes", "-oConnectTimeout=5", "-oServerAliveInterval=15", "-oServerAliveCountMax=3"]
+GiB = 2 ** 30
+ERROR_SERVER_SECONDS = 120
+
+
+def log(msg):
+    print(f"archive-restore: {msg}", file=sys.stderr, flush=True)
+
+
+class Failure(Exception):
+    pass
+
+
+def load_manifest(shortcut):
+    m = json.loads(shortcut.read_text())
+    host, _, path = m["archive"].partition(":")
+    if not host or not path.startswith("/"):
+        raise Failure(f"bad archive location in {shortcut}: {m['archive']}")
+    return host, path, m["entries"]
+
+
+def total_bytes(entries):
+    return sum(e[1] for e in entries.values() if e[0] == "file")
+
+
+def problems(root, entries, hashes=False, on_bytes=None):
+    """Differences between the directory and the manifest (missing entries, sizes; with hashes also SHA-256)."""
+    out = []
+    for name, e in sorted(entries.items()):
+        p = root / name
+        kind = e[0]
+        if kind == "dir":
+            if not p.is_dir() or p.is_symlink():
+                out.append(f"missing dir {name}")
+        elif kind == "link":
+            if not p.is_symlink() or os.readlink(p) != e[1]:
+                out.append(f"bad link {name}")
+        elif kind == "hardlink":
+            q = root / e[1]
+            if not (p.is_file() and q.is_file() and os.path.samefile(p, q)):
+                out.append(f"bad hardlink {name}")
+        elif kind == "file":
+            if not p.is_file() or p.is_symlink():
+                out.append(f"missing file {name}")
+            elif p.stat().st_size != e[1]:
+                out.append(f"size {name}: {p.stat().st_size} != {e[1]}")
+            elif hashes:
+                import hashlib
+                h = hashlib.sha256()
+                with open(p, "rb") as f:
+                    for block in iter(lambda: f.read(8 * 1024 * 1024), b""):
+                        h.update(block)
+                        if on_bytes:
+                            on_bytes(len(block))
+                if h.hexdigest() != e[2]:
+                    out.append(f"sha256 {name}")
+        else:
+            out.append(f"unknown entry type {kind} for {name}")
+    return out
+
+
+def tree_bytes(root):
+    n = 0
+    for dirpath, _, files in os.walk(root):
+        for f in files:
+            try:
+                n += os.lstat(os.path.join(dirpath, f)).st_size
+            except OSError:
+                pass
+    return n
+
+
+class Status:
+    def __init__(self):
+        import threading
+        self.progress, self.message, self.error, self.served_error = 0.0, "starting", None, threading.Event()
+
+
+def start_server(port, status):
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def _send(self, code, body):
+            data = json.dumps(body, ensure_ascii=False).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _any(self):
+            if self.path.split("?")[0] == "/health":
+                if status.error:
+                    self._send(200, {"status": "error", "message": status.error})
+                else:
+                    self._send(503, {"progress": round(status.progress, 4), "message": status.message})
+                return
+            n = int(self.headers.get("Content-Length") or 0)
+            if n:
+                self.rfile.read(n)
+            if status.error:
+                self._send(503, {"error": {"message": status.error, "type": "model_unavailable", "code": 503}})
+                status.served_error.set()
+            else:
+                self._send(503, {"error": {"message": status.message, "type": "model_restoring", "code": 503}})
+
+        do_GET = do_POST = do_PUT = do_DELETE = do_HEAD = _any
+
+        def log_message(self, *a):
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    httpd.daemon_threads = True
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd
+
+
+def restore(model, local, host, path, entries, min_free, status):
+    import shlex
+    import subprocess
+    state = MODELS / ".model-archive"
+    staging = state / f"{model}.restoring"
+    total = total_bytes(entries)
+    staged = tree_bytes(staging) if staging.is_dir() else 0
+    need = max(total - staged, 0)
+    free = shutil.disk_usage(MODELS).free
+    manual = (f"rsync -aH {host}:{path}/ {local}/ （或 ~/llm-serving/bin/archive-restore {model}，"
+              f"它检查空间并按 SHA-256 清单校验）")
+    if free - need <= min_free * GiB:
+        raise Failure(f"{model} 的权重已归档到 {host}:{path}（{total / GiB:.1f} GiB），本机没有副本。"
+                      f"自动拷回要求拷完后仍剩 >{min_free:g} GiB：还需拷 {need / GiB:.1f} GiB，当前空闲 "
+                      f"{free / GiB:.1f} GiB（拷完剩 {(free - need) / GiB:.1f} GiB）。请先腾出空间，或手动恢复：{manual}")
+    try:
+        r = subprocess.run([*SSH, host, "test -d " + shlex.quote(path) + " && echo ok"], capture_output=True,
+                           text=True, timeout=15)
+        reachable = r.stdout.strip() == "ok"
+        why = (r.stderr or r.stdout).strip()[-300:]
+    except subprocess.TimeoutExpired:
+        reachable, why = False, "ssh timed out"
+    if not reachable:
+        raise Failure(f"{model} 的权重已归档到 {host}:{path}（{total / GiB:.1f} GiB），本机没有副本，"
+                      f"但连不上 Mac mini 或找不到归档（{why or 'no answer'}）。手动恢复：{manual}")
+    state.mkdir(mode=0o700, exist_ok=True)
+    staging.mkdir(exist_ok=True)
+    log(f"restoring {host}:{path} -> {staging} ({need / GiB:.1f} of {total / GiB:.1f} GiB to copy, "
+        f"{free / GiB:.1f} GiB free)")
+    t0 = time.time()
+    proc = subprocess.Popen(["/usr/bin/rsync", "-aH", "--partial", "-e", shlex.join(SSH),
+                             f"{host}:{path}/", f"{staging}/"], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                            text=True)
+    while proc.poll() is None:
+        done = tree_bytes(staging)
+        status.progress = 0.95 * min(done / total, 1.0) if total else 0.0
+        status.message = f"从 Mac mini 拷回归档权重 {done / GiB:.1f}/{total / GiB:.1f} GiB"
+        time.sleep(2)
+    err = proc.stderr.read()
+    if proc.returncode != 0:
+        raise Failure(f"{model}: rsync 从 {host}:{path} 拷回失败（exit {proc.returncode}）：{err.strip()[-500:]}；"
+                      f"已拷部分留在 {staging}，下次启动会续传。手动恢复：{manual}")
+    status.progress, status.message = 0.95, "SHA-256 校验中"
+    log(f"copied in {time.time() - t0:.0f} s; verifying SHA-256")
+    hashed = [0]
+
+    def on_bytes(n):   # keep the progress moving while hashing (llama-swap restarts its timeout on each change)
+        hashed[0] += n
+        status.progress = 0.95 + 0.04 * min(hashed[0] / total, 1.0) if total else 0.99
+        status.message = f"SHA-256 校验 {hashed[0] / GiB:.1f}/{total / GiB:.1f} GiB"
+
+    bad = problems(staging, entries, hashes=True, on_bytes=on_bytes)
+    extra = [os.path.relpath(os.path.join(d, f), staging) for d, ds, fs in os.walk(staging) for f in fs + ds
+             if os.path.relpath(os.path.join(d, f), staging) not in entries]
+    if bad or extra:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise Failure(f"{model}: 拷回的副本与 SHA-256 清单不一致（{len(bad)} 项不符、{len(extra)} 个多余文件，"
+                      f"例如 {(bad + extra)[:3]}），不完整的副本已删除。归档在 {host}:{path}，手动恢复：{manual}")
+    if os.path.lexists(local):
+        raise Failure(f"{model}: 恢复期间 {local} 出现了，未覆盖；拷回的副本留在 {staging}")
+    staging.rename(local)
+    status.progress, status.message = 0.995, "拷回并校验完成，启动中"
+    log(f"restored and verified {local} in {time.time() - t0:.0f} s")
+
+
+def lock(path, flags):
+    f = open(path, "a")
+    fcntl.flock(f, flags)
+    return f
+
+
+def parse(argv):
+    """[--port P] [--min-free-gib N] [--model A[,B]]... [A[,B] ...] [-- COMMAND ...]"""
+    command = []
+    if "--" in argv:
+        i = argv.index("--")
+        argv, command = argv[:i], argv[i + 1:]
+    port, min_free, models = None, 100.0, []
+    it = iter(argv)
+    for x in it:
+        if x in ("-h", "--help"):
+            print(__doc__)
+            sys.exit(0)
+        elif x == "--port" or x.startswith("--port="):
+            port = int(x.split("=", 1)[1] if "=" in x else next(it))
+        elif x == "--min-free-gib" or x.startswith("--min-free-gib="):
+            min_free = float(x.split("=", 1)[1] if "=" in x else next(it))
+        elif x == "--model" or x.startswith("--model="):
+            models += (x.split("=", 1)[1] if "=" in x else next(it)).split(",")
+        elif x.startswith("-"):
+            sys.exit(f"archive-restore: unknown option {x}")
+        else:
+            models += x.split(",")
+    models = [m for m in models if m]
+    if not models:
+        sys.exit("archive-restore: no model given")
+    for m in models:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", m):
+            sys.exit(f"archive-restore: {m!r} must be a directory name under ~/models")
+    return port, min_free, models, command
+
+
+def main():
+    port, min_free, models, command = parse(sys.argv[1:])
+    status, httpd, held = Status(), None, []
+    try:
+        state = MODELS / ".model-archive"
+        state.mkdir(mode=0o700, exist_ok=True)
+        todo = []     # archived models without a local copy: (name, local, host, path, entries)
+        for m in models:
+            local, shortcut = MODELS / m, MODELS / f"{m}.archive"
+            held.append(lock(state / f"{m}.use.lock", fcntl.LOCK_SH))
+            if not shortcut.is_file():
+                if not local.is_dir():
+                    raise Failure(f"{m}: 本机找不到 {local}，也没有归档记录（{shortcut} 不存在）")
+                continue
+            host, path, entries = load_manifest(shortcut)
+            if os.path.lexists(local):
+                bad = problems(local, entries)
+                if bad:   # changed on purpose after archiving, or damaged: never overwrite, start as it is
+                    log(f"WARN {local} differs from {shortcut} ({len(bad)}: {bad[:3]}); starting with the local copy")
+                continue
+            todo.append((m, local, host, path, entries))
+        if todo:
+            if port:
+                httpd = start_server(port, status)
+            need = sum(total_bytes(t[4]) for t in todo)
+            free = shutil.disk_usage(MODELS).free
+            if len(todo) > 1 and free - need <= min_free * GiB:
+                names = "、".join(t[0] for t in todo)
+                raise Failure(f"{names} 的权重已归档到 Mac mini，本机没有副本。自动拷回要求拷完后仍剩 >{min_free:g} GiB："
+                              f"共需 {need / GiB:.1f} GiB，当前空闲 {free / GiB:.1f} GiB（拷完剩 {(free - need) / GiB:.1f} GiB）。"
+                              f"请先腾出空间，或逐个手动恢复：~/llm-serving/bin/archive-restore <名字>")
+            for m, local, host, path, entries in todo:
+                with lock(state / f"{m}.transfer.lock", fcntl.LOCK_EX):
+                    if not os.path.lexists(local):   # another start may have restored it while we waited
+                        restore(m, local, host, path, entries, min_free, status)
+        if not command:
+            log("complete: " + ", ".join(models))
+            return 0
+        if httpd:
+            httpd.shutdown()
+            httpd.server_close()
+        for f in held:
+            os.set_inheritable(f.fileno(), True)
+        os.execvp(command[0], command)
+    except (Failure, OSError, ValueError, KeyError) as e:
+        msg = str(e)
+        log("ERROR " + msg)
+        if port and command:
+            status.error = msg
+            try:
+                if httpd is None:
+                    httpd = start_server(port, status)
+                status.served_error.wait(ERROR_SERVER_SECONDS)
+                time.sleep(0.5)
+            except OSError as e2:
+                log(f"could not serve the error on port {port}: {e2}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

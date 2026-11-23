@@ -1,20 +1,27 @@
-# Base Labs elephant-1 (MIT; Qwen3.5-9B post-trained for calibrated decisions, block-bidirectional full attention +
-# slot-letter readout), SystemOne protocol (POST /v1/systemone, routed by `model`). MLX port of the backbone
-# (decisions/jev/jev_mlx.py); prompts, slots, calibration and answers are the official OneJev qev code
-# (decisions/OneJev @81ce62f + the checkpoint's serve.patch, see docs/decisions.md). The embedding and LM head stay
-# in the mapped bf16 file, so only the 32 decoder layers are in GPU memory. Text only; state + one question
-# <= 16,384 tokens. Capacities = measured wired peak + margin.
+# Base Labs decision models (baselabs/elephant-1, MIT; Qwen3.5-9B post-trained for calibrated decisions, block-
+# bidirectional full attention + slot-letter readout), SystemOne protocol (POST /v1/systemone, routed by `model`);
+# OpenAI POST /v1/decisions reaches them through the translator (com.local.decisions). Owner: decisions (2026-11-17).
+# Report: ~/llm-serving/reports/decisions.md. MLX port of the backbone (decisions/jev/jev_mlx.py); prompts, slots,
+# calibration and answers are the official OneJev qev code (@81ce62f + the checkpoint's serve.patch, unmodified).
+# The embedding and LM head stay in the mapped bf16 file (rows read on the CPU), so only the 32 decoder layers are
+# in GPU memory. Text only; state + one question <= 16,384 tokens (the model card's maximum sequence length).
+# MLX cache 1024 MB (cleared after every request): a 16K request takes 3.1 s instead of 3.5 s with 256 MB, short
+# requests unchanged; 2048 MB saves only another 5% for ~1 GB more. Fits next to Flash-Next (71000). results/e1-*.
 models:
-  # Precision per projection class: W8A8 (int8 weights + int8 activations) on every class that gets faster, the
-  # linear-attention in_proj_z at 8-bit weight-only (1% of the time, halves the mean error), in_proj_a/b bf16.
-  # max |dp| 0.0077 vs the float32 reference, no answer flips; ~1.4x the all-8-bit-weight-only speed.
-  # Weights: the pre-quantized copy written by decisions/jev/save_mix.py (docs/decisions.md), mapped zero-copy.
+  # One entry (2026-11-18): precision chosen per projection class (AGENTS.md / deploy-process per-class standard):
+  # W8A8 (int8 weights + int8 activations, INT8 TensorOps GEMM) on every class that gets faster, in_proj_z back at
+  # 8-bit weight-only (1% of the time, halves the mean error; evals/int8-principle/u1-*, u3-*), in_proj_a/b bf16.
+  # vs the official float32 reference: max |dp| 0.0077 (all-8-bit-weight-only 0.0023, official bf16 0.0025), no answer
+  # flips; 1.4x the all-8-bit speed. Stored pre-quantized (decisions/jev/save_mix.py) and mapped zero-copy; replaces the
+  # former 8-bit-only and "-int8" entries. Rebuild: hf download baselabs/elephant-1, save_mix.py --quant w8a8 --w8a8-skip in_proj_z.
+  # Weights archived 2026-11-22 to mac:/Volumes/SSD/model-archive/elephant-1-mix8 (manifest ~/models/elephant-1-mix8.archive); archive-restore copies them back on demand when >100 GiB stays free, else answers 503.
   "elephant-1":
     name: "Base Labs elephant-1 (decisions)"
-    description: "Decision model (9B): predicate / choice / score probabilities, text, up to 16K tokens"
+    description: "Decision model (9B): predicate / choice / score probabilities, text, up to 16K tokens (weights archived, restored on demand)"
     cmd: >
-      @PYTHON@ @ROOT@/decisions/jev/server.py
-      --model @MODELS@/elephant-1-mix8 --model-id elephant-1 --dtype bfloat16 --cache-mb 1024
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model elephant-1-mix8 -- ${env.LLM_SERVING}/.venv/bin/python
+      ${env.LLM_SERVING}/services/decisions/jev/server.py
+      --model ${env.LLM_MODELS}/elephant-1-mix8 --model-id elephant-1 --dtype bfloat16 --cache-mb 1024
       --host 127.0.0.1 --port ${PORT}
     capabilities:
       in: [text]
@@ -22,5 +29,5 @@ models:
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 10000            # wired peak +8730 MiB at the 16,384-token limit, 1024 MB cache
+      gpu: 10000             # peak wired +8730 MiB at the 16,384-token limit, direct server, 1024 MB cache (dq1-1118-0056)
     evict_cost: 0

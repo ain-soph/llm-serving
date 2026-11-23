@@ -1,26 +1,33 @@
+# EmbeddingGemma 2 (google/embeddinggemma-2, Apache 2.0; ggml-org BF16 GGUF = official outputs, see
+# ~/llm-serving/services/embedding/compare_gguf.py) behind the adapter ~/llm-serving/services/embedding/server.py
+# (dimensions: truncate/zero-pad, input_type: EmbeddingGemma prompts, base64). Owner: embedding (2026-11-15).
+# ALWAYS LOADED (user choice): no capacities = uses none of the pool, so it always fits and is never evicted;
+# its real footprint is taken off the pool in config.yaml instead. Preloaded, no ttl.
 models:
   "embeddinggemma-2":
     name: "EmbeddingGemma 2 (768d, always loaded)"
     description: "Text embeddings for RAG / memory search; dimensions up to 768 (Matryoshka) or padded"
     cmd: >
-      @PYTHON@ @ROOT@/embedding/server.py
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model embeddinggemma-2 -- ${env.LLM_SERVING}/.venv/bin/python ${env.LLM_SERVING}/services/embedding/server.py
       --backend mlx --mlx-dtype float32 --max-tokens 8192
-      --port ${PORT} --model @MODELS@/embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf
+      --port ${PORT} --model ${env.LLM_MODELS}/embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf
     env:
       - "MLX_ENABLE_TF32=1"
     checkEndpoint: /health
     evict_cost: 0
 
+  # Same model with the vision + audio projector (ggml-org mmproj BF16): content-part inputs (image_url, input_audio,
+  # video_url) give vectors in the same space as the text-only entry. NOT always loaded (user choice): ttl 600.
   "embeddinggemma-2-multimodal":
     name: "EmbeddingGemma 2 multimodal (text/image/audio/video)"
     description: "Same vector space as embeddinggemma-2; inputs may be chat-style content-part lists"
     cmd: >
-      @PYTHON@ @ROOT@/embedding/server.py
-      --llama-server @LLAMA_SERVER@ --port ${PORT} --model-id embeddinggemma-2-multimodal
-      --model @MODELS@/embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf
-      --mmproj @MODELS@/embeddinggemma-2/ggml-org/mmproj-embeddinggemma-2-BF16.gguf
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model embeddinggemma-2 -- ${env.LLM_SERVING}/.venv/bin/python ${env.LLM_SERVING}/services/embedding/server.py
+      --port ${PORT} --model-id embeddinggemma-2-multimodal
+      --model ${env.LLM_MODELS}/embeddinggemma-2/ggml-org/embeddinggemma-2-BF16.gguf
+      --mmproj ${env.LLM_MODELS}/embeddinggemma-2/ggml-org/mmproj-embeddinggemma-2-BF16.gguf
     checkEndpoint: /health
     ttl: 600
     capacities:
-      gpu: 3500
+      gpu: 3500             # measured wired +2996 MB after text, image, audio, video (2026-11-15) + margin
     evict_cost: 0

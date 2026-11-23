@@ -1,78 +1,78 @@
-# Qwen-Image-2.1 (Qwen Research License: non-commercial) via the mflux fork (github.com/ain-soph/mflux, pinned in
-# uv.lock): POST /v1/images/generations and /v1/images/edits (up to 10 references, OpenAI mask, transparent PNG).
-# DiT W8A8 (Comfy-Org int8_convrot) on the M5 TensorOps INT8 GEMM. Text encoder W8A16 (MFLUX_QWEN21_TE_Q8: 8-bit
-# weights, bf16 activations; 10.9 GB instead of 16.4 GB, embeds 3.55 % vs 2.58 % from diffusers, judged a tie). An
-# int8-activation text encoder was tried and dropped 2026-11-17 (no faster, larger error).
-# Zero-copy page-aligned weights streamed layer by layer; MLX cache 6 GB for the denoiser (2 GB with references),
-# 2 GB for the VAE, which decodes in two-pass row strips. Measured wired peak of a whole generation: 6.7-9.0 GB
-# (text to image up to 2400x1792), 5.6-8.4 GB with 3-10 references -> capacity 11000 fits next to the chat model.
-# -pe: requests without prompt_enhance are rewritten by the chat model (prompt_enhance=llm).
-# Weight preparation: docs/qwen-image.md. Numbers: docs/performance.md.
+# Qwen-Image-2.1 (Qwen, Qwen Research License: non-commercial) via mflux from github.com/ain-soph/mflux@serving
+# behind ~/llm-serving/services/image/qwen-image/server.py: POST /v1/images/generations and /v1/images/edits (up to 10 references,
+# OpenAI mask = transparent pixels are repainted, background=transparent -> RGBA). Owner: qwen-image (2026-11-17).
+# Report: ~/llm-serving/reports/qwen-image.md.
+# DiT: W8A8 (Comfy-Org int8_convrot, ~/models/qwen-image-2.1/w8a8/{base,turbo}; re-derived from the official bf16
+# weights to the same int8 values) on the M5 TensorOps INT8 GEMM. Text encoder: 8-bit weights + bf16 activations
+# (MFLUX_QWEN21_TE_Q8, ~/models/qwen-image-2.1/te-q8, 10.9 GB vs 16.4 GB bf16; embeds 3.55 % vs 2.58 % from diffusers,
+# 32-prompt judge vs bf16 46 %: deploy/qwen-image-teq8-deploy-*, 2026-11-17)
+# (the -int8 text-encoder IDs were removed 2026-11-17 at the user's request: no speedup — the text encoder is a small part of
+# a generation — only 8.8 GB less page cache; backup qwen-image.yaml.bak-20261117-dropint8te).
+# Zero-copy, page-aligned files streamed layer by layer; MLX cache 6 GB for the denoiser (2 GB with reference images),
+# 2 GB for the VAE; VAE in two-pass row strips sized by image width (upstream mflux default since #1000; the former
+# MFLUX_QWEN21_VAE_STRIP_FROM=2 / _BUDGET=16384 settings were the same values and were removed 2026-11-21). Measured wired peak of a whole generation
+# (qwen-image/bench/results/s24-*, s25-*): 1024² ~7 GB, 2048² / 2752x1536 / 2400x1792 8.2-9.0 GB, reference edits: see
+# the report -> capacity 11000 fits beside Flash-Next (71000 + 11000 < pool 83192).
 macros:
   "qwen-image-cmd": >
-    @PYTHON@ @ROOT@/qwen-image/server.py --port ${PORT}
+    ${env.LLM_SERVING}/.venv/bin/python ${env.LLM_SERVING}/services/image/qwen-image/server.py
+    --port ${PORT}
 
 models:
   "qwen-image-2.1-turbo":
     name: "Qwen Image 2.1 Turbo"
     description: "8 steps, W8A8: 1024² ~9 s, 2048² ~43 s; edits, masks, transparent PNG"
-    cmd: ${qwen-image-cmd} --turbo --model @MODELS@/qwen-image-2.1/turbo --model-id qwen-image-2.1-turbo
-    env:
+    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen-image-2.1 -- ${qwen-image-cmd} --turbo --model ${env.LLM_MODELS}/qwen-image-2.1/turbo --model-id qwen-image-2.1-turbo
+    env: &qwen-image-env-turbo
       - "MFLUX_ZERO_COPY=1"
       - "MFLUX_ZERO_COPY_STREAM=1"
-      - "MFLUX_QWEN21_W8A8=@MODELS@/qwen-image-2.1/w8a8/turbo"
+      - "MFLUX_QWEN21_W8A8=${env.LLM_MODELS}/qwen-image-2.1/w8a8/turbo"
+      - "MFLUX_QWEN21_TE_Q8=${env.LLM_MODELS}/qwen-image-2.1/te-q8"
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
       - "QWEN_IMAGE_CACHE_MB=6144"
       - "QWEN_IMAGE_REF_CACHE_MB=2048"
-      - "MFLUX_QWEN21_TE_Q8=@MODELS@/qwen-image-2.1/te-q8"
-    capabilities:
+    capabilities: &qwen-image-caps
       in: [text, image]
       out: [image]
     checkEndpoint: /health
     ttl: 600
-    capacities:
+    capacities: &qwen-image-cap
       gpu: 11000
     evict_cost: 0
 
   "qwen-image-2.1-turbo-pe":
     name: "Qwen Image 2.1 Turbo + prompt enhance"
     description: "As qwen-image-2.1-turbo, but short prompts are first rewritten by the chat model with the official Qwen system prompts (+~30 s; see revised_prompt)"
-    cmd: ${qwen-image-cmd} --turbo --model @MODELS@/qwen-image-2.1/turbo --model-id qwen-image-2.1-turbo-pe
+    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen-image-2.1 -- ${qwen-image-cmd} --turbo --model ${env.LLM_MODELS}/qwen-image-2.1/turbo --model-id qwen-image-2.1-turbo-pe
     env:
       - "MFLUX_ZERO_COPY=1"
       - "MFLUX_ZERO_COPY_STREAM=1"
-      - "MFLUX_QWEN21_W8A8=@MODELS@/qwen-image-2.1/w8a8/turbo"
+      - "MFLUX_QWEN21_W8A8=${env.LLM_MODELS}/qwen-image-2.1/w8a8/turbo"
+      - "MFLUX_QWEN21_TE_Q8=${env.LLM_MODELS}/qwen-image-2.1/te-q8"
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
       - "QWEN_IMAGE_CACHE_MB=6144"
       - "QWEN_IMAGE_REF_CACHE_MB=2048"
-      - "MFLUX_QWEN21_TE_Q8=@MODELS@/qwen-image-2.1/te-q8"
-      - "QWEN_IMAGE_DEFAULT_ENHANCE=llm"   # needs the system prompts, see docs/qwen-image.md
-    capabilities:
-      in: [text, image]
-      out: [image]
+      - "QWEN_IMAGE_DEFAULT_ENHANCE=llm"   # judged better than no rewrite on 32 prompts (reports/qwen-image.md section 8)
+    capabilities: *qwen-image-caps
     checkEndpoint: /health
     ttl: 600
-    capacities:
-      gpu: 11000
+    capacities: *qwen-image-cap
     evict_cost: 0
 
   "qwen-image-2.1":
     name: "Qwen Image 2.1"
     description: "40 steps, W8A8, best quality and negative prompts: 1024² ~28 s"
-    cmd: ${qwen-image-cmd} --model @MODELS@/qwen-image-2.1/base --model-id qwen-image-2.1
+    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen-image-2.1 -- ${qwen-image-cmd} --model ${env.LLM_MODELS}/qwen-image-2.1/base --model-id qwen-image-2.1
     env:
       - "MFLUX_ZERO_COPY=1"
       - "MFLUX_ZERO_COPY_STREAM=1"
-      - "MFLUX_QWEN21_W8A8=@MODELS@/qwen-image-2.1/w8a8/base"
+      - "MFLUX_QWEN21_W8A8=${env.LLM_MODELS}/qwen-image-2.1/w8a8/base"
+      - "MFLUX_QWEN21_TE_Q8=${env.LLM_MODELS}/qwen-image-2.1/te-q8"
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
       - "QWEN_IMAGE_CACHE_MB=6144"
       - "QWEN_IMAGE_REF_CACHE_MB=2048"
-      - "MFLUX_QWEN21_TE_Q8=@MODELS@/qwen-image-2.1/te-q8"
-    capabilities:
-      in: [text, image]
-      out: [image]
+    capabilities: *qwen-image-caps
     checkEndpoint: /health
     ttl: 600
-    capacities:
-      gpu: 11000
+    capacities: *qwen-image-cap
     evict_cost: 0

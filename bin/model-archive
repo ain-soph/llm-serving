@@ -1,0 +1,276 @@
+#!/usr/bin/python3
+"""Stage cold model weights on SSD before starting a loader."""
+
+import argparse
+from contextlib import contextmanager
+import fcntl
+import hashlib
+import inspect
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import stat
+import subprocess
+import sys
+
+
+MODELS = Path.home() / "models"
+STATE = MODELS / ".model-archive"
+HOST = "mac"
+ARCHIVES = {volume: Path("/Volumes") / volume / "model-archive" for volume in ("HDD", "SSD")}
+SSH = ["/usr/bin/ssh", "-oBatchMode=yes", "-oConnectTimeout=10",
+       "-oServerAliveInterval=15", "-oServerAliveCountMax=3"]
+
+
+def snapshot(root):
+    """Record relative paths, file sizes, SHA-256 and link relationships."""
+    if os.path.islink(root) or not os.path.isdir(root):
+        raise ValueError(f"Expected a model directory at {root}")
+    root = os.path.realpath(root)
+    entries, hardlinks = {}, {}
+
+    def read_dir(directory):
+        for item in sorted(os.scandir(directory), key=lambda entry: entry.name):
+            name = os.path.relpath(item.path, root)
+            mode = item.stat(follow_symlinks=False).st_mode
+            if stat.S_ISLNK(mode):
+                target = os.readlink(item.path)
+                resolved = os.path.realpath(item.path)
+                if (os.path.isabs(target) or os.path.commonpath([resolved, root]) != root
+                        or not os.path.exists(resolved)):
+                    raise ValueError(f"Link must resolve within the model directory: {name}")
+                entries[name] = ["link", target]
+            elif stat.S_ISDIR(mode):
+                entries[name] = ["dir"]
+                read_dir(item.path)
+            elif stat.S_ISREG(mode):
+                with open(item.path, "rb") as stream:
+                    before = os.fstat(stream.fileno())
+                    identity = before.st_dev, before.st_ino
+                    if identity in hardlinks:
+                        entries[name] = ["hardlink", hardlinks[identity]]
+                        continue
+                    digest = hashlib.sha256()
+                    for block in iter(lambda: stream.read(4 * 1024 * 1024), b""):
+                        digest.update(block)
+                    after = os.fstat(stream.fileno())
+                    if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                            after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                        raise ValueError(f"File changed during verification: {name}")
+                entries[name] = ["file", before.st_size, digest.hexdigest()]
+                if before.st_nlink > 1:
+                    hardlinks[identity] = name
+            else:
+                raise ValueError(f"Unsupported file type: {name}")
+
+    read_dir(root)
+    if not any(entry[0] == "file" for entry in entries.values()):
+        raise ValueError(f"No files at {root}")
+    return entries
+
+
+def remote_python(code, *args, capture=False):
+    command = shlex.join(["/usr/bin/python3", "-", *map(str, args)])
+    return subprocess.run([*SSH, HOST, command], input=code, text=True, check=True,
+                          stdout=subprocess.PIPE if capture else None).stdout
+
+
+def remote_snapshot(path):
+    code = "import hashlib, json, os, stat, sys\n" + inspect.getsource(snapshot)
+    code += """
+root = os.path.dirname(sys.argv[1])
+if not os.path.ismount(os.path.dirname(root)) or os.path.islink(root):
+    raise SystemExit('Archive volume is unavailable')
+print(json.dumps(snapshot(sys.argv[1])))
+"""
+    return json.loads(remote_python(code, path, capture=True))
+
+
+def transfer(source, target):
+    subprocess.run(["/usr/bin/rsync", "-aHc", "--partial", "-e", shlex.join(SSH),
+                    str(source) + "/", str(target) + "/"], check=True)
+
+
+def verify(expected, actual):
+    if expected != actual:
+        changed = sorted(name for name in expected.keys() | actual.keys()
+                         if expected.get(name) != actual.get(name))
+        raise ValueError(f"Verification failed for {len(changed)} entries: {', '.join(changed[:5])}")
+
+
+@contextmanager
+def lock(name, purpose, flags=fcntl.LOCK_EX):
+    with (STATE / f"{name}.{purpose}.lock").open("a") as handle:
+        try:
+            fcntl.flock(handle, flags)
+        except BlockingIOError as exc:
+            raise ValueError(f"Model is in use: {name}") from exc
+        yield handle
+
+
+def write_shortcut(path, archived, entries):
+    content = {"archive": f"{HOST}:{archived}", "entries": entries}
+    if path.is_symlink():
+        raise ValueError(f"Shortcut path is already a symlink: {path}")
+    if path.exists():
+        previous = json.loads(path.read_text())
+        if previous == content:
+            return
+        if previous["entries"] != entries:
+            raise ValueError(f"Existing shortcut points to different contents: {path}")
+    pending = STATE / (path.name + ".tmp")
+    pending.write_text(json.dumps(content, indent=2, sort_keys=True) + "\n")
+    pending.replace(path)
+
+
+def read_shortcut(path, model):
+    manifest = json.loads(path.read_text())
+    for root in ARCHIVES.values():
+        archived = root / model
+        if manifest["archive"] == f"{HOST}:{archived}":
+            return archived, manifest["entries"]
+    raise ValueError(f"Unexpected archive path in {path}")
+
+
+def archive_destination(model, shortcut, volume):
+    if volume is not None:
+        return ARCHIVES[volume] / model
+    if shortcut.exists():
+        archived, _ = read_shortcut(shortcut, model)
+        return archived
+    return ARCHIVES["SSD"] / model
+
+
+def require_unused(path):
+    result = subprocess.run(["/usr/sbin/lsof", "-nP", "+D", str(path)],
+                            capture_output=True, text=True)
+    if result.returncode != 1 or result.stdout or result.stderr:
+        raise ValueError(f"Could not establish that {path} is idle\n{result.stdout}{result.stderr}")
+
+
+def archive(local, archived, shortcut, evict):
+    if evict:
+        require_unused(local)
+    print(f"Verifying local files in {local}", file=sys.stderr)
+    entries = snapshot(local)
+    root = archived.parent
+    staging = root / f".upload-{local.name}"
+    exists = remote_python("""
+import os, sys
+root, destination, staging = sys.argv[1:]
+if not os.path.ismount(os.path.dirname(root)) or os.path.islink(root):
+    raise SystemExit('Archive volume is unavailable')
+os.makedirs(root, exist_ok=True)
+if os.path.lexists(destination):
+    print('yes')
+else:
+    os.makedirs(staging, exist_ok=True)
+    if os.path.islink(staging):
+        raise SystemExit('Archive staging path is a symlink')
+    print('no')
+""", root, archived, staging, capture=True).strip()
+    if exists == "no":
+        print(f"Uploading {local.name} to {HOST}:{root}", file=sys.stderr)
+        transfer(local, f"{HOST}:{staging}")
+        verify(entries, remote_snapshot(staging))
+        remote_python("""
+import os, sys
+source, destination = sys.argv[1:]
+if os.path.lexists(destination):
+    raise SystemExit('Archive destination already exists')
+os.rename(source, destination)
+""", staging, archived)
+    else:
+        verify(entries, remote_snapshot(archived))
+    write_shortcut(shortcut, archived, entries)
+    if evict:
+        verify(entries, snapshot(local))
+        require_unused(local)
+        parked = STATE / f"{local.name}.evicting"
+        if os.path.lexists(parked):
+            raise ValueError(f"Previous eviction needs inspection: {parked}")
+        local.rename(parked)
+        shutil.rmtree(parked)
+
+
+def restore(local, shortcut):
+    if local.is_dir():
+        return
+    if os.path.lexists(local):
+        raise ValueError(f"Model path already exists: {local}")
+    archived, entries = read_shortcut(shortcut, local.name)
+    staging = STATE / f"{local.name}.restoring"
+    if not staging.exists():
+        required = sum(entry[1] for entry in entries.values() if entry[0] == "file")
+        available = shutil.disk_usage(STATE).free
+        if required > available:
+            raise ValueError(f"Restoring {local.name} needs {required / 2**30:.1f} GiB, "
+                             f"but only {available / 2**30:.1f} GiB is available")
+    staging.mkdir(exist_ok=True)
+    if staging.is_symlink():
+        raise ValueError(f"Restore staging path is a symlink: {staging}")
+    print(f"Restoring {local.name} from {HOST}:{archived.parent}", file=sys.stderr)
+    transfer(f"{HOST}:{archived}", staging)
+    verify(entries, snapshot(staging))
+    if os.path.lexists(local):
+        raise ValueError(f"Model path appeared during restore: {local}")
+    staging.rename(local)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="action", required=True)
+    for name, help_text in (
+        ("register", "create a shortcut for an existing remote archive"),
+        ("archive", "copy and verify a local model on the archive volume"),
+        ("restore", "restore a model to its original path"),
+        ("run", "restore a model if needed and start a command"),
+    ):
+        sub = commands.add_parser(name, help=help_text)
+        sub.add_argument("model", help="model directory name under ~/models")
+        if name in ("archive", "register"):
+            sub.add_argument("--volume", choices=ARCHIVES,
+                             help="archive volume on mac (reuse shortcut, otherwise SSD)")
+        if name == "archive":
+            sub.add_argument("--evict", action="store_true", help="remove the verified local copy")
+        if name == "run":
+            sub.add_argument("command", nargs=argparse.REMAINDER, help="command to execute after --")
+    args = parser.parse_args()
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]*", args.model):
+        parser.error("model must be a directory name, without any slashes")
+    local = MODELS / args.model
+    shortcut = MODELS / f"{args.model}.archive"
+    STATE.mkdir(mode=0o700, exist_ok=True)
+
+    if args.action == "run":
+        command = args.command[1:] if args.command[:1] == ["--"] else args.command
+        if not command:
+            parser.error("run requires a command")
+        with lock(args.model, "use", fcntl.LOCK_SH) as lease:
+            with lock(args.model, "transfer"):
+                restore(local, shortcut)
+            os.set_inheritable(lease.fileno(), True)
+            os.execvp(command[0], command)
+    elif args.action == "archive":
+        with lock(args.model, "use", fcntl.LOCK_EX | fcntl.LOCK_NB), lock(args.model, "transfer"):
+            archived = archive_destination(args.model, shortcut, args.volume)
+            archive(local, archived, shortcut, args.evict)
+        print(shortcut)
+    else:
+        with lock(args.model, "transfer"):
+            if args.action == "register":
+                archived = archive_destination(args.model, shortcut, args.volume)
+                write_shortcut(shortcut, archived, remote_snapshot(archived))
+            else:
+                restore(local, shortcut)
+        print(shortcut if args.action == "register" else local)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
+        sys.exit(f"model-archive: {error}")

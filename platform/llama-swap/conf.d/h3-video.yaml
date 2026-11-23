@@ -1,22 +1,36 @@
-# MiniMax-H3 video + stereo audio via the h3.c fork (native.lock.json). One entry since 2026-11-17: the packed INT8
-# DiT is page-aligned (tools/align_int8_pack.py in h3.c) and mapped zero-copy, so the resident mode loads in 0.33 s and
-# renders as fast as the former SSD-streaming entry (byte-identical output); the wrapper still accepts the old
-# minimax-h3-video-stream name as an alias. A render keeps the GPU busy for minutes, so it takes the whole pool.
+# MiniMax-H3 video + synchronized stereo audio (FL2VA checkpoint) via h3.c (github.com/ain-soph/h3.c, branch serving),
+# wrapped by ~/llm-serving/services/video/h3-video/server.py (owner: h3video agent; reports ~/llm-serving/reports/h3-video.md,
+# h3-optimization.md).
+# One entry since 2026-11-17: the packed INT8 DiT is page-aligned and mapped zero-copy, so the resident mode loads in
+# 0.33 s and renders as fast as the old SSD-streaming mode (512x512 56f 24 s, 1344x768 124f 365 s, byte-identical);
+# the former minimax-h3-video-stream entry is gone and the wrapper accepts that name as an alias.
+#   POST /upstream/minimax-h3-video/v1/videos
+# Idle, the wrapper holds no model memory (each render is a child h3 process); capacities are measured render peaks.
+# Capacity (2026-11-15): ${env.LSW_GPU_EXCLUSIVE} (bin/gpu-pool: the whole pool) on purpose: a render keeps the GPU busy
+# for minutes, so the user chose to run it alone (chat, image and ASR models are unloaded).
+# Max render: steps <= 20 and <=124 frames above 512x512 => ~16 min worst case; public proxy timeout 1200 s.
+# A POST while a render runs gets 429.
 models:
   "minimax-h3-video":
     name: "MiniMax H3 Video"
     description: "Text/first/last-frame to video with stereo audio; POST /upstream/minimax-h3-video/v1/videos"
-    capabilities:
-      in: [text, image]
-      out: [video]
-      disableAuto: true
+    capabilities:          # Video section of the llama-swap UI (without it the model is listed as Chat)
+      in: [text, image]    # prompt + optional first/last frame
+      out: [video]         # MP4 with a stereo audio track; not declared as audio so speech UIs do not list it
+      disableAuto: true    # not a llama-server: no capability probing
     ttl: 120
     checkEndpoint: /health
     cmd: >
-      @PYTHON@ @ROOT@/h3-video/server.py
-      --port ${PORT} --models @MODELS@/minimax-h3 --out-dir @STATE@/media/videos
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model minimax-h3 --model minimax-h3-turbo --model minimax-h3-image -- ${env.LLM_SERVING}/.venv/bin/python ${env.LLM_SERVING}/services/video/h3-video/server.py
+      --port ${PORT} --models ${env.LLM_MODELS}/minimax-h3
       --model-id minimax-h3-video --mode resident
+    env:
+      - "H3_VIDEO_SHARE_BASE=${env.H3_VIDEO_SHARE_BASE}"
+      - "H3_VIDEO_FETCH_HOSTS=${env.H3_VIDEO_FETCH_HOSTS}"
     capacities:
-      gpu: ${env.LSW_GPU_EXCLUSIVE}
+      gpu: ${env.LSW_GPU_EXCLUSIVE}            # EXCLUSIVE by choice (2026-11-15): a render saturates the GPU, so every other model is unloaded.
+                            # Measured need (zero-copy, 2026-11-17): 768p wired +20.4 GB
     evict_cost: 0
 
+  # The read-only reads (/v1/videos GET, /media) are served by the standalone LaunchAgent com.local.h3-video-files
+  # (127.0.0.1:8090) behind the Caddy gateway since 2026-11-16; it was the llama-swap model minimax-h3-video-files.

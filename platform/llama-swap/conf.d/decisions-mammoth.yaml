@@ -1,19 +1,27 @@
-# Base Labs mammoth-1 (MIT; Qwen3.5-27B post-trained for calibrated decisions; same architecture, readout and
-# serve.patch as elephant-1), SystemOne protocol (POST /v1/systemone). Same MLX port as elephant-1
-# (decisions/jev/jev_mlx.py, OneJev checkout: docs/decisions.md).
-# Text only; state + one question <= 16,384 tokens. MLX cache 4096 MB (a 16K request: 13.9 s instead of 20.0 s
-# with 256 MB). It does not fit next to the chat model, which is unloaded while it runs.
+# Base Labs mammoth-1 (baselabs/mammoth-1, MIT; Qwen3.5-27B post-trained for calibrated decisions; same architecture,
+# readout and serve.patch as elephant-1), SystemOne protocol (POST /v1/systemone, routed by `model`); OpenAI
+# POST /v1/decisions reaches it through the translator (com.local.decisions). Owner: decisions (2026-11-17, agent P).
+# Report: ~/llm-serving/reports/decisions.md. Same MLX port as elephant-1 (decisions/jev/jev_mlx.py). Text only;
+# state + one question <= 16,384 tokens (model card).
+# Capacity = measured peak wired + margin (user 2026-11-17: label the real footprint, no artificial exclusive size).
+# MLX cache 4096 MB (cleared after every request): a 16K request takes 13.9 s instead of 20.0 s with the default
+# 256 MB (results/p4-*). It does not fit next to Flash-Next (71000): llama-swap unloads Flash-Next when this loads (switch costs in the report).
 models:
-  # Precision per projection class: W8A8 on every class that gets faster, except the linear-attention out_proj
-  # (2-5% of the speedup, most of the error) at 8-bit weight-only; in_proj_a/b bf16. max |dp| 0.0066 vs the official
-  # bf16 reference (all-W8A8 0.021, all-8-bit 0.0062); 1.45x short / 1.59x at 16K over all-8-bit.
-  # Weights: the pre-quantized copy written by decisions/jev/save_mix.py (docs/decisions.md), mapped zero-copy.
+  # One entry (2026-11-18): precision chosen per projection class (decisions/jev/results/p1b-*, p6-*, p7-*): W8A8 (int8
+  # weights + int8 activations, INT8 TensorOps GEMM) on MLP gate/up/down, linear-attention in_proj_qkv/z and full-
+  # attention q/k/v/o; the linear-attention out_proj at 8-bit weight-only (2-5% of the speed-up, the main W8A8 error
+  # source); in_proj_a/b bf16. max |dp| vs the official bf16 reference 0.0066 (all-8-bit-weight-only 0.0062, all-W8A8
+  # 0.021), 1.45x / 1.59x the all-8-bit speed (short / 16K). Stored pre-quantized (decisions/jev/save_mix.py) and mapped
+  # zero-copy; replaces the former 8-bit-only and "-int8" entries.
+  # Rebuild: hf download baselabs/mammoth-1, save_mix.py --quant w8a8 --w8a8-skip out_proj.
+  # Weights archived 2026-11-22 to mac:/Volumes/SSD/model-archive/mammoth-1-mix8 (manifest ~/models/mammoth-1-mix8.archive); archive-restore copies them back on demand when >100 GiB stays free, else answers 503.
   "mammoth-1":
     name: "Base Labs mammoth-1 (decisions, 27B)"
-    description: "Decision model (27B): predicate / choice / score probabilities, text, up to 16K tokens; unloads the chat model"
+    description: "Decision model (27B): predicate / choice / score probabilities, text, up to 16K tokens; unloads Flash-Next (weights archived, restored on demand)"
     cmd: >
-      @PYTHON@ @ROOT@/decisions/jev/server.py
-      --model @MODELS@/mammoth-1-mix8 --model-id mammoth-1 --dtype bfloat16 --cache-mb 4096
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model mammoth-1-mix8 -- ${env.LLM_SERVING}/.venv/bin/python
+      ${env.LLM_SERVING}/services/decisions/jev/server.py
+      --model ${env.LLM_MODELS}/mammoth-1-mix8 --model-id mammoth-1 --dtype bfloat16 --cache-mb 4096
       --host 127.0.0.1 --port ${PORT}
     capabilities:
       in: [text]
@@ -21,5 +29,5 @@ models:
     checkEndpoint: /health
     ttl: 600
     capacities:
-      gpu: 28500            # wired peak +27458 MiB at the 16,384-token limit
+      gpu: 28500             # peak wired +27458 MiB at the 16,384-token limit, direct server, 4096 MB cache (dq1-1118-0056)
     evict_cost: 0

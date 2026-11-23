@@ -4,7 +4,7 @@
 # videos/images (/v1/videos GET, /media/*), which go to the standalone read-only server com.local.h3-video-files on
 # 127.0.0.1:8090 (since 2026-11-16; it used to be the llama-swap model minimax-h3-video-files). API keys stay with
 # llama-swap: renders are /upstream paths, reads ask llama-swap first (forward_auth on /v1/models).
-# Client IPs: only the Mac mini (SWAG, @TRUSTED_PROXY@) is trusted; its X-Real-IP (SWAG's real_ip result) becomes the
+# Client IPs: only the Mac mini (SWAG, {$LLM_TRUSTED_PROXY}) is trusted; its X-Real-IP (SWAG's real_ip result) becomes the
 # client IP, and X-Forwarded-For is rewritten to that one address, which is what llama-swap's activity log records.
 # LaunchAgent: com.local.llm-gateway.
 # OpenAI Decisions API (2026-11-16): llama-swap routes the SystemOne protocol (/v1/systemone) but not /v1/decisions, so
@@ -18,11 +18,11 @@
 	auto_https off
 	persist_config off
 	servers {
-		trusted_proxies static @TRUSTED_PROXY@/32
+		trusted_proxies static {$LLM_TRUSTED_PROXY}/32
 		client_ip_headers X-Real-IP
 	}
 	log {
-		output file @SERVING_ROOT@/platform/gateway/logs/caddy.log {
+		output file {$LLM_SERVING}/platform/gateway/logs/caddy.log {
 			roll_size 20MiB
 			roll_keep 3
 		}

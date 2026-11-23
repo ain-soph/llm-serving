@@ -1,34 +1,65 @@
-# Flash-Next via ain-soph/Strata serving at 82d63e19e (upstream main 6e38f588a + our commits).
+# Flash-Next via ain-soph/Strata serving at 7a4bbc527 (upstream main 73d4f4196 = v0.2.20+13, + our 9; release worktree
+# serving-20261123, 2026-11-23). Upstream defaults kept (user 2026-11-23): a request with no sampling field is decoded
+# greedily with MTP drafts (d35353903; before: the model card's sampling); the server adds --conversation-cache-min-tokens 1024
+# (#6463); a 'model' naming another Strata catalogue id gets 404 model_not_found (#6621; our IDs are aliases in the configs).
+# Rollback: .backup/platform/llama-swap/conf.d/strata.yaml.20261123-pre-rebase (+ configs/*.20261123-pre-rebase).
 # 262144 tokens per slot, two physical states, Q2_0 MTP, INT8 KV, 1024 MiB conversation cache.
-# Compact dual-slot qualification on M5 Ultra peaked at +67695 MiB wired; 82d63e19e peaked at +65880..+66763 MiB (2026-11-21/22).
+# Compact dual-slot qualification on M5 Ultra peaked at +67695 MiB wired; serving-next peaked at +66763 (2026-11-21).
 # Reserve 69500 MiB for either weight variant. See reports/strata-compact-dual-20261119.md.
+# Local worker alias (2026-11-23, user): "<id>:worker" is the same loaded model for agents/local-worker (Claude Code
+# /v1/messages, Codex /v1/responses, both always ask for thinking). setParamsByID "?" keys fill the model card's
+# thinking sampling (Strata MODEL_CARD_SAMPLING qwen4exp "thinking": 1.0 / 0.95 / 20) only where the request has no value;
+# any missing field (presence_penalty on a non-thinking turn) the server still takes from the card. The plain IDs are
+# unchanged (no sampling field = greedy). useModelName: Strata 404s an unknown qwen3.8-flash-next* name (#6621), so
+# the alias reaches it as the plain ID (a no-op for requests to the plain ID). Not listed in /v1/models.
 models:
   "qwen3.8-flash-next":
     name: "Qwen3.8 Flash-Next"
     description: "AtomicChat AD-4.27 on Strata, 262144 ctx x 2 slots, compact Metal, MTP, Strata vision tower"
     cmd: >
-      @SERVING_ROOT@/.venv/bin/python @STRATA_RELEASE@/terminal/serve/server.py
-      --engine strata --config @SERVING_ROOT@/services/text/strata/configs/strata-ad427-c262k-p2-compact.json
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model strata-ad427 --model strata-mtp -- ${env.LLM_SERVING}/.venv/bin/python ${env.STRATA_RELEASE}/terminal/serve/server.py
+      --engine strata --config ${env.LLM_SERVING}/services/text/strata/configs/strata-ad427-c262k-p2-compact.json
       --host 127.0.0.1 --port ${PORT}
     env:
-      - "XDG_CONFIG_HOME=@SERVING_ROOT@/services/text/strata/config"
+      - "XDG_CONFIG_HOME=${env.LLM_SERVING}/services/text/strata/config"
     checkEndpoint: /health
     concurrencyLimit: 64
     capacities:
       gpu: 69500
     evict_cost: 100
+    useModelName: "qwen3.8-flash-next"
+    filters:
+      setParamsByID:
+        "${MODEL_ID}:worker":
+          temperature?: 1.0
+          top_p?: 0.95
+          top_k?: 20
 
+  # Weights archived 2026-11-22 to mac:/Volumes/SSD/model-archive/strata-uncensored (90.3 GiB, manifest
+  # ~/models/strata-uncensored.archive). bin/archive-restore starts the server at once when ~/models/strata-uncensored
+  # is complete; otherwise it copies it back (only if >100 GiB stays free afterwards), verifies SHA-256, then starts.
+  # While copying it reports {"progress"} on /health, which restarts healthCheckTimeout (600 s) on every change; when it
+  # cannot restore it answers the request with a 503 error naming the space and the manual restore command.
+  # Manual restore: ~/llm-serving/bin/archive-restore strata-uncensored
   "qwen3.8-flash-next-uncensored":
     name: "Qwen3.8 Flash-Next Uncensored"
-    description: "Navin AD-4.27 on Strata, 262144 ctx x 2 slots, compact Metal, MTP, Strata vision tower"
+    description: "Navin AD-4.27 on Strata, 262144 ctx x 2 slots, compact Metal, MTP, Strata vision tower (weights archived, restored on demand)"
     cmd: >
-      @SERVING_ROOT@/.venv/bin/python @STRATA_RELEASE@/terminal/serve/server.py
-      --engine strata --config @SERVING_ROOT@/services/text/strata/configs/strata-uncensored-c262k-p2-compact.json
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model strata-uncensored --model strata-mtp --
+      ${env.LLM_SERVING}/.venv/bin/python ${env.STRATA_RELEASE}/terminal/serve/server.py
+      --engine strata --config ${env.LLM_SERVING}/services/text/strata/configs/strata-uncensored-c262k-p2-compact.json
       --host 127.0.0.1 --port ${PORT}
     env:
-      - "XDG_CONFIG_HOME=@SERVING_ROOT@/services/text/strata/config"
+      - "XDG_CONFIG_HOME=${env.LLM_SERVING}/services/text/strata/config"
     checkEndpoint: /health
     concurrencyLimit: 64
     capacities:
       gpu: 69500
     evict_cost: 50
+    useModelName: "qwen3.8-flash-next-uncensored"
+    filters:
+      setParamsByID:
+        "${MODEL_ID}:worker":
+          temperature?: 1.0
+          top_p?: 0.95
+          top_k?: 20

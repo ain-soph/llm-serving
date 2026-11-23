@@ -8,6 +8,7 @@
 		<string>/opt/homebrew/bin/caddy</string><string>run</string>
 		<string>--config</string><string>@SERVING_ROOT@/platform/gateway/Caddyfile</string>
 		<string>--adapter</string><string>caddyfile</string>
+		<string>--envfile</string><string>@SERVING_ROOT@/.local/serving.env</string>
 	</array>
 	<key>EnvironmentVariables</key>
 	<dict>

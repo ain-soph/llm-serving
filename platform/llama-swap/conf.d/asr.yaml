@@ -1,5 +1,12 @@
-# nemotron-3.5-transcribe and sov-transcribe-1 were retired 2026-11-18 (code kept: asr/sov, tools/nemo.sh, docs/sov.md).
+# Speech-to-text models (agent asr). Clients POST multipart to /v1/audio/transcriptions with model=<id>.
+# Code and launch scripts: ~/llm-serving/services/asr/, weights: ~/models/. Report: ~/llm-serving/reports/asr.md.
+# capacities.gpu = measured GPU-wired peak in MB plus startup/format margin (see the report).
+# Retired 2026-11-18 (user): nemotron-3.5-transcribe, sov-transcribe-1 -- weights deleted, code kept
+# (asr/nemo-speech, asr/sov); re-add steps in reports/asr.md "已下线，重新上线方法".
 models:
+  # Whisper large-v3 (not turbo), MLX, word timestamps, allocator cache <=512 MiB. Stored pre-quantized (2026-11-18, PA2):
+  # decoder, cross-attention k/v and the tied token embedding in 8-bit weights (W8A16), encoder float16, mapped zero-copy;
+  # 3.5 % faster, errors unchanged, weights 3.1 -> 2.3 GB.
   "whisper-large-v3":
     name: "Whisper large-v3"
     capabilities:
@@ -7,18 +14,24 @@ models:
       out: [text]
       disableAuto: true
     concurrencyLimit: 4
-    cmd: @ROOT@/tools/whisper.sh ${PORT}
+    env:
+      - "MLX_ZERO_COPY_LOAD=1"
+    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model whisper-large-v3-q8 -- ${env.LLM_SERVING}/services/asr/whisper/serve-mlx.sh ${PORT} --model ${env.LLM_MODELS}/whisper-large-v3-q8
     checkEndpoint: /health
     ttl: 600
     capacities:
-      gpu: 6000
+      gpu: 6000             # wired delta peak 4545 MiB (~4.8 GB), plus margin
     evict_cost: 10
 
-  # Runtime: mlx-qwen3-asr on the original BF16 checkpoints (cast to float16 at load). The production host runs
-  # pre-quantized 8-bit weights with float16 activations on mlx-audio instead: add
-  # "--backend mlx-audio --fast --batch 8" there (4.5-10 % faster on every test set, 2.3-2.9x on 12-16 min audio,
-  # same WER / CER). Not used here: mlx-audio keeps the stored dtype, and BF16 activations are much slower on
-  # short files.
+  # Qwen3-ASR-1.7B (largest open Qwen3-ASR) via mlx-qwen3-asr + Qwen3-ForcedAligner-0.6B for timestamps. Both stored
+  # pre-quantized (2026-11-18, agent PA2, reports/asr.md "精度复查"): every linear layer, lm_head and the token embedding
+  # in 8-bit weights (W8A16, group 32), float16 activations, mapped zero-copy. vs the old float16 entry: 1.27-1.31x
+  # faster, WER / CER unchanged, word timestamps 0.1-0.2 % moved by one 80 ms step; weights 6.1 -> 3.5 GB.
+  # Runtime since 2026-11-22: mlx-audio (ain-soph/mlx-audio serving fc3820a) through mlxaudio_engine.py, --fast (one-pass
+  # prefill, pipelined decode; 4.5-10 % faster than mlx-qwen3-asr on every test set, same WER / CER, word timestamps
+  # p95 <= 62 ms) and --batch 8 (chunks of one long request decoded together: 2.3-2.9x on 12-16 min audio). Rollback:
+  # drop "--backend mlx-audio --fast --batch 8" (mlx-qwen3-asr stays installed). Evaluation:
+  # services/asr/eval/qwen3-mlxaudio-20261121/, reports/asr.md.
   "qwen3-asr-1.7b":
     name: "Qwen3-ASR 1.7B"
     capabilities:
@@ -26,29 +39,15 @@ models:
       out: [text]
       disableAuto: true
     concurrencyLimit: 4
+    env:
+      - "MLX_ZERO_COPY_LOAD=1"
     cmd: >
-      @PYTHON@
-      @ROOT@/asr/qwen3-asr-mlx/server.py --port ${PORT} --model-id qwen3-asr-1.7b --model @MODELS@/qwen3-asr-1.7b --aligner @MODELS@/qwen3-forcedaligner-0.6b
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen3-asr-1.7b-q8 --model qwen3-forcedaligner-0.6b-q8 -- ${env.LLM_SERVING}/.venv/bin/python
+      ${env.LLM_SERVING}/services/asr/qwen3-asr-mlx/server.py --port ${PORT} --model-id qwen3-asr-1.7b
+      --model ${env.LLM_MODELS}/qwen3-asr-1.7b-q8 --aligner ${env.LLM_MODELS}/qwen3-forcedaligner-0.6b-q8
+      --backend mlx-audio --fast --batch 8
     checkEndpoint: /health
     ttl: 600
     capacities:
-      gpu: 10000
-    evict_cost: 10
-
-  # Same model with the text decoder and lm_head in 8-bit weights + float16 activations (W8A16, --q8, converted at
-  # load): 1.27-1.31x faster end to end, same error rates; the audio encoder stays float16. The default stays exact.
-  "qwen3-asr-1.7b-int8":
-    name: "Qwen3-ASR 1.7B (8-bit decoder, faster)"
-    capabilities:
-      in: [audio]
-      out: [text]
-      disableAuto: true
-    concurrencyLimit: 4
-    cmd: >
-      @PYTHON@
-      @ROOT@/asr/qwen3-asr-mlx/server.py --port ${PORT} --model-id qwen3-asr-1.7b-int8 --model @MODELS@/qwen3-asr-1.7b --aligner @MODELS@/qwen3-forcedaligner-0.6b --q8
-    checkEndpoint: /health
-    ttl: 600
-    capacities:
-      gpu: 10000            # as the exact entry (MLX peak 3.78 vs 4.59 GB)
+      gpu: 6500            # wired delta peak 4599 MiB (long_en srt with the aligner, 2026-11-18 PA2) + margin; mlx-audio b8: 4011-4462 MiB, MLX peak 4.59 GB
     evict_cost: 10

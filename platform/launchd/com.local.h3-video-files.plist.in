@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Read-only H3 video/media server (2026-11-16): /v1/videos reads (status, MP4) and the /media pages, behind the
+     Caddy gateway (:8080), which checks the API key with llama-swap (forward_auth) first. Not a llama-swap model any
+     more: it loads no weights and must keep serving while llama-swap restarts. Renders stay on minimax-h3-video. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>com.local.h3-video-files</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/homebrew/bin/python3.15</string>
+		<string>@SERVING_ROOT@/services/video/h3-video/server.py</string>
+		<string>--host</string><string>127.0.0.1</string>
+		<string>--port</string><string>8090</string>
+		<string>--models</string><string>@MODELS@/minimax-h3</string>
+		<string>--model-id</string><string>minimax-h3-video</string>
+		<string>--files-only</string>
+	</array>
+	<key>WorkingDirectory</key><string>@SERVING_ROOT@/services/video/h3-video</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>H3_VIDEO_SHARE_BASE</key><string>@SHARE_BASE@</string>
+		<key>H3_VIDEO_FETCH_HOSTS</key><string>@FETCH_HOSTS@</string>
+	</dict>
+	<key>RunAtLoad</key><true/>
+	<key>KeepAlive</key><true/>
+	<key>StandardOutPath</key><string>@SERVING_ROOT@/services/video/h3-video/logs/files-stdout.log</string>
+	<key>StandardErrorPath</key><string>@SERVING_ROOT@/services/video/h3-video/logs/files-stderr.log</string>
+</dict>
+</plist>

@@ -1,22 +1,52 @@
-# Perplexity Decider Flash v1.3 (Apache-2.0; Qwen3.5-4B, noncausal attention + 255-code readout) on MLX behind
-# decisions/decider/server.py: SystemOne protocol, POST /v1/systemone (llama-swap routes it by `model`).
-# The official pplx_decider package (prompts, preprocessing, calibration) is read from the checkpoint's source/ folder
-# (copied into the pre-quantized directory).
-# Not included here: Drex v1.5 (needs nace-ai's llama.cpp branch) and the OpenAI /v1/decisions translator.
+# Decision models (SystemOne protocol: POST /v1/systemone, routed by llama-swap by `model`). The OpenAI Decisions API
+# (POST /v1/decisions) is served by the translator ~/llm-serving/services/decisions/server.py (LaunchAgent com.local.decisions,
+# gateway route), which forwards here as /v1/systemone; every model below is reachable through both.
+# Owner: decisions (2026-11-16). Report: ~/llm-serving/reports/decisions.md.
 models:
-  # One entry: text and images (base64 data URLs). Precision per projection class: W8A8 (int8 weights + int8
-  # activations) on attention q/k/v/o, linear-attention in_proj_qkv / in_proj_z / out_proj and MLP gate/up; down_proj
-  # FP16 (its W8A8 was most of the error for 2-5% of the time); in_proj_a/b and the vision tower FP16 (no speed-up);
-  # FP16 activations. max |dp| 0.0009 text / 0.0003 images vs the float32 reference. Weights: the pre-quantized copy
-  # written by decisions/decider/save_mix.py (docs/decisions.md), mapped zero-copy; the vision tower is mapped on the
-  # first image request, so text-only use never makes it resident. MLX cache 4096 MB during a request (cleared after
-  # it): with 256 MB every layer of a long input re-allocates its buffers (32.6K tokens 14.1 s instead of 5.6 s).
+  # Drex v1.5 (nace-ai, Nace Open RAIL-M; Qwen3.5-9B with a pointer head), Q8_0 GGUF on nace-ai's llama.cpp fork
+  # (branch drex-v2.0 @5ba1949, built unmodified in decisions/llama.cpp-drex; stock llama.cpp lacks the head and
+  # /v1/systemone). -np 2 shares the encoded state across questions; -c 32768 = 16384 tokens per request.
+  # -ub 512 instead of the documented 2048: same answers, long requests ~8% slower, peak wired 12.5 -> 11.0 GiB so it
+  # fits beside Flash-Next. Metal answers = CPU answers (max |dp| 0.006).
+  "drex-v1.5":
+    name: "Drex v1.5 (decisions)"
+    description: "Decision model: predicate / choice / score probabilities (text only, up to 16K tokens)"
+    cmd: >
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model drex-v1.5-q8 -- ${env.LLM_SERVING}/services/decisions/llama.cpp-drex/build/bin/llama-server
+      -m ${env.LLM_MODELS}/drex-v1.5-q8/drex-v1.5-Q8_0.gguf
+      --embedding --pooling none -np 2 -c 32768 -b 16384 -ub 512 -ngl 99
+      --host 127.0.0.1 --port ${PORT}
+    capabilities:
+      out: [decisions]
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 12000            # peak wired +11028 MiB (2026-11-16, decisions/drex-mem2.sh)
+    evict_cost: 0
+
+  # Perplexity Decider Flash v1.3 (perplexity-ai/pplx-decider-flash-v1.3 @d06fb3f, Apache 2.0; Qwen3.5-4B, noncausal
+  # full attention + 255-code readout, distilled from the 27B). MLX port of the backbone (decisions/decider/decider_mlx.py,
+  # official pplx_decider for prompts / preprocessing / calibration, mode "separate"). Text and images (base64 data URLs)
+  # in one entry. Long sequences are blocked exactly (linear attention with carried state, MLP per token, attention per query).
+  # One entry (2026-11-18, user: one name per model): precision per class (reports/optimization-audit-20261117.md section 3):
+  # W8A8 (int8 weights + int8 activations, INT8 TensorOps GEMM) on attention q/k/v/o, linear-attention in_proj_qkv /
+  # in_proj_z / out_proj and MLP gate/up; down_proj FP16 (its W8A8 was most of the error for 2-5% of the time);
+  # in_proj_a/b and the vision tower FP16 (no speed-up: vision 0.331 vs 0.332 s on the 0.3-1.1 MP test images);
+  # FP16 activations. vs the official float32 reference: max |dp| 0.0009 text, no answer flips. Stored pre-quantized
+  # (decisions/decider/save_mix.py, ~/models/pplx-decider-flash-mix8) and mapped zero-copy; the vision tower is mapped
+  # on the first image request, so text-only use never makes it resident. Replaces the former FP16 text,
+  # "-multimodal" and "-int8" entries.
+  # MLX cache 4096 MB during a request, cleared after it (2026-11-18, results/dq3-*): with the old 256 MB every layer of a
+  # long input re-allocated its buffers: 32.6K tokens 14.1 -> 5.6 s, 8K 2.0 -> 0.82 s, short and images unchanged;
+  # peak wired +6.9 -> +8.8 GB (same capacity), idle unchanged. 8192 MB gives nothing more (results/bisect-1118).
+  # Weights archived 2026-11-22 to mac:/Volumes/SSD/model-archive/pplx-decider-flash-mix8 (manifest ~/models/pplx-decider-flash-mix8.archive); archive-restore copies them back on demand when >100 GiB stays free, else answers 503.
   "pplx-decider-flash":
     name: "Perplexity Decider Flash v1.3 (decisions)"
-    description: "Decision model (4B): predicate / choice / score probabilities, text and images, up to 32K tokens per question"
+    description: "Decision model (4B): predicate / choice / score probabilities, text and images, up to 32K tokens per question (weights archived, restored on demand)"
     cmd: >
-      @PYTHON@ @ROOT@/decisions/decider/server.py
-      --model @MODELS@/pplx-decider-flash-mix8 --model-id pplx-decider-flash --cache-mb 4096
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model pplx-decider-flash-mix8 -- ${env.LLM_SERVING}/.venv/bin/python
+      ${env.LLM_SERVING}/services/decisions/decider/server.py
+      --model ${env.LLM_MODELS}/pplx-decider-flash-mix8 --model-id pplx-decider-flash --cache-mb 4096
       --host 127.0.0.1 --port ${PORT}
     capabilities:
       in: [text, image]
@@ -24,5 +54,5 @@ models:
     checkEndpoint: /health
     ttl: 1800
     capacities:
-      gpu: 10000            # wired peak +8783 MiB: short cases, 25.6K / 32.6K tokens, images, 4096 MB cache
+      gpu: 10000            # peak wired +8783 MiB: short cases, 25.6K / 32.6K tokens, images, 4096 MB cache (dq3)
     evict_cost: 0

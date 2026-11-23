@@ -8,7 +8,8 @@ name=${1:-}; DIR=$HOME/llm-serving/platform/llama-swap
 # gpu-lock v2: a restart unloads everything and preloads Flash-Next (~70 GB) plus the always-loaded embedding model, so NAME must hold the whole pool
 # (gpu-lock acquire NAME, without MB) and be the only holder.
 H=$HOME/llm-serving/.locks/holders
-eval "$($HOME/llm-serving/bin/gpu-pool --env)"     # LSW_GPU_POOL / LSW_GPU_EXCLUSIVE, as serve.sh exports them
+export LLM_SERVING=${LLM_SERVING:-${0:A:h:h}}
+source $DIR/env.sh     # machine values + LSW_GPU_POOL / LSW_GPU_EXCLUSIVE, as serve.sh exports them
 others=(${${(f)"$(ls $H 2>/dev/null)"}:#$name})
 [[ -f $H/$name ]] || { echo "refusing: $name holds no gpu share (gpu-lock acquire $name, exclusive)"; exit 1; }
 (( $(awk 'NR==1{print $1}' $H/$name) >= LSW_GPU_POOL )) || { echo "refusing: $name holds only $(awk 'NR==1{print $1}' $H/$name) MB; lsw-apply needs an exclusive share (gpu-lock acquire $name without MB)"; exit 1; }

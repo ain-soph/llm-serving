@@ -1,11 +1,16 @@
-"""Restore the serving glue: GPU lock scripts, llama-swap launcher and config, gateway, Strata routes, LaunchAgents.
+"""Install the machine-specific part of the serving deployment: rendered templates, env file, API key.
 
-Files come from serving/ in this checkout (docs/serving-restore.md has the full inventory):
-  verbatim  ~/llm-serving/bin/{gpu-lock,gpu-lock-run,gpu-pool,gpu-top,memguard,lsw-inflight,lsw-apply,gpu-lock-watchdog},
-            ~/llm-serving/platform/llama-swap/{serve,start,stop}.sh
-  template  llama-swap config.yaml and conf.d/strata.yaml, the gateway Caddyfile, the two Strata engine configs and
-            the LaunchAgent plists (@NAME@ placeholders, values from a machine-local JSON file that is never committed)
+This checkout is the deployment: clone it to ~/llm-serving and the scripts, llama-swap config (config.yaml,
+conf.d/*.yaml with ${env.NAME} macros) and the Caddyfile ({$NAME}) are already where they run
+(docs/serving-restore.md). What differs per machine is rendered here from a machine-local values JSON that is
+never committed (default .local/serving-values.json):
+  env       <checkout>/.local/serving.env (mode 0600): LLM_SERVING, LLM_MODELS, STRATA_RELEASE, LLM_TRUSTED_PROXY,
+            H3_VIDEO_SHARE_BASE, H3_VIDEO_FETCH_HOSTS; sourced by platform/llama-swap/env.sh, read by Caddy --envfile
+  template  the two Strata engine configs (services/text/strata/configs/*.json.in -> *.json) and the LaunchAgents
+            (platform/launchd/*.plist.in -> ~/Library/LaunchAgents); the gpu-lock watchdog plist only with --render
   generated ~/llm-serving/platform/llama-swap/.api_key: random, mode 0600, only when absent; never overwritten or printed
+  verbatim  bin/ scripts and the llama-swap / gateway files: "in place" when this checkout is <home>/llm-serving,
+            copied when installing into another home (tests, a second checkout)
 
 A missing file is created. An existing file that differs is only reported unless --update is given; then it is
 copied to <home>/llm-serving/.backup/<relative path>.<time>-install-serving first. --check writes nothing and
@@ -26,43 +31,47 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "serving"
+SOURCE = ROOT
 DEFAULT_VALUES = ROOT / ".local/serving-values.json"
 S, LA = "llm-serving/", "Library/LaunchAgents/"
 KEY = S + "platform/llama-swap/.api_key"
-# destination relative to the target home -> (source relative to serving/, kind, mode)
-FILES = {
-    S + "bin/gpu-lock": ("bin/gpu-lock", "verbatim", 0o755),
-    S + "bin/gpu-lock-run": ("bin/gpu-lock-run", "verbatim", 0o755),
-    S + "bin/gpu-pool": ("bin/gpu-pool", "verbatim", 0o755),
-    S + "bin/gpu-top": ("bin/gpu-top", "verbatim", 0o755),
-    S + "bin/memguard": ("../tools/memguard", "verbatim", 0o755),
-    S + "bin/lsw-inflight": ("bin/lsw-inflight", "verbatim", 0o755),
-    S + "bin/lsw-apply": ("bin/lsw-apply", "verbatim", 0o755),
-    S + "bin/gpu-lock-watchdog": ("bin/gpu-lock-watchdog", "verbatim", 0o755),
-    # The watchdog LaunchAgent stays disabled (user decision 2026-11-15): its plist is kept next to the script,
-    # never in ~/Library/LaunchAgents, where launchd would load it at the next login.
-    S + "bin/com.local.gpu-lock-watchdog.plist.disabled":
-        ("LaunchAgents/com.local.gpu-lock-watchdog.plist", "template", 0o644),
-    S + "platform/llama-swap/serve.sh": ("platform/llama-swap/serve.sh", "verbatim", 0o755),
-    S + "platform/llama-swap/start.sh": ("platform/llama-swap/start.sh", "verbatim", 0o755),
-    S + "platform/llama-swap/stop.sh": ("platform/llama-swap/stop.sh", "verbatim", 0o755),
-    S + "platform/llama-swap/config.yaml": ("platform/llama-swap/config.yaml", "template", 0o644),
-    S + "platform/llama-swap/conf.d/strata.yaml": ("platform/llama-swap/conf.d/strata.yaml", "template", 0o644),
-    S + "platform/gateway/Caddyfile": ("platform/gateway/Caddyfile", "template", 0o644),
-    S + "platform/gateway/com.local.llm-gateway.plist": ("LaunchAgents/com.local.llm-gateway.plist", "template", 0o644),
-    S + "services/text/strata/configs/strata-ad427-c262k-p2-compact.json":
-        ("services/text/strata/configs/strata-ad427-c262k-p2-compact.json", "template", 0o644),
-    S + "services/text/strata/configs/strata-uncensored-c262k-p2-compact.json":
-        ("services/text/strata/configs/strata-uncensored-c262k-p2-compact.json", "template", 0o644),
-    LA + "com.local.llama-server.plist": ("LaunchAgents/com.local.llama-server.plist", "template", 0o644),
-    LA + "com.local.llm-gateway.plist": ("LaunchAgents/com.local.llm-gateway.plist", "template", 0o644),
-}
+ENV_FILE = S + ".local/serving.env"
+SERVING_ENV = """\
+# Written by tools/install_serving.py from .local/serving-values.json; machine-local, never committed.
+LLM_SERVING=@SERVING_ROOT@
+LLM_MODELS=@MODELS@
+STRATA_RELEASE=@STRATA_RELEASE@
+LLM_TRUSTED_PROXY=@TRUSTED_PROXY@
+H3_VIDEO_SHARE_BASE=@SHARE_BASE@
+H3_VIDEO_FETCH_HOSTS=@FETCH_HOSTS@
+"""
+VERBATIM = [f"bin/{n}" for n in ("archive-restore", "gpu-lock", "gpu-lock-run", "gpu-lock-watchdog", "gpu-pool",
+                                 "gpu-top", "health-check", "lsw-apply", "lsw-inflight", "memguard", "model-archive",
+                                 "regress")] \
+    + [f"platform/llama-swap/{n}" for n in ("serve.sh", "start.sh", "stop.sh")]
+VERBATIM_DATA = ["platform/llama-swap/env.sh", "platform/llama-swap/config.yaml", "platform/gateway/Caddyfile"] \
+    + sorted(f"platform/llama-swap/conf.d/{p.name}" for p in (ROOT / "platform/llama-swap/conf.d").glob("*.yaml"))
+STRATA = "services/text/strata/configs/"
+AGENTS = ("llama-server", "llm-gateway", "decisions", "h3-video-files", "health")
+# destination relative to the target home -> (source relative to this checkout, kind, mode)
+FILES = {S + p: (p, "verbatim", 0o755) for p in VERBATIM}
+FILES.update({S + p: (p, "verbatim", 0o644) for p in VERBATIM_DATA})
+FILES.update({S + STRATA + n: (STRATA + n + ".in", "template", 0o644)
+              for n in ("strata-ad427-c262k-p2-compact.json", "strata-uncensored-c262k-p2-compact.json")})
+FILES.update({LA + f"com.local.{n}.plist": (f"platform/launchd/com.local.{n}.plist.in", "template", 0o644)
+              for n in AGENTS})
+FILES[ENV_FILE] = (None, "env", 0o600)
+# Rendered only with --render: the gpu-lock watchdog stays disabled (user decision 2026-11-15), so its plist is never
+# written where launchd would load it.
+RENDER_ONLY = {LA + "com.local.gpu-lock-watchdog.plist": ("platform/launchd/com.local.gpu-lock-watchdog.plist.in",
+                                                           "template", 0o644)}
 PATH_VALUES = ("MODELS", "STRATA_RELEASE", "STRATA_EXE", "STRATA_VISION_EXE")
-VALUE_NAMES = PATH_VALUES + ("TRUSTED_PROXY",)
+VALUE_NAMES = PATH_VALUES + ("TRUSTED_PROXY", "SHARE_BASE", "FETCH_HOSTS")
 PLACEHOLDER = re.compile(r"@([A-Z_]+)@")
-# Values go unquoted into llama-swap `cmd` lines, JSON strings and plists (as in the live files): plain path characters.
+# Values go unquoted into llama-swap `cmd` lines, JSON strings, plists and the env file: plain characters only.
 SAFE_PATH = re.compile(r"/[A-Za-z0-9_./+-]*")
+SAFE_URL = re.compile(r"https?://[A-Za-z0-9.-]+(?::\d+)?(?:/[A-Za-z0-9_./-]*)?")
+SAFE_HOSTS = re.compile(r"(?:[A-Za-z0-9.-]+(?:,[A-Za-z0-9.-]+)*)?")
 
 
 def serving_root(home):
@@ -77,7 +86,7 @@ def default_values(home):
     return {"MODELS": str(Path(home) / "models"), "STRATA_RELEASE": str(release),
             "STRATA_EXE": str(release / "build-metal-serving/strata"),
             "STRATA_VISION_EXE": str(release / "build-vision/bin/strata-vision"),
-            "TRUSTED_PROXY": "127.0.0.1"}
+            "TRUSTED_PROXY": "127.0.0.1", "SHARE_BASE": "http://127.0.0.1:8080", "FETCH_HOSTS": ""}
 
 
 def load_values(home, path=None):
@@ -94,8 +103,18 @@ def load_values(home, path=None):
         raise FileNotFoundError(f"values file not found: {path}")
     out = {}
     for name, value in values.items():
-        if not isinstance(value, str) or not value:
+        if not isinstance(value, str) or (not value and name != "FETCH_HOSTS"):
             raise ValueError(f"{name} must be a non-empty string")
+        if name == "SHARE_BASE":
+            if not SAFE_URL.fullmatch(value):
+                raise ValueError(f"{name} must be an http(s) URL without query or special characters")
+            out[name] = value.rstrip("/")
+            continue
+        if name == "FETCH_HOSTS":
+            if not SAFE_HOSTS.fullmatch(value):
+                raise ValueError(f"{name} must be comma-separated host names")
+            out[name] = value
+            continue
         if name == "TRUSTED_PROXY":
             try:
                 out[name] = str(ipaddress.IPv4Address(value))
@@ -122,15 +141,27 @@ def render_text(text, values):
     return PLACEHOLDER.sub(sub, text)
 
 
-def rendered(values):
-    """{destination relative to home: (bytes, mode)} for every published file."""
+def rendered(values, files=None):
+    """{destination relative to home: (bytes, mode)} for every installed file."""
     out = {}
-    for dest, (src, kind, mode) in FILES.items():
-        data = (SOURCE / src).read_bytes()
-        if kind == "template":
-            data = render_text(data.decode(), values).encode()
+    for dest, (src, kind, mode) in (files or FILES).items():
+        if kind == "env":
+            data = render_text(SERVING_ENV, values).encode()
+        else:
+            data = (SOURCE / src).read_bytes()
+            if kind == "template":
+                data = render_text(data.decode(), values).encode()
         out[dest] = (data, mode)
     return out
+
+
+def in_place(home, rel):
+    """True when the destination is this checkout's own file (the normal case: the checkout is ~/llm-serving)."""
+    src = FILES.get(rel, (None, None, None))[0]
+    if FILES.get(rel, (None, "x"))[1] != "verbatim":
+        return False
+    dest = Path(home) / rel
+    return dest.exists() and dest.resolve() == (SOURCE / src).resolve()
 
 
 def state(path, data, mode):
@@ -199,6 +230,9 @@ def install(home, values, mode="install", update=False, show_diff=False, log=pri
     problems = 0
     for rel, (data, fmode) in rendered(values).items():
         path = home / rel
+        if in_place(home, rel):
+            log(f"in place   {rel}")
+            continue
         s = state(path, data, fmode)
         if s == "unchanged":
             log(f"unchanged  {rel}")
@@ -262,6 +296,8 @@ def doctor(home=None, values_path=None, log=print):
         log(f"WARN serving glue: {e}")
         return
     for rel, (data, fmode) in files.items():
+        if in_place(home, rel):
+            continue
         s = state(home / rel, data, fmode)
         log(("OK" if s == "unchanged" else "WARN") + f" serving ~/{rel}: "
             + ("matches the repo" if s == "unchanged" else s + "; see tools/install_serving.py --check"))
@@ -278,7 +314,7 @@ def main(argv=None):
     g.add_argument("--dry-run", action="store_true", help="print what would change, write nothing")
     g.add_argument("--check", action="store_true", help="write nothing; exit 1 if anything is missing or differs")
     g.add_argument("--render", type=Path, metavar="DIR",
-                   help="only render the templates into DIR (paths relative to home); no scripts, no key")
+                   help="only render the templates and the env file into DIR (paths relative to home); no scripts, no key")
     p.add_argument("--update", action="store_true", help="replace differing files (after a backup)")
     p.add_argument("--diff", action="store_true", help="with --check: show unified diffs of differing files")
     a = p.parse_args(argv)
@@ -288,10 +324,10 @@ def main(argv=None):
     except (OSError, ValueError) as e:
         p.error(str(e))
     if a.render:
-        for rel, (data, fmode) in rendered(values).items():
-            if FILES[rel][1] == "template":
-                write_atomic(a.render / rel, data, fmode)
-                print(f"rendered   {rel}")
+        templates = {rel: v for rel, v in {**FILES, **RENDER_ONLY}.items() if v[1] in ("template", "env")}
+        for rel, (data, fmode) in rendered(values, templates).items():
+            write_atomic(a.render / rel, data, fmode)
+            print(f"rendered   {rel}")
         return 0
     mode = "check" if a.check else "dry-run" if a.dry_run else "install"
     print(f"{mode}: {home}")
