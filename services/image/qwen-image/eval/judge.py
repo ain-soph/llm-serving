@@ -6,7 +6,7 @@ from PIL import Image
 
 base, runs, va, vb = sys.argv[1].rstrip("/"), Path(sys.argv[2]), sys.argv[3], sys.argv[4]
 here = Path(__file__).resolve().parent
-key = (Path(os.environ.get("LLM_API_KEY_FILE") or Path(os.environ.get("LLM_STATE_DIR", str(Path.home() / "Library/Application Support/llm-serving"))) / "api_key")).read_text().strip()
+key = (Path(os.environ.get("LLM_API_KEY_FILE") or Path(__file__).resolve().parents[4] / "platform/llama-swap/.api_key")).read_text().strip()
 MODEL = "qwen3.8-flash-next"
 
 

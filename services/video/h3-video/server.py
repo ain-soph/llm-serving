@@ -12,7 +12,7 @@ Endpoints:
                                    only; the wrapper checks the HMAC (key derived from llama-swap's API key) and expiry.
   GET  /media/{id}                 watch page (player + download, or progress until done); /media/{id}.mp4 the file,
                                    /media/{id}/status JSON. Served by the read-only instance; the gateway in front of
-                                   llama-swap (~/llm-serving/gateway) routes /media and /v1/videos here.
+                                   llama-swap (platform/gateway) routes /media and /v1/videos here.
   Downloads honour Range requests (Safari's video player needs them).
 
 POST /v1/videos fields (JSON values or multipart form fields):
@@ -124,12 +124,12 @@ MODE_BY_MODEL = {"minimax-h3-video": "resident", "minimax-h3-video-stream": "res
 MODEL_BY_MODE = {"resident": "minimax-h3-video", "stream": "minimax-h3-video"}
 MODEL_RE = re.compile(r"(minimax-h3-video(?:-stream)?)(?:-(fast|turbo|standard|best|quality|draft))?")
 LSW_URL = os.environ.get("H3_VIDEO_LSW_URL", "http://127.0.0.1:8080")       # where the hold request goes
-LSW_KEY_FILE = Path(os.environ.get("H3_VIDEO_LSW_KEY_FILE") or Path(os.environ.get("LLM_STATE_DIR", str(Path.home() / "Library/Application Support/llm-serving"))) / "api_key")
+LSW_KEY_FILE = Path(os.environ.get("H3_VIDEO_LSW_KEY_FILE") or HERE.parents[2] / "platform/llama-swap/.api_key")
 FETCH_HOSTS = {h for h in os.environ.get("H3_VIDEO_FETCH_HOSTS", "").split(",") if h}
 FETCH_MAX = 100 << 20     # reference videos can be large
 FFMPEG = os.environ.get("FFMPEG", "ffmpeg")
 FFPROBE = os.environ.get("FFPROBE", "ffprobe")
-MEDIA_IMAGES = Path(os.environ.get("H3_MEDIA_IMAGES") or Path(os.environ.get("LLM_STATE_DIR", str(Path.home() / "Library/Application Support/llm-serving"))) / "media/images")
+MEDIA_IMAGES = Path(os.environ.get("H3_MEDIA_IMAGES") or HERE.parents[2] / "data/media/images")
 SHARE_BASE = os.environ.get("H3_VIDEO_SHARE_BASE", "http://127.0.0.1:8080")
 SHARE_TTL = 30 * 86400    # signed links stay valid 30 days after the render
 DEFAULT_CONTEXT = 3.0     # s of the earlier video an extension re-creates first (H3 Ref2VA): 3 s keeps more of the
@@ -165,7 +165,7 @@ DEFAULT_PRESET = "standard"
 # (h3.c H3_COND_CACHE_DIR, 2026-11-21): a repeated prompt skips the tokenizer and the INT8 text encoder (~2.5-4 s, ~24 GiB
 # read); the output is bit-identical. Keyed by prompt, media content, weight / tokenizer / binary identity and env;
 # LRU-bounded to H3_COND_CACHE_MAX_MB (default 2048). Not under outputs/ (that is pruned and served).
-COND_CACHE_DIR = Path(os.environ.get("H3_VIDEO_COND_CACHE") or Path(os.environ.get("LLM_STATE_DIR", str(Path.home() / "Library/Application Support/llm-serving"))) / "h3-video/cond-cache")
+COND_CACHE_DIR = Path(os.environ.get("H3_VIDEO_COND_CACHE") or HERE / "cond-cache")
 H3_ENV = {"H3_VAE_BF16": "2", "H3_COND_CACHE_DIR": str(COND_CACHE_DIR), "H3_COND_CACHE_MAX_MB": "2048"}
 # Sparse attention (h3.c H3_SPARSE): a query block keeps the key blocks of the frames within t0 and, further away
 # in time, those within a spatial radius that halves as the distance doubles (r0 >> level, at least rmin); sink=1 also

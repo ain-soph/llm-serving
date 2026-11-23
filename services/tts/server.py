@@ -25,7 +25,7 @@ paragraphs and sentences of at most --max-chars characters, generated one after 
 at a time on a single worker thread that owns the MLX model (MLX streams are per thread). `speed` != 1 is applied
 with ffmpeg atempo (pitch kept).
 
-Usage: .venv/bin/python tts/server.py --port PORT --model DIR --model-id ID [--cache-mb 512] [--max-chars 220]
+Usage: .venv/bin/python services/tts/server.py --port PORT --model DIR --model-id ID [--cache-mb 512] [--max-chars 220]
        (the CosyVoice3 branch, --voices / --s3tokenizer, is kept for a possible return; the entry is retired: docs/tts.md)"""
 import argparse
 import base64

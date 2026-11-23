@@ -37,7 +37,7 @@ MIN_SIDE, MAX_SIDE = 256, 2048
 MAX_AREA = 2048 * 2048
 ALIGN = 16  # VAE 8 x patch 2
 OUTPUT_FORMATS = {"png": "PNG", "jpeg": "JPEG", "webp": "WEBP"}
-MEDIA_DIR = Path(os.environ.get("H3_MEDIA_IMAGES") or Path(os.environ.get("LLM_STATE_DIR", str(Path.home() / "Library/Application Support/llm-serving"))) / "media/images")
+MEDIA_DIR = Path(os.environ.get("H3_MEDIA_IMAGES") or Path(__file__).resolve().parents[3] / "data/media/images")
 MEDIA_KEEP_DAYS, MEDIA_KEEP_BYTES = 30, 2 << 30
 
 log = logging.getLogger("z-image-server")

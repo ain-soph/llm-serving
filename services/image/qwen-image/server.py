@@ -49,7 +49,7 @@ MAX_AREA = 2400 * 1792           # native 2K: the largest recommended size (4:3)
 OUTPUT_FORMATS = {"png": "PNG", "jpeg": "JPEG", "webp": "WEBP"}
 RGBA_TEMPLATE = ("This is an RGBA image with transparency. {}. "
                  "The image has alpha channel and the background is transparent.")
-MEDIA_DIR = Path(os.environ.get("H3_MEDIA_IMAGES") or Path(os.environ.get("LLM_STATE_DIR", str(Path.home() / "Library/Application Support/llm-serving"))) / "media/images")
+MEDIA_DIR = Path(os.environ.get("H3_MEDIA_IMAGES") or Path(__file__).resolve().parents[3] / "data/media/images")
 MEDIA_KEEP_DAYS, MEDIA_KEEP_BYTES = 30, 2 << 30
 
 log = logging.getLogger("qwen-image-server")
@@ -141,7 +141,7 @@ DEFAULT_ENHANCE = os.environ.get("QWEN_IMAGE_DEFAULT_ENHANCE", "off")
 # (QwenLM/Qwen-Image-2.1 prompt_rewrite/prompts, copied to ./prompt_rewrite).
 LLM_URL = os.environ.get("QWEN_IMAGE_LLM_URL", "http://127.0.0.1:8080/v1/chat/completions")
 LLM_MODEL = os.environ.get("QWEN_IMAGE_LLM_MODEL", "qwen3.8-flash-next")
-LLM_KEY_FILE = Path(os.environ.get("QWEN_IMAGE_LLM_KEY_FILE") or Path(os.environ.get("LLM_STATE_DIR", str(Path.home() / "Library/Application Support/llm-serving"))) / "api_key")
+LLM_KEY_FILE = Path(os.environ.get("QWEN_IMAGE_LLM_KEY_FILE") or Path(__file__).resolve().parents[3] / "platform/llama-swap/.api_key")
 # Not redistributed here (no license stated upstream): docs/qwen-image.md shows where to download them.
 SYSTEM_PROMPTS = Path(os.environ.get("QWEN_IMAGE_SYSTEM_PROMPTS") or Path(__file__).resolve().parent / "prompt_rewrite/prompts")
 RATIO_SIDES = {"1:1": (2048, 2048), "4:3": (2400, 1792), "3:4": (1792, 2400), "3:2": (2528, 1696),

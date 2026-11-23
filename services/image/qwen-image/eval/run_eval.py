@@ -6,7 +6,7 @@ from pathlib import Path
 base, model, enhance, out = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3], Path(sys.argv[4])
 here = Path(__file__).resolve().parent
 out.mkdir(parents=True, exist_ok=True)
-key = (Path(os.environ.get("LLM_API_KEY_FILE") or Path(os.environ.get("LLM_STATE_DIR", str(Path.home() / "Library/Application Support/llm-serving"))) / "api_key")).read_text().strip()
+key = (Path(os.environ.get("LLM_API_KEY_FILE") or Path(__file__).resolve().parents[4] / "platform/llama-swap/.api_key")).read_text().strip()
 done = {json.loads(l)["id"] for l in open(out / "results.jsonl")} if (out / "results.jsonl").exists() else set()
 SEED = 11
 
