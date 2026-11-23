@@ -21,14 +21,13 @@ EXTENSIONS = {".py", ".md", ".json", ".toml", ".lock", ".sh", ".yaml", ".yml", "
 
 
 # The MCP server code is published (neutral defaults, configured by environment); its deployment files are not.
-PUBLIC_IN_PRIVATE_DIRS = {"mcp/server.py", "mcp/requirements.txt", "mcp/Dockerfile", "mcp/mcp_call.py",
-                          "clients/mcp/server.py", "clients/mcp/requirements.txt", "clients/mcp/Dockerfile",
+PUBLIC_IN_PRIVATE_DIRS = {"clients/mcp/server.py", "clients/mcp/requirements.txt", "clients/mcp/Dockerfile",
                           "clients/mcp-tests/mcp_call.py"}
 PRIVATE_DIRS = {".venv", ".local", "logs", "outputs", "media", "models", "reports", "clients", "mcp"}
 # Extension-less public files that are sourced rather than executed.
 PUBLIC_NAMES = {"platform/agent-bridge/llm-collab.env"}
 # Directories whose executables (with a #! line) are published.
-SCRIPT_DIRS = {("tools",), ("bin",), ("agents",), ("serving", "bin"), ("platform", "agent-bridge")}
+SCRIPT_DIRS = {("tools",), ("bin",), ("platform", "agent-bridge")}
 
 
 def template_suffix(path):
@@ -41,7 +40,7 @@ def inspect_file(path, data, extra_literals=()):
     public = path.as_posix() in PUBLIC_IN_PRIVATE_DIRS
     if path.name in FORBIDDEN or (not public and any(p in PRIVATE_DIRS for p in path.parts[:-1])):
         problems.append("private/runtime file")
-    # bin/ (serving/bin before the merge): the published GPU lock and serving scripts (tools/install_serving.py)
+    # bin/: the published GPU lock and serving scripts; platform/agent-bridge/: the bridge launcher and local worker
     script_dir = path.parent.name == "tools" or any(path.parts[:len(d)] == d for d in SCRIPT_DIRS)
     if template_suffix(path) not in EXTENSIONS and path.as_posix() not in PUBLIC_NAMES \
             and path.name not in {"Brewfile", "LICENSE", ".gitignore", ".python-version", "Dockerfile", ".keep", "Caddyfile"} \

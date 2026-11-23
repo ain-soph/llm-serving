@@ -2,8 +2,9 @@
 
 CLAUDE.md: the rules live between BEGIN/END markers. A missing file is created; an existing file keeps everything
 outside the markers (the block is appended when absent, replaced when it differs). Any change to an existing file
-is backed up first. Local worker: the deployment path becomes a symlink to agents/local-worker in this checkout;
-an existing directory or foreign link there is left alone and reported. llm-collab bridge: see
+is backed up first; a block written by an older checkout (old BEGIN marker) is replaced, not duplicated. Local
+worker: it lives in this checkout (platform/agent-bridge/local-worker), so in the deployment it is "in place";
+another home gets a symlink to it, and an existing directory or foreign link there is left alone and reported. llm-collab bridge: see
 tools/llm_collab_bridge.py (pinned checkouts, launcher, MCP registration; --no-bridge skips it).
 Never needs sudo; --check and --dry-run write nothing. --home installs into another home directory (tests).
 """
@@ -16,9 +17,11 @@ from pathlib import Path
 import llm_collab_bridge
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATE = ROOT / "agents/claude-code/global-CLAUDE.md"
-WORKER = ROOT / "agents/local-worker"
-BEGIN = "<!-- BEGIN llm-serving agents: managed by tools/install_agents.py, edit agents/claude-code/global-CLAUDE.md -->"
+TEMPLATE = ROOT / "platform/agent-bridge/global-CLAUDE.md"
+WORKER = ROOT / "platform/agent-bridge/local-worker"
+BEGIN = "<!-- BEGIN llm-serving agents: managed by tools/install_agents.py, edit platform/agent-bridge/global-CLAUDE.md -->"
+# Markers written by earlier layouts: recognised (and rewritten as BEGIN) so the block is replaced, not appended twice.
+OLD_BEGINS = ("<!-- BEGIN llm-serving agents: managed by tools/install_agents.py, edit agents/claude-code/global-CLAUDE.md -->",)
 END = "<!-- END llm-serving agents -->"
 
 
@@ -30,7 +33,11 @@ def merge(existing, new_block):
     """Return (text, action) for an existing CLAUDE.md text (None = missing)."""
     if existing is None:
         return new_block, "created"
-    start, end = existing.find(BEGIN), existing.find(END)
+    start, end = -1, existing.find(END)
+    for marker in (BEGIN, *OLD_BEGINS):
+        start = existing.find(marker)
+        if start >= 0:
+            break
     if start >= 0 and end > start:
         stop = end + len(END)
         if existing[stop:stop + 1] == "\n":
@@ -69,6 +76,8 @@ def install_claude_md(target, backup_dir, home, check=False):
 
 
 def link_worker(target, check=False):
+    if not target.is_symlink() and target.exists() and target.resolve() == WORKER.resolve():
+        return "in place"
     if target.is_symlink():
         return "unchanged" if target.resolve() == WORKER.resolve() else "kept (links elsewhere)"
     if target.exists():
@@ -112,7 +121,7 @@ def main():
         print(f"local worker: {'would be linked' if report and state == 'linked' else state} ({a.worker_path} -> {WORKER})")
         if state.startswith("kept"):
             print("  Move its runtime state (logs/, claude-config/, codex-home/) into the checkout, remove it, then rerun.")
-        pending |= state != "unchanged"
+        pending |= state not in ("unchanged", "in place")
     if not a.no_bridge:
         try:
             sources = dict(item.split("=", 1) for item in a.source)

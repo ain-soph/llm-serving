@@ -4,8 +4,8 @@
 harness 可选 **Claude Code CLI** 或 **Codex CLI**（两者平等可选，共用同一套加锁、沙箱、超时、日志逻辑）。
 定位：团队里 Codex 之下的一层，只做**清单式机械活**，结果必须由 Claude/调度者自己核对。
 
-代码在公开仓库 [ain-soph/llm-serving](https://github.com/ain-soph/llm-serving) 的 `agents/local-worker/`；
-`tools/install_agents.py` 把 `~/llm-serving/platform/agent-bridge/local-worker` 链接到这里（见 `docs/multi-agent.md`）。
+代码在公开仓库 [ain-soph/llm-serving](https://github.com/ain-soph/llm-serving) 的 `platform/agent-bridge/local-worker/`，
+部署时就在 `~/llm-serving/platform/agent-bridge/local-worker`（见 `docs/multi-agent.md`）。
 依赖本机部署：`~/llm-serving/bin/gpu-lock`、`services/text/strata/configs`、`platform/llama-swap/.api_key`。
 
 ## 用法
@@ -35,7 +35,7 @@ worker 只能写这里）、`--timeout 90s|45m|1h`（30 s–60 min，默认 60m�
 `net-attempts.jsonl`、`summary.json`。
 
 编排者在后台命令里调用 `run`（如 Claude Code `run_in_background` Bash；带 `--wait` 时尤其如此），结束回合等退出通知，
-不用短间隔轮询（规则见 `agents/claude-code/global-CLAUDE.md` 的“等待长任务”）。
+不用短间隔轮询（规则见 `platform/agent-bridge/global-CLAUDE.md` 的“等待长任务”）。
 
 退出码：0 harness 正常结束（任务是否真的完成要自己验）；2 参数错；3 模型/环境错误；75 GPU 忙（未加 `--wait`）
 或 gpu-lock 拒绝；124 硬超时；其他 = harness 自身退出码。

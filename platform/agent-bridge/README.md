@@ -6,17 +6,21 @@ Claude Code、Codex、Antigravity 共用的 MCP 服务 `llm-collab`，由两部�
 - [ain-soph/local-agent-bridge](https://github.com/ain-soph/local-agent-bridge) 分支 `serving`：Bridge 运行时
   （agy Orchestrator/xhigh/`--settings`、所有 origin 分支可见的 writer checkout、`BRIDGE_CODEX_MODEL`、回合时限跟随 `turnTimeoutSeconds`（上限 14400 s，超时是明确失败而非 indeterminate））。
 
-本目录只放启动器和配置；`tools/install_agents.py` 按 `pins.json` 把两个仓库装到 bridge 目录并注册 MCP。
+本目录就是 bridge 目录（`~/llm-serving/platform/agent-bridge/`）：仓库里只跟踪启动器和配置，
+`tools/install_agents.py` 按 `pins.json` 把两个仓库装到这里并注册 MCP；这些文件已在原位，安装器只设置权限
+（装到另一个 home 时才复制）。
 
-| 文件 | 装到 `~/llm-serving/platform/agent-bridge/` | 作用 |
-| --- | --- | --- |
-| `pins.json` | （不复制） | 两个仓库的 URL、分支、固定 commit 和安装位置（`release/`、`runtime/upstream/`） |
-| `launcher.sh` | `mcp` | MCP stdio 入口。沿用旧私有 wrapper 的文件名，客户端里已有的注册无需改动 |
-| `llm-collab.json` | `llm-collab.json` | llm-collab 配置，路径全部相对 bridge 目录（workspace、state、运行时、生产根目录 `../..`） |
-| `llm-collab.env.sh` | `llm-collab.env` | 委派回合的模型和 effort（见下） |
-| `codex-select` | `codex-select` | 选择 Codex 可执行文件（见下） |
+| 文件 | 作用 |
+| --- | --- |
+| `pins.json` | 两个仓库的 URL、分支、固定 commit 和安装位置（`release/`、`runtime/upstream/`） |
+| `mcp` | MCP stdio 入口（0700）。沿用旧私有 wrapper 的文件名，客户端里已有的注册无需改动 |
+| `llm-collab.json` | llm-collab 配置（0600），路径全部相对 bridge 目录（workspace、state、运行时、生产根目录 `../..`） |
+| `llm-collab.env` | 委派回合的模型和 effort（0600，见下） |
+| `codex-select` | 选择 Codex 可执行文件（0700，见下） |
+| `global-CLAUDE.md` | 装进 `~/.claude/CLAUDE.md` 的多 agent 规则块 |
+| `local-worker/` | 本地 Flash-Next worker（见其 README） |
 
-不受管理、安装器从不改动的：`state/`（任务账本、交接、`state/codex/` 委派 Codex 的 home）、`workspace/`（已存在时）、
+不进仓库、安装器从不改动的：`state/`（任务账本、交接、`state/codex/` 委派 Codex 的 home）、`workspace/`（已存在时）、
 `llm-collab.local.env`（本机覆盖，启动器在 `llm-collab.env` 之后读取）。
 
 ## 模型与开关

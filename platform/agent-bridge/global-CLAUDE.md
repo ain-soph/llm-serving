@@ -1,7 +1,7 @@
 # 多 agent 分工（全局规则）
 
-本段由 llm-serving 仓库 `agents/claude-code/global-CLAUDE.md` 经 `tools/install_agents.py` 装入；改仓库里的版本后重装。
-详细说明：`~/llm-serving/portable/docs/multi-agent.md`；本地 worker：`~/llm-serving/portable/agents/local-worker/README.md`。
+本段由 llm-serving 仓库 `platform/agent-bridge/global-CLAUDE.md` 经 `tools/install_agents.py` 装入；改仓库里的版本后重装。
+详细说明：`~/llm-serving/docs/multi-agent.md`；本地 worker：`~/llm-serving/platform/agent-bridge/local-worker/README.md`。
 
 - **主窗口只编排**：与用户交流、拆分任务、派发、跟进、回答进度；实际工作交给 subagent（统一 Opus 5.5 high）。分工可按判断调整。
 - **按难度分级**

@@ -14,8 +14,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "serving/bin/gpu-top"
-LOCK_SCRIPT = ROOT / "serving/bin/gpu-lock"
+SCRIPT = ROOT / "bin/gpu-top"
+LOCK_SCRIPT = ROOT / "bin/gpu-lock"
 # the installed script runs under the system Python (3.9 on macOS): test it there when present
 PY = "/usr/bin/python3" if Path("/usr/bin/python3").exists() else sys.executable
 POOL = 10000
@@ -416,13 +416,13 @@ class GpuTopTests(unittest.TestCase):
         self.assertNotIn("xyz", json.dumps(got))                   # request headers are never passed on
         self.assertEqual(gt.parse_events(b"HTTP/1.1 200 OK\r\n\r\n" + msg("pauseChanged", {"paused": False})),
                          {"paused": False})
-        inflight = load(ROOT / "serving/bin/lsw-inflight", "lsw_inflight")
+        inflight = load(ROOT / "bin/lsw-inflight", "lsw_inflight")
         self.assertEqual(gt.LOCAL, inflight.LOCAL)
         for r in reqs + [{"remote_ip": "1.1.1.1"}, {"req_headers": {"X-Real-Ip": "8.8.4.4"}}, {}]:
             self.assertEqual(gt.client(r), inflight.client(r))
 
     def test_constants_match_gpu_lock(self):
-        src = (ROOT / "serving/bin/gpu-lock").read_text()
+        src = (ROOT / "bin/gpu-lock").read_text()
         for name in ("BASE_TOL", "STALE", "TICKET_STALE", "BACKFILL_MAX", "TURN_MAX", "PRIORITY_AGE"):
             self.assertEqual(int(re.search(rf"^{name}=(\d+)", src, re.M).group(1)), getattr(gt, name), name)
         self.assertEqual(int(re.search(r"\|\| POOL=(\d+)", src).group(1)), gt.DEFAULT_POOL)

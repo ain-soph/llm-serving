@@ -1,15 +1,16 @@
-"""Install or update the llm-collab MCP bridge from agents/llm-collab (used by tools/install_agents.py).
+"""Install or update the llm-collab MCP bridge from platform/agent-bridge (used by tools/install_agents.py).
 
 Bridge directory: <home>/llm-serving/platform/agent-bridge.
-- release/           ain-soph/llm-collab at the commit pinned in agents/llm-collab/pins.json
+- release/           ain-soph/llm-collab at the commit pinned in platform/agent-bridge/pins.json
 - runtime/upstream/  ain-soph/local-agent-bridge (branch serving) at its pinned commit
   A missing checkout is cloned; a clean one at another commit is fetched and checked out (detached) at the pin;
   one with local changes is reported and left alone. Locked dependencies: `npm ci --ignore-scripts`, skipped when
   node_modules already matches package-lock.json.
 - workspace/         default collaboration checkout; only created when missing (clone of a local bare mirror
                      runtime/portable-base.git of this repository, pushes go to a nonexistent path).
-- mcp, codex-select, llm-collab.json, llm-collab.env: copied from agents/llm-collab; a differing file is backed up
-  under <home>/llm-serving/.backup/ (same relative path, .<time>-install-agents suffix) before it is replaced.
+- mcp, codex-select, llm-collab.json, llm-collab.env: tracked in platform/agent-bridge, so in the deployment they
+  are "in place" (only their mode is set); another home gets copies, and a differing file is backed up under
+  <home>/llm-serving/.backup/ (same relative path, .<time>-install-agents suffix) before it is replaced.
 - state/ and llm-collab.local.env are never touched.
 MCP server "llm-collab" -> <bridge>/mcp is registered through each client's own CLI (Claude Code user scope,
 Codex in $CODEX_HOME or <home>/.codex, Antigravity) when the CLI is installed and the entry differs. Current
@@ -24,12 +25,12 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATES = ROOT / "agents/llm-collab"
+TEMPLATES = ROOT / "platform/agent-bridge"
 SERVER = "llm-collab"
-# Template name, installed name, mode. The launcher keeps the name of the private wrapper it replaces, so client
-# registrations that already point at <bridge>/mcp stay valid.
-MANAGED = (("launcher.sh", "mcp", 0o700), ("codex-select", "codex-select", 0o700),
-           ("llm-collab.json", "llm-collab.json", 0o600), ("llm-collab.env.sh", "llm-collab.env", 0o600))
+# Template name, installed name, mode. The launcher keeps the name of the private wrapper it replaced, so client
+# registrations that point at <bridge>/mcp stay valid.
+MANAGED = (("mcp", "mcp", 0o700), ("codex-select", "codex-select", 0o700),
+           ("llm-collab.json", "llm-collab.json", 0o600), ("llm-collab.env", "llm-collab.env", 0o600))
 EXTRA_PATH = ("/opt/homebrew/bin", "/usr/local/bin")
 
 
@@ -188,6 +189,12 @@ def render(bridge, backup_dir, home, apply):
     results = []
     for template, name, mode in MANAGED:
         target, data = bridge / name, (TEMPLATES / template).read_bytes()
+        if target.is_file() and target.resolve() == (TEMPLATES / template).resolve():
+            same_mode = (target.stat().st_mode & 0o777) == mode
+            if apply and not same_mode:
+                target.chmod(mode)
+            results.append((name, "in place" if same_mode else "mode fixed", None))
+            continue
         current = target.read_bytes() if target.is_file() else None
         same_mode = current is not None and (target.stat().st_mode & 0o777) == mode
         if current == data and same_mode:
@@ -359,7 +366,7 @@ def status(home):
                    + ("" if deps_installed(path) else ", dependencies not installed"))))
     drift = [name for _t, name, _m in MANAGED if not ((bridge / name).is_file()
              and (bridge / name).read_bytes() == (TEMPLATES / _t).read_bytes())]
-    out.append((not drift, "llm-collab launcher: " + ("matches agents/llm-collab" if not drift
+    out.append((not drift, "llm-collab launcher: " + ("matches platform/agent-bridge" if not drift
                                                        else "differs or missing: " + ", ".join(drift))))
     env, wanted = _client_env(home), (str(bridge / "mcp"), [])
     for label, _cli, current_of, _commands in CLIENTS:

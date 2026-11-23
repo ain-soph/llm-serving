@@ -68,10 +68,10 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("unexpected file type", ok(Path("services/x/tool.bin.in"), b"\n"))
 
     def test_agent_files_pass_privacy_rules(self):
-        self.assertEqual(privacy_check.inspect_file(Path("agents/local-worker/run"), b"#!/bin/zsh\n"), [])
-        self.assertEqual(privacy_check.inspect_file(Path("agents/local-worker/lib/sandbox.sb"), b"(version 1)"), [])
-        self.assertIn("unexpected file type", privacy_check.inspect_file(Path("agents/local-worker/blob"), b"data"))
-        self.assertIn("private/runtime file", privacy_check.inspect_file(Path("agents/local-worker/logs/x.json"), b"{}"))
+        self.assertEqual(privacy_check.inspect_file(Path("platform/agent-bridge/local-worker/run"), b"#!/bin/zsh\n"), [])
+        self.assertEqual(privacy_check.inspect_file(Path("platform/agent-bridge/local-worker/lib/sandbox.sb"), b"(version 1)"), [])
+        self.assertIn("unexpected file type", privacy_check.inspect_file(Path("platform/agent-bridge/local-worker/blob"), b"data"))
+        self.assertIn("private/runtime file", privacy_check.inspect_file(Path("platform/agent-bridge/local-worker/logs/x.json"), b"{}"))
 
     def test_claude_md_block_merges_without_overwriting(self):
         new = install_agents.block("rules v2")
@@ -106,9 +106,19 @@ class DeploymentTests(unittest.TestCase):
             other = home / "other"
             other.mkdir()
             self.assertEqual(install_agents.link_worker(other), "kept (existing directory)")
+            # the deployment itself: the worker directory is this checkout's own
+            self.assertEqual(install_agents.link_worker(install_agents.WORKER), "in place")
+
+    def test_claude_md_old_marker_is_replaced_not_duplicated(self):
+        new = install_agents.block("rules v2")
+        old_block = install_agents.OLD_BEGINS[0] + "\nrules v1\n" + install_agents.END + "\n"
+        text, action = install_agents.merge("mine\n\n" + old_block + "tail\n", new)
+        self.assertEqual((action, text), ("updated", "mine\n\n" + new + "tail\n"))
+        self.assertEqual(text.count("BEGIN llm-serving agents"), 1)
+        self.assertEqual(install_agents.merge(text, new), (text, "unchanged"))
 
     def test_media_stays_local_and_offline_by_default(self):
-        path = ROOT / "h3-video/server.py"
+        path = ROOT / "services/video/h3-video/server.py"
         spec = importlib.util.spec_from_file_location("video_wrapper", path)
         mod = importlib.util.module_from_spec(spec)
         with patch.dict(os.environ, {"H3_VIDEO_FETCH_HOSTS": "", "H3_VIDEO_SHARE_BASE": "http://127.0.0.1:8080"}):

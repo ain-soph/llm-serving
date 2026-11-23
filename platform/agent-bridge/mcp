@@ -1,8 +1,8 @@
 #!/bin/sh
-# llm-collab MCP launcher. Installed as <bridge>/mcp by tools/install_agents.py from agents/llm-collab/launcher.sh
+# llm-collab MCP launcher, tracked as platform/agent-bridge/mcp (the bridge directory; tools/install_agents.py)
 # in the llm-serving repository; edit it there, not in the bridge directory. Every path is resolved from this
 # file's location at launch time:
-#   <bridge>/release           ain-soph/llm-collab checkout (MCP server, pinned in agents/llm-collab/pins.json)
+#   <bridge>/release           ain-soph/llm-collab checkout (MCP server, pinned in platform/agent-bridge/pins.json)
 #   <bridge>/runtime/upstream  ain-soph/local-agent-bridge checkout, branch serving (Bridge runtime)
 #   <bridge>/llm-collab.json   llm-collab config (relative paths: workspace, state, runtime, production root)
 #   <bridge>/llm-collab.env    provider models and efforts; llm-collab.local.env (optional, unmanaged) overrides

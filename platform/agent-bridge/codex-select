@@ -1,6 +1,6 @@
 #!/bin/sh
 # Codex CLI used for bridge-delegated turns and quota checks (llm-collab.json providers.codex).
-# Installed as <bridge>/codex-select by tools/install_agents.py from agents/llm-collab/codex-select.
+# Tracked as platform/agent-bridge/codex-select (the bridge directory; tools/install_agents.py).
 #
 # Order: LLM_COLLAB_CODEX_BIN if set, else the Codex app-server daemon's copy of the same version as the `codex`
 # on PATH, else that `codex`. Reason: Homebrew's Caskroom copy of codex-code-mode-host hung in _dyld_start even

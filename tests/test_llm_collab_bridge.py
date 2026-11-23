@@ -222,8 +222,9 @@ class BridgeInstallTests(unittest.TestCase):
 class TemplateTests(unittest.TestCase):
     def test_templates_are_path_free(self):
         pattern = re.compile(r"/(?:Users|home)/[^\s/]+/|@[A-Za-z0-9.-]+\.[a-z]{2,}|api_key\s*=")
-        for path in bridge_mod.TEMPLATES.iterdir():
-            self.assertIsNone(pattern.search(path.read_text()), path.name)
+        # the tracked bridge files (the directory also holds machine state: state/, runtime/, llm-collab.local.env)
+        for name in [t for t, _n, _m in bridge_mod.MANAGED] + ["pins.json", "README.md"]:
+            self.assertIsNone(pattern.search((bridge_mod.TEMPLATES / name).read_text()), name)
         config = json.loads((bridge_mod.TEMPLATES / "llm-collab.json").read_text())
         for key in ("bridgeRoot", "workspace", "stateDirectory", "productionRoot"):
             self.assertFalse(Path(config[key]).is_absolute(), key)
@@ -233,7 +234,7 @@ class TemplateTests(unittest.TestCase):
             self.assertTrue(pin["url"].startswith("https://github.com/ain-soph/"))
 
     def test_shell_syntax(self):
-        for name in ("launcher.sh", "codex-select"):
+        for name in ("mcp", "codex-select"):
             subprocess.run(["sh", "-n", str(bridge_mod.TEMPLATES / name)], check=True)
 
     def test_codex_select_prefers_daemon_copy(self):
