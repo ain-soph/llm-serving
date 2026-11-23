@@ -62,7 +62,7 @@ worker 只能写这里）、`--timeout 90s|45m|1h`（30 s–60 min，默认 60m�
 | 配置目录 | `claude-config/` = `CLAUDE_CONFIG_DIR`（运行时状态，git 忽略） | `codex-home/` = `CODEX_HOME`（只提交 `config.toml`、`rules/default.rules`） |
 | 协议 | `/v1/messages`（Anthropic） | `/v1/responses`（`wire_api="responses"`） |
 | 鉴权 | `ANTHROPIC_API_KEY` = llama-swap key（运行时从 `.api_key` 读入环境，不写进文件；`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` 使 Bash 子进程看不到它） | `env_key = "LOCAL_WORKER_API_KEY"`（同上；`shell_environment_policy` 排除 `*KEY*`/`*TOKEN*`） |
-| 模型映射 | `ANTHROPIC_MODEL`、`ANTHROPIC_SMALL_FAST_MODEL`、`ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL`、`CLAUDE_CODE_SUBAGENT_MODEL` 全部 = 本地模型 | `-m <模型>`，provider `strata` |
+| 模型映射 | `ANTHROPIC_MODEL`、`ANTHROPIC_SMALL_FAST_MODEL`、`ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL`、`CLAUDE_CODE_SUBAGENT_MODEL` 全部 = `<模型>:worker`（见下“采样”） | `-m <模型>:worker`，provider `strata` |
 | 关闭外联 | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`、`DISABLE_{AUTOUPDATER,TELEMETRY,ERROR_REPORTING}=1`、`--strict-mcp-config`、`--setting-sources ""`（不读用户/项目设置）、`--no-session-persistence` | `analytics/feedback` 关、`web_search="disabled"`、关闭 plugins/apps/浏览器/图像等 features（plugins 同步曾试图连 github.com）、`--ephemeral` |
 | 工具 | `--tools Bash,Read,Edit,Write,Glob,Grep`、`ENABLE_TOOL_SEARCH=false` | `exec_command`、`write_stdin`、`request_user_input`、`view_image`（无 apply_patch 工具，改文件靠 shell） |
 | 权限 | `lib/claude-settings.json`：`acceptEdits` + `--permission-prompts none`（cwd 外编辑自动拒绝）；允许 Bash；拒绝 `git push`/`git remote`/`git config`、curl/wget/ssh/scp/rsync/nc、sudo/launchctl/brew、pip/uv/npm 安装、gpu-lock/lsw-apply、WebFetch/WebSearch、读 `.api_key` | Codex 自带沙箱与外层 sandbox-exec 不能嵌套，所以用 `--dangerously-bypass-approvals-and-sandbox`，由外层沙箱限制文件和网络；`rules/default.rules` 禁止 `git push`/`git remote`/curl/wget/ssh/gpu-lock |
@@ -70,6 +70,16 @@ worker 只能写这里）、`--timeout 90s|45m|1h`（30 s–60 min，默认 60m�
 | 已知提示 | stderr `[claude-code:unrecognized_model]`，无害 | 事件里 `Model metadata ... not found`，无害（摘要已过滤） |
 
 验收对比与默认值建议见下文“验收结果”。默认 harness 为 **claude**。
+
+## 采样（2026-11-23）
+
+Strata 从上游 d35353903 起，对不带任何采样字段的请求按贪心解码；Claude Code 和 Codex CLI 都没法设 temperature。
+所以两种 harness 都改用 llama-swap 别名 `qwen3.8-flash-next:worker`（uncensored：`qwen3.8-flash-next-uncensored:worker`，
+定义在部署机 `platform/llama-swap/conf.d/strata.yaml`）：同一个已加载的模型，`setParamsByID` 的 `?` 键只在请求没带时补
+模型卡的思考套 `temperature 1.0 / top_p 0.95 / top_k 20`（Strata `MODEL_CARD_SAMPLING["qwen4exp"]["thinking"]`），
+请求自己带的值优先；`useModelName` 把别名改回原 ID 再转给 Strata（否则 #6621 返回 404）。两种 harness 的请求都要求思考
+（Claude Code `thinking: adaptive` + `effort: high`；Codex 不带 effort，Flash-Next 模板默认思考），所以用思考套。
+加载 / 卸载仍用原 ID。别名不出现在 `/v1/models`，原 ID 的行为不变。
 
 ## 适用 / 不适用
 

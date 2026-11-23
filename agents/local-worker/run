@@ -52,6 +52,11 @@ case $variant in
   uncensored) MODEL=qwen3.8-flash-next-uncensored; ENGINE_CFG=$STRATA_CFG/strata-uncensored-c262k-p2-compact.json ;;
   *) die "--variant must be normal or uncensored" ;;
 esac
+# The harnesses talk to the llama-swap alias "<id>:worker" (conf.d/strata.yaml): the same loaded model, with the model
+# card's thinking sampling (temperature 1.0, top_p 0.95, top_k 20) filled in where a request carries none. Neither
+# Claude Code nor Codex can set sampling, and Strata decodes a request without any sampling field greedily (upstream
+# d35353903). Loading and unloading still use the plain ID.
+API_MODEL=$MODEL:worker
 [[ -n $task_file ]] && { [[ -r $task_file ]] || die "cannot read --task-file $task_file"; task=$(<$task_file); }
 [[ -n ${task// /} ]] || die "no task: pass it after -- or with --task-file"
 [[ -n $cwd && -d $cwd ]] || die "--cwd must be an existing directory"
@@ -71,7 +76,7 @@ mkdir -p $RUN_DIR/tmp
 LOCK_NAME=local_worker_$$
 log() { print -u2 -- "[local-worker $(date +%H:%M:%S)] $*"; print -- "$(date +%FT%T) $*" >> $RUN_DIR/run.log; }
 jstr() { $PY -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
-log "run $RUN_ID: harness=$harness variant=$variant model=$MODEL cwd=$cwd timeout=${timeout_s}s"
+log "run $RUN_ID: harness=$harness variant=$variant model=$API_MODEL cwd=$cwd timeout=${timeout_s}s"
 
 # ---------------------------------------------------------------- cleanup (EXIT trap; INT/TERM -> exit)
 held=0 hb_pid= proxy_pid= job_pid= exit_code=0 t_start=$(date +%s) t_lock= t_ready= t_end=
@@ -191,14 +196,14 @@ ENVV=(HOME=$HOME USER=$USER LOGNAME=$USER LANG=en_US.UTF-8 TERM=dumb SHELL=/bin/
       NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost PIP_NO_INDEX=1 UV_OFFLINE=1)
 if [[ $harness == claude ]]; then
   HHOME=$HERE/claude-config
-  ENVV+=(CLAUDE_CONFIG_DIR=$HHOME ANTHROPIC_BASE_URL=$API_URL ANTHROPIC_API_KEY=$KEY ANTHROPIC_MODEL=$MODEL
-         ANTHROPIC_SMALL_FAST_MODEL=$MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL=$MODEL ANTHROPIC_DEFAULT_SONNET_MODEL=$MODEL
-         ANTHROPIC_DEFAULT_OPUS_MODEL=$MODEL CLAUDE_CODE_SUBAGENT_MODEL=$MODEL
+  ENVV+=(CLAUDE_CONFIG_DIR=$HHOME ANTHROPIC_BASE_URL=$API_URL ANTHROPIC_API_KEY=$KEY ANTHROPIC_MODEL=$API_MODEL
+         ANTHROPIC_SMALL_FAST_MODEL=$API_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL=$API_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL=$API_MODEL
+         ANTHROPIC_DEFAULT_OPUS_MODEL=$API_MODEL CLAUDE_CODE_SUBAGENT_MODEL=$API_MODEL
          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1 DISABLE_ERROR_REPORTING=1
          CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 ENABLE_TOOL_SEARCH=false
          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 CLAUDE_CODE_MAX_CONTEXT_TOKENS=262144 CLAUDE_CODE_MAX_OUTPUT_TOKENS=32768
          API_TIMEOUT_MS=900000 BASH_DEFAULT_TIMEOUT_MS=300000 BASH_MAX_TIMEOUT_MS=600000)
-  CMD=(claude -p "$PROMPT" --model $MODEL --output-format stream-json --verbose
+  CMD=(claude -p "$PROMPT" --model $API_MODEL --output-format stream-json --verbose
        --strict-mcp-config --setting-sources "" --settings $HERE/lib/claude-settings.json
        --tools "Bash,Read,Edit,Write,Glob,Grep" --permission-mode acceptEdits --permission-prompts none
        --no-session-persistence --disable-slash-commands --max-turns $max_turns)
@@ -206,7 +211,7 @@ else
   HHOME=$HERE/codex-home
   ENVV+=(CODEX_HOME=$HHOME LOCAL_WORKER_API_KEY=$KEY)
   CMD=(codex exec --json --skip-git-repo-check --ephemeral --dangerously-bypass-approvals-and-sandbox
-       -C $cwd -m $MODEL -c "model_providers.strata.base_url=\"$API_URL/v1\"" -o $RUN_DIR/last-message.txt "$PROMPT")
+       -C $cwd -m $API_MODEL -c "model_providers.strata.base_url=\"$API_URL/v1\"" -o $RUN_DIR/last-message.txt "$PROMPT")
 fi
 print -r -- "$PROMPT" > $RUN_DIR/prompt.txt
 
