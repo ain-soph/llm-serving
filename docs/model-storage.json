@@ -209,16 +209,16 @@
     },
     "qwen3-tts": {
       "relative_paths": [
-        "qwen3-tts/1.7B-CustomVoice",
-        "qwen3-tts/1.7B-Base",
-        "qwen3-tts/1.7B-VoiceDesign"
+        "qwen3-tts/1.7B-CustomVoice-q8",
+        "qwen3-tts/1.7B-Base-q8",
+        "qwen3-tts/1.7B-VoiceDesign-q8"
       ],
-      "measured_on": "2026-11-17",
+      "measured_on": "2026-11-23",
       "files": 37,
-      "bytes": 12220026299,
-      "GB": 12.220026,
-      "allocated_bytes": 12226981888,
-      "note": "Three entries; the speech tokenizer is one file hard-linked into each variant."
+      "bytes": 7189353189,
+      "GB": 7.189353,
+      "allocated_bytes": 7189463040,
+      "note": "Three entries, stored pre-quantized (services/tts/save_q8.py, 8-bit weights, group 32); the speech tokenizer is one file hard-linked into each variant. The BF16 originals (12.22 GB) are only needed to rebuild them."
     },
     "elephant-1": {
       "relative_paths": [

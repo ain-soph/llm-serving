@@ -20,7 +20,7 @@
 | 决策 | `pplx-decider-flash` | MLX 移植 | 按层类：W8A8，down_proj／视觉塔 FP16；预量化存盘、零拷贝 | 短请求 23–47 ms；图片 0.17–0.51 s；2K／8K／32.6K token 0.20／0.82／5.64 s | wired 峰值 +8783 MiB（4096 MB 缓存）；只发文本时视觉塔不驻留 | 6.29 GB³ |
 | 决策 | `elephant-1` | MLX 移植 + 官方 OneJev | 按层类：W8A8，in_proj_z 用 8-bit 只量化权重；预量化存盘、零拷贝 | 短请求 0.078–0.084 s；16.3K token 3.16 s | wired 峰值 +8730 MiB | 11.07 GB⁵ |
 | 决策 | `mammoth-1` | 同上，27B | 按层类：W8A8，out_proj 用 8-bit 只量化权重；预量化存盘、零拷贝 | 短请求 0.20–0.21 s；16.3K token 8.9 s | wired 峰值 +27458 MiB（不能与聊天模型共存） | 29.69 GB⁵ |
-| 语音合成 | `qwen3-tts`／`-clone`／`-design` | mlx-audio fork | BF16 | 首段音频 0.08–0.14 s；实时率 0.22–0.23 | wired +4850／+5603／+5035 MiB | 12.22 GB⁴ |
+| 语音合成 | `qwen3-tts`／`-clone`／`-design` | mlx-audio fork | 8 位权重（W8A16，group 32，预量化、零拷贝），BF16 激活 | 首段音频 0.08–0.14 s；实时率 0.17／0.18／0.17（进程内，BF16 0.21–0.22） | wired +3554／+4876／+3853 MiB（16 句） | 7.19 GB⁴ |
 | 语音转写 | `qwen3-asr-1.7b`（默认） | mlx-qwen3-asr fork | BF16 文件／FP16 运行 | en100 c1 15.4 s；WER 1.48% | wired +6.6 GB | 6.543 GB |
 | 语音转写 | `qwen3-asr-1.7b-int8` | 同上 | 解码器 + lm_head W8A16（加载时量化） | en100 11.8 s（进程内，默认入口同条件 15.1 s）；WER 1.48% | MLX 峰值 3.78 GB（默认 4.59） | 同上 |
 | 语音转写 | `whisper-large-v3` | mlx-whisper fork | FP16 | en100 c1 22.8 s；WER 2.80% | wired +4.5 GB | 3.084 GB |
@@ -31,7 +31,7 @@
 | 图片 | `z-image-turbo` | mflux fork | W8A8 DiT（注意力＋前馈），文本编码器／VAE BF16 | 1024² 5.6 s；2048² 36.1 s（经 API，9 步） | 生成期 wired 8.0–8.8 GiB | 14.51 GB |
 | 视频＋音频 | `minimax-h3-video`（旧名 `-stream` 为别名） | h3.c fork | INT8 DiT（零拷贝）、W8A16 文本编码器、BF16 VAE 计算 | fast 768p：5 s 片段 165–170 s；15 s 片段 758 s | standard 768p wired +14.3 GB（按 block 释放）；DiT GPU 峰值 22.20／33.00 GiB（fast） | 58.90 GB² |
 
-¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享 VAE；文本编码器链接到 H3 图片的 INT8 文件，不另计。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `services/decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `services/decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。⁶ 2026-11-18（pa1b）起每个尺寸一个入口：原精确入口与 `-int8` 入口合并为 `shared/common/qwen3_w8a8.py mix` 写出的预量化混合副本（`mix.json`，零拷贝），见 [w8a8.md](w8a8.md)；下文 11-16／11-17 的 `-int8` 数据保留作记录。
+¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享 VAE；文本编码器链接到 H3 图片的 INT8 文件，不另计。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `services/decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份；2026-11-23 起为 `services/tts/save_q8.py` 写出的 8 位副本，官方 BF16（12.22 GB）只在重新生成时需要。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `services/decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。⁶ 2026-11-18（pa1b）起每个尺寸一个入口：原精确入口与 `-int8` 入口合并为 `shared/common/qwen3_w8a8.py mix` 写出的预量化混合副本（`mix.json`，零拷贝），见 [w8a8.md](w8a8.md)；下文 11-16／11-17 的 `-int8` 数据保留作记录。
 
 ## 文本：Qwen3.8 Flash-Next（Strata）
 
@@ -433,6 +433,17 @@
 | 长前缀精确分块（注意力按查询，线性注意力与 MLP 按 2048 token） | 峰值随长度缓慢增长 |
 
 ## 语音合成：Qwen3-TTS
+
+**2026-11-23 起用 8 位权重**（`services/tts/save_q8.py`：talker、码本预测器、embedding、输出头 W8A16，group 32；语音解码器 FP32；激活与 KV BF16）。
+同一会话独占测量（进程内，16 句，官方采样，seed 0）：
+
+| 变体 | 实时率 BF16 → 8 位 | MLX 峰值 GB | wired 增量 MiB | ASR 回写错误 |
+| --- | ---: | ---: | ---: | ---: |
+| CustomVoice | 0.214 → 0.172 | 8.02 → 6.52 | 5454 → 3554 | 0% → 0% |
+| Base | 0.225 → 0.181 | 8.91 → 7.16 | 5145 → 4876 | 0% → 0% |
+| VoiceDesign | 0.216 → 0.166 | 7.98 → 6.15 | 5570 → 3853 | 0% → 0% |
+
+下面是 2026-11-17 BF16 上线时的服务端到端数据，保留作记录。
 
 **条件**：Qwen3-TTS 12Hz 1.7B，mlx-audio，BF16，KV BF16；服务端到端（HTTP，pcm），实时率 = 生成耗时 ÷ 音频时长。
 

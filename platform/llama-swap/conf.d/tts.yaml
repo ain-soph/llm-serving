@@ -1,7 +1,11 @@
-# Text-to-speech (agent tts, 2026-11-17). Qwen3-TTS 12Hz 1.7B (Apache-2.0), BF16, via mlx-audio 0.6.6 behind
+# Text-to-speech (agent tts, 2026-11-17). Qwen3-TTS 12Hz 1.7B (Apache-2.0) via mlx-audio behind
 # ~/llm-serving/services/tts/server.py: POST /v1/audio/speech (OpenAI: model, input, voice, instructions, response_format
 # mp3|opus|aac|flac|wav|pcm, speed, stream_format audio|sse; audio is streamed as it is generated), GET /v1/audio/voices.
-# Weights: ~/models/qwen3-tts/<variant> (the speech tokenizer is one file hard-linked into every variant).
+# Weights (since 2026-11-23): ~/models/qwen3-tts/<variant>-q8, stored pre-quantized by services/tts/save_q8.py: talker,
+# code predictor, embeddings and heads in 8-bit weights (W8A16, group 32), bfloat16 activations, speech-tokenizer decoder
+# float32 as shipped; mapped zero-copy (MLX_ZERO_COPY_LOAD=1). vs BF16: real-time factor 15-18 % lower, MLX peak
+# 1.5-1.8 GB lower, ASR read-back unchanged (docs/performance.md, docs/tts.md). The speech tokenizer is one file
+# hard-linked into every variant. The BF16 originals are archived on the Mac mini SSD (reports/tts.md).
 # Report: ~/llm-serving/reports/tts.md. capacities.gpu = measured wired peak delta (tts/eval/out/s1-*, s2-*) + margin.
 macros:
   "tts-cmd": >
@@ -13,7 +17,9 @@ models:
   "qwen3-tts":
     name: "Qwen3-TTS 1.7B"
     description: "Preset voices + style instructions; zh/en/ja/ko/de/fr/ru/it/es/pt; ~4x real time, first audio ~0.1 s"
-    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen3-tts -- ${tts-cmd} --model ${env.LLM_MODELS}/qwen3-tts/1.7B-CustomVoice --model-id qwen3-tts
+    env:
+      - "MLX_ZERO_COPY_LOAD=1"
+    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen3-tts -- ${tts-cmd} --model ${env.LLM_MODELS}/qwen3-tts/1.7B-CustomVoice-q8 --model-id qwen3-tts
     capabilities: &tts-caps
       in: [text]
       out: [audio]
@@ -28,7 +34,9 @@ models:
   "qwen3-tts-clone":
     name: "Qwen3-TTS 1.7B voice clone"
     description: "Clone a voice from ref_audio + ref_text"
-    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen3-tts -- ${tts-cmd} --model ${env.LLM_MODELS}/qwen3-tts/1.7B-Base --model-id qwen3-tts-clone
+    env:
+      - "MLX_ZERO_COPY_LOAD=1"
+    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen3-tts -- ${tts-cmd} --model ${env.LLM_MODELS}/qwen3-tts/1.7B-Base-q8 --model-id qwen3-tts-clone
     capabilities: *tts-caps
     checkEndpoint: /health
     ttl: 600
@@ -40,7 +48,9 @@ models:
   "qwen3-tts-design":
     name: "Qwen3-TTS 1.7B voice design"
     description: "Create a voice from a text description in `instructions`"
-    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen3-tts -- ${tts-cmd} --model ${env.LLM_MODELS}/qwen3-tts/1.7B-VoiceDesign --model-id qwen3-tts-design
+    env:
+      - "MLX_ZERO_COPY_LOAD=1"
+    cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen3-tts -- ${tts-cmd} --model ${env.LLM_MODELS}/qwen3-tts/1.7B-VoiceDesign-q8 --model-id qwen3-tts-design
     capabilities: *tts-caps
     checkEndpoint: /health
     ttl: 600

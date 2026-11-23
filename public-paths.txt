@@ -69,6 +69,7 @@ services/rerank/q8_0_to_mlx.py
 services/rerank/server.py
 services/text/strata/configs/strata-ad427-c262k-p2-compact.json.in
 services/text/strata/configs/strata-uncensored-c262k-p2-compact.json.in
+services/tts/save_q8.py
 services/tts/server.py
 services/video/h3-video/server.py
 standby/asr/sov/quantize.py

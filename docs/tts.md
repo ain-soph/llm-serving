@@ -1,6 +1,6 @@
 # 语音合成：Qwen3-TTS
 
-服务 `services/tts/server.py` 用 mlx-audio fork（commit 固定在 `uv.lock`）运行 Qwen3-TTS 12Hz 1.7B（Apache-2.0，BF16），
+服务 `services/tts/server.py` 用 mlx-audio fork（commit 固定在 `uv.lock`）运行 Qwen3-TTS 12Hz 1.7B（Apache-2.0；2026-11-23 起用预量化的 8 位权重），
 接口 `POST /v1/audio/speech`（OpenAI 字段，音频边生成边发送）和 `GET /v1/audio/voices`。路由模板：`platform/llama-swap/conf.d/tts.yaml`。
 速度与内存：[性能与资源报告](performance.md#语音合成qwen3-tts)。
 
@@ -23,9 +23,16 @@ hf download Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign --local-dir "$M/1.7B-VoiceDesig
 # 可选：三个变体的语音编解码器（speech_tokenizer/model.safetensors，0.68 GB）相同，比对后可以硬链接成一份
 cmp "$M/1.7B-Base/speech_tokenizer/model.safetensors" "$M/1.7B-CustomVoice/speech_tokenizer/model.safetensors" && \
   ln -f "$M/1.7B-CustomVoice/speech_tokenizer/model.safetensors" "$M/1.7B-Base/speech_tokenizer/model.safetensors"
+# 存成 8 位（服务用的版本）：在仓库根目录运行；speech_tokenizer/ 以硬链接放进 -q8 目录
+for v in CustomVoice Base VoiceDesign; do
+  .venv/bin/python -I services/tts/save_q8.py "$M/1.7B-$v" "$M/1.7B-$v-q8"
+done
 ```
 
-权重原样使用（BF16），不需要转换。三个入口合计约 12.2 GB（编解码器硬链接后）。
+服务读 `1.7B-<变体>-q8`（`MLX_ZERO_COPY_LOAD=1` 零拷贝映射）：talker、码本预测器、各 embedding 和输出头都是 8 位权重
+（W8A16，group 32），激活 BF16，语音解码器保持官方 FP32。和 BF16 比（同一会话独占测量）：实时率低 19–23%，MLX 峰值少 1.5–1.8 GB，
+16 句 × 3 变体的 ASR 回写错误都是 0%（与 BF16 相同）。三个 `-q8` 目录合计 7.19 GB（BF16 原版 12.2 GB，只在重新生成时需要，
+生成后可以删除）。要改回 BF16，把 `tts.yaml` 里的 `--model` 指回不带 `-q8` 的目录即可。
 
 ## CosyVoice3（2026-11-18 下线）
 

@@ -125,6 +125,7 @@
 !/services/text/strata/configs/strata-uncensored-c262k-p2-compact.json.in
 !/services/tts/
 /services/tts/*
+!/services/tts/save_q8.py
 !/services/tts/server.py
 !/services/video/
 /services/video/*

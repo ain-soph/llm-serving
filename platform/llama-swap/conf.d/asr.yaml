@@ -20,7 +20,7 @@ models:
     checkEndpoint: /health
     ttl: 600
     capacities:
-      gpu: 6000             # wired delta peak 4545 MiB (~4.8 GB), plus margin
+      gpu: 4500             # wired delta peak 3198 MiB with the stored 8-bit weights (2026-11-18 PA2), plus margin; was 6000 (FP16, +4545 MiB)
     evict_cost: 10
 
   # Qwen3-ASR-1.7B (largest open Qwen3-ASR) via mlx-qwen3-asr + Qwen3-ForcedAligner-0.6B for timestamps. Both stored
