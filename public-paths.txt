@@ -41,8 +41,10 @@ public-paths.txt
 pyproject.toml
 services/asr/http_api.py
 services/asr/qwen3-asr-mlx/mlxaudio_engine.py
+services/asr/qwen3-asr-mlx/save_q8.py
 services/asr/qwen3-asr-mlx/server.py
 services/asr/w8a8/asr_quant.py
+services/asr/whisper/save_q8.py
 services/asr/whisper/serve-mlx.sh
 services/asr/whisper/server.py
 services/decisions/decider/decider_mlx.py

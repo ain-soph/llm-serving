@@ -41,6 +41,21 @@ class DeploymentTests(unittest.TestCase):
                                   "qwen3-embedding/zc-0.6b-fp16", "qwen3-embedding/zc-4b-fp16",
                                   "qwen3-embedding/mix-8b"])
 
+    def test_speech_models_are_required(self):
+        # ASR / TTS entries load stored 8-bit copies (<name>-q8); doctor checks exactly the directories they read.
+        required = json.loads((ROOT / "models.required.json").read_text())
+        served = []
+        for name in ("asr.yaml", "tts.yaml"):
+            served += re.findall(r"--(?:model|aligner) \$\{env\.LLM_MODELS\}/(\S+)",
+                                 (ROOT / "platform/llama-swap/conf.d" / name).read_text())
+        self.assertTrue(served)
+        for directory in served:
+            self.assertTrue(directory.endswith("-q8"), directory)
+            self.assertIn(directory, required["directories"])
+        speech = ("whisper-", "qwen3-asr", "qwen3-forced", "qwen3-tts")
+        listed = [d for d in required["directories"] if d.startswith(speech)]
+        self.assertEqual(sorted(listed), sorted(set(served)))
+
     def test_privacy_scanner_checks_actual_content(self):
         name = Path("sample.py")
         self.assertEqual(privacy_check.inspect_file(name, b'URL = "http://127.0.0.1:8080"'), [])

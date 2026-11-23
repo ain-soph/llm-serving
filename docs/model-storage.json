@@ -88,22 +88,26 @@
     },
     "whisper-large-v3": {
       "relative_paths": [
-        "whisper-large-v3-mlx"
+        "whisper-large-v3-q8"
       ],
-      "files": 4,
-      "bytes": 3083522487,
-      "GB": 3.083522,
-      "allocated_bytes": 3083534336
+      "measured_on": "2026-11-23",
+      "files": 3,
+      "bytes": 2291261640,
+      "GB": 2.291262,
+      "allocated_bytes": 2291269632,
+      "note": "Stored pre-quantized (services/asr/whisper/save_q8.py, 8-bit decoder weights, group 32). The FP16 original whisper-large-v3-mlx (3.08 GB) is only needed to rebuild it."
     },
     "qwen3-asr-1.7b": {
       "relative_paths": [
-        "qwen3-asr-1.7b",
-        "qwen3-forcedaligner-0.6b"
+        "qwen3-asr-1.7b-q8",
+        "qwen3-forcedaligner-0.6b-q8"
       ],
+      "measured_on": "2026-11-23",
       "files": 22,
-      "bytes": 6543186767,
-      "GB": 6.543187,
-      "allocated_bytes": 6543245312
+      "bytes": 3692698348,
+      "GB": 3.692698,
+      "allocated_bytes": 3692765184,
+      "note": "Recognizer and forced aligner stored pre-quantized (services/asr/qwen3-asr-mlx/save_q8.py, 8-bit weights, group 32). The BF16 originals (6.54 GB) are only needed to rebuild them."
     },
     "minimax-h3-image": {
       "relative_paths": [
