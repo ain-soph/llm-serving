@@ -8,8 +8,8 @@
 
 What it reads (see bin/gpu-lock for the format; docs/gpu-lock.md for the rules):
   .locks/holders/NAME    "MB since DATE TIME", "chain: PIDS" (first = the shell that took the share), "agent: PID NAME";
-                         mtime = last heartbeat
-  .locks/queue/T-NAME    the requested MB; T = arrival time, mtime = last poll
+                         mtime = last heartbeat; optional "estimated_release: EPOCH_SECONDS"
+  .locks/queue/T-NAME    the requested MB; T = arrival time, mtime = last poll; optional "estimate_s: SECONDS"
   .locks/turns/NAME      when NAME's turn came; .locks/forced/NAME: watchdog notices; .locks/drain-since
   bin/gpu-pool           the pool (MB), as gpu-lock computes it
   llama-swap /api/events (127.0.0.1:8081, the first messages only): models not stopped, paused or not, requests in
@@ -48,6 +48,8 @@ BASE_TOL = 6000
 STALE = 3600
 TICKET_STALE = 900
 BACKFILL_MAX = 1200
+PRIORITY_AGE = 1800
+PRIORITIES = ("low", "normal", "high")
 TURN_MAX = 300
 MUTEX_STALE = 30          # gpu-lock removes a mutex older than this
 LOCAL = {"127.0.0.1", "::1", "localhost", ""}   # bin/lsw-inflight: requests from these are not waited for
@@ -84,7 +86,7 @@ def signature(locks):
                 sig.append((sub, n, st.st_mtime_ns, st.st_size))
             except FileNotFoundError:
                 sig.append((sub, n, None, None))
-    for n in ("drain-since",):
+    for n in ("drain-since", "grant-seq"):
         try:
             st = os.stat(locks / n)
             sig.append(("", n, st.st_mtime_ns, st.st_size))
@@ -110,6 +112,7 @@ def _mtime(path):
 def read_raw(locks):
     """One pass over the state files. Entries whose file vanished between listing and reading are left out."""
     raw = {"holders": {}, "queue": [], "turns": {}, "forced": {}, "drain_since": None}
+    raw["grant_seq"] = unsigned((_read(locks / "grant-seq") or "").strip(), 0)
     for n in _entries(locks / "holders"):
         p = locks / "holders" / n
         text, mt = _read(p), _mtime(p)
@@ -222,17 +225,19 @@ def mb_of(text, pool):
     return int(first[0]) if first and first[0].isdigit() else pool
 
 
-def may_take(me, pool, holders, queue, turns, now):
-    """gpu-lock's may_take on this snapshot: (ok, reason). holders {name: mb}, queue [(arrived, name, mb)] in order;
-    a waiter without a turns file would get one now."""
+def may_take(me, pool, holders, queue, turns, now, yielding=()):
+    """Return (ok, reason, seconds until backfill protection), with 0 for active protection."""
+    now = int(now)
     free = pool - sum(holders.values())
     if me in holders:
         mb = next((m for _, n, m in queue if n == me), pool)
         ok = mb <= free + holders[me]
-        return ok, "growth fits" if ok else f"growth needs {mb - holders[me]} MB, {free} free"
+        return ok, "growth fits" if ok else f"growth needs {mb - holders[me]} MB, {free} free", None
     for arrived, n, mb in queue:
         if n == me:
-            return (True, "fits") if mb <= free else (False, f"needs {mb} MB, {max(free, 0)} MB free for it")
+            if mb <= free:
+                return True, "fits", None
+            return False, f"needs {mb} MB, {max(free, 0)} MB free for it", max(0, arrived + BACKFILL_MAX + 1 - now)
         if n in holders:
             if mb - holders[n] <= free:
                 free -= mb - holders[n]
@@ -240,10 +245,12 @@ def may_take(me, pool, holders, queue, turns, now):
         if mb <= free:
             if now - turns.get(n, now) > TURN_MAX:
                 continue
+            if me in yielding:
+                return False, f"yielding a turn to {n} between slices", None
             free -= mb
         elif now - arrived > BACKFILL_MAX:
-            return False, f"nobody may pass {n} (waiting > {BACKFILL_MAX // 60} min)"
-    return False, "not queued"
+            return False, f"nobody may pass {n} (waiting > {BACKFILL_MAX // 60} min; needs {mb - free} MB more)", None
+    return False, "not queued", None
 
 
 def grow_deadlock(pool, holders, queue):
@@ -262,10 +269,46 @@ def grow_deadlock(pool, holders, queue):
     return set(want)
 
 
+def record_fields(text):
+    return dict(line.split(": ", 1) for line in text.splitlines()[1:] if ": " in line)
+
+
+def unsigned(value, default=None):
+    return int(value) if value and re.fullmatch(r"[0-9]{1,15}", value) else default
+
+
+def slice_fields(fields):
+    return {"slice": unsigned(fields.get("slice")), "slices": unsigned(fields.get("slices"))}
+
+
+def ticket_priority(arrived, text, now, grants):
+    fields = record_fields(text)
+    base = fields.get("priority", "normal")
+    if base not in PRIORITIES:
+        base = "normal"
+    credit = max(0, int(now) - unsigned(fields.get("age_since"), arrived))
+    effective = min(2, PRIORITIES.index(base) + credit // PRIORITY_AGE)
+    yield_after = unsigned(fields.get("yield_after"))
+    return {
+        "priority": base, "effective_priority": PRIORITIES[effective],
+        "priority_credit_s": credit,
+        "priority_next_in_s": PRIORITY_AGE - credit % PRIORITY_AGE if effective < 2 else None,
+        "yielding": yield_after is not None and grants <= yield_after,
+        **slice_fields(fields),
+    }
+
+
+def stale_ticket(text, mtime, now, procs):
+    runner = unsigned(record_fields(text).get("run_pid"))
+    return now - mtime > TICKET_STALE or bool(runner and not alive(runner, procs))
+
+
 def parse_holder(name, text, mtime, pool, now, procs):
     lines = text.splitlines()
     m = HOLDER_RE.match(lines[0]) if lines else None
-    kv = dict(l.split(": ", 1) for l in lines[1:] if ": " in l)
+    kv = record_fields(text)
+    release = kv.get("estimated_release", "")
+    release = int(release) if re.fullmatch(r"[1-9][0-9]{0,11}", release) else None
     chain = []
     for p in kv.get("chain", "").split():
         if p.isdigit() and int(p) not in chain:      # gpu-lock's acquire loop appends the chain once per poll
@@ -283,11 +326,32 @@ def parse_holder(name, text, mtime, pool, now, procs):
     shell_alive, agent_alive = alive(shell, procs), alive(agent_pid, procs)
     cmd_pid = shell if shell_alive else agent_pid if agent_alive else None
     beat = int(now - mtime)
+    runner = unsigned(kv.get("run_pid"))
+    worker = unsigned(kv.get("worker_pgid"))
+    deadline = unsigned(kv.get("lease_deadline"))
+    stale = beat > STALE
+    if runner:
+        stale = not alive(runner, procs)
+        if stale and worker and worker > 1:
+            try:
+                os.killpg(worker, 0)
+                stale = False
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                stale = False
     return {
         "name": name, "mb": mb, "exclusive": mb >= pool,
         "since": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(since)) if since else None,
         "held_s": int(now - since) if since else None,
-        "heartbeat_age_s": beat, "stale": beat > STALE,
+        "estimated_release_epoch_s": release,
+        "estimated_remaining_s": release - int(now) if release is not None else None,
+        "heartbeat_age_s": beat, "stale": stale,
+        "priority": kv.get("priority", "normal"),
+        "runner_pid": runner, "worker_pgid": worker,
+        "lease_deadline_epoch_s": deadline,
+        "lease_remaining_s": deadline - int(now) if deadline is not None else None,
+        **slice_fields(kv),
         "partial": not m,
         "shell_pid": shell, "shell_alive": shell_alive, "chain": chain,
         "agent_pid": agent_pid, "agent": " ".join(agent[1:]) or None, "agent_alive": agent_alive,
@@ -307,23 +371,31 @@ def build(locks=LOCKS, swap=True, now=None, procs=None, clock=time.time):
     holders = [parse_holder(n, t, mt, pool, now, procs) for n, (t, mt) in sorted(raw["holders"].items())]
     live = {h["name"]: h["mb"] for h in holders if not h["stale"]}       # what gpu-lock sees after its prune
     turns = {n: int(t.strip()) for n, t in raw["turns"].items() if t.strip().isdigit()}
-    tickets = sorted(raw["queue"])                                       # gpu-lock's (Non) glob: by arrival
-    q = [(a, n, mb_of(t, pool)) for a, n, t, mt in tickets if now - mt <= TICKET_STALE]
+    priority = {n: ticket_priority(a, t, now, raw["grant_seq"]) for a, n, t, _ in raw["queue"]}
+    tickets = sorted(raw["queue"], key=lambda ticket: (
+        priority[ticket[1]]["yielding"], -PRIORITIES.index(priority[ticket[1]]["effective_priority"]),
+        ticket[0], unsigned(record_fields(ticket[2]).get("order_ns"), 0), ticket[1],
+    ))
+    stale_names = {n for _, n, t, mt in tickets if stale_ticket(t, mt, now, procs)}
+    q = [(a, n, mb_of(t, pool)) for a, n, t, _ in tickets if n not in stale_names]
+    yielding = {n for _, n, _ in q if priority[n]["yielding"]}
     dead = grow_deadlock(pool, live, q)
     waiting = waiting_procs(procs)
     queue = []
     for pos, (arrived, name, text, mt) in enumerate(tickets, 1):
         mb = mb_of(text, pool)
-        stale = now - mt > TICKET_STALE
-        pids = waiting.get(name, [])
+        stale = name in stale_names
+        runner = unsigned(record_fields(text).get("run_pid"))
+        pids = waiting.get(name, []) or ([runner] if runner and alive(runner, procs) else [])
         refused = name in dead
         if not refused and pids:          # a waiter inside the script holding another share that it cannot fit beside
             up = set(ancestors(pids[0], procs))
             for h in holders:
                 if h["name"] != name and h["shell_pid"] in up and h["shell_alive"] and mb + h["mb"] > pool:
                     refused = True
-        ok, why = (False, "stale: dropped on the next gpu-lock call") if stale else \
-            may_take(name, pool, live, q, turns, now)
+        ok, why, backfill_in = (False, "stale: dropped on the next gpu-lock call", None) if stale else \
+            may_take(name, pool, live, q, turns, now, yielding)
+        estimate = re.search(r"(?m)^estimate_s: ([1-9][0-9]{0,7})$", text)
         turn_s = int(now - turns[name]) if name in turns else None
         status = "deadlock" if refused else "stale" if stale else "ready" if ok else "waiting"
         if turn_s is not None and not ok and not stale:
@@ -332,9 +404,12 @@ def build(locks=LOCKS, swap=True, now=None, procs=None, clock=time.time):
             "pos": pos, "name": name, "mb": mb, "exclusive": mb >= pool,
             "grow_from": live.get(name), "arrived": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(arrived)),
             "waited_s": int(now - arrived), "last_poll_s": int(now - mt), "stale": stale,
+            "estimated_duration_s": int(estimate[1]) if estimate else None,
+            "backfill_protect_in_s": None if refused else backfill_in,
             "pids": pids, "partial": not text.strip(),
             "status": status, "reason": "would be refused (exit 4) on its next poll" if refused else why,
             "deadlock": refused, "turn_since_s": turn_s,
+            **priority[name],
         })
     reserved = sum(live.values())
     snap = {
@@ -459,6 +534,12 @@ def fmt_dur(s):
     return f"{s // 3600}h{s % 3600 // 60:02d}m"
 
 
+def fmt_estimate(s):
+    if s is None:
+        return "-"
+    return ("+" if s < 0 else "~") + fmt_dur(abs(s))
+
+
 def gb(mb):
     return f"{mb / 1024:.1f} GB"
 
@@ -489,7 +570,7 @@ def render(snap, width=100):
                   if age > MUTEX_STALE else "") if age is not None else "state files changing")
                   + "; showing the last read, it may be mid-change", "warn"))
     if snap["stale_reserved_mb"]:
-        L.append((f"+{snap['stale_reserved_mb']} MB held by stale shares (no heartbeat > {STALE // 60} min): "
+        L.append((f"+{snap['stale_reserved_mb']} MB held by stale shares: "
                   "dropped on the next gpu-lock call, not counted above", "warn"))
     sw = snap["llama_swap"]
     if sw is not None:
@@ -527,35 +608,53 @@ def render(snap, width=100):
     L.append(("", ""))
     L.append((f"HOLDERS ({len(snap['holders'])})", "bold"))
     if snap["holders"]:
-        L.append((f"{'NAME':<20} {'MB':>6} {'HELD':>7} {'BEAT':>7} {'PID':>6} {'ALIVE':<6} {'AGENT':<14} COMMAND", "head"))
+        L.append((f"{'NAME':<20} {'MB':>6} {'HELD':>7} {'ETA':>8} {'BEAT':>7} {'PID':>6} {'ALIVE':<6} {'AGENT':<14} COMMAND", "head"))
     for h in snap["holders"]:
         al = {True: "yes", False: "DEAD", None: "?"}[h["alive"]]
         if h["alive"] and h["shell_pid"] and not h["shell_alive"]:
             al = "agent"                # the taking shell exited, the agent is still there
         agent = f"{h['agent_pid']} {h['agent'] or ''}".strip() if h["agent_pid"] else "-"
         cols = (f"{h['name'][:20]:<20} {fmt_mb(h['mb'], pool) + ('?' if h['partial'] else ''):>6} "
-                f"{fmt_dur(h['held_s']):>7} {fmt_dur(h['heartbeat_age_s']):>7} {str(h['shell_pid'] or '-'):>6} "
+                f"{fmt_dur(h['held_s']):>7} {fmt_estimate(h['estimated_remaining_s']):>8} "
+                f"{fmt_dur(h['heartbeat_age_s']):>7} {str(h['shell_pid'] or '-'):>6} "
                 f"{al:<6} {agent[:14]:<14} ")
         cmd = " ".join((h["command"] or "-").split())
         style = "bad" if h["alive"] is False or h["stale"] else ""
         L.append((cols + cmd[:max(0, width - len(cols))], style))
+        if h["lease_remaining_s"] is not None:
+            remaining = max(0, h["lease_remaining_s"])
+            L.append((f"    slice {h['slice']}/{h['slices']}  {h['priority']}  lease {fmt_dur(remaining)} left",
+                      "warn" if remaining < 60 else "dim"))
         if h["stale"]:
-            L.append((f"    stale: no heartbeat for {fmt_dur(h['heartbeat_age_s'])}; dropped on the next gpu-lock call",
-                      "bad"))
+            why = "managed runner and worker have exited" if h["runner_pid"] else f"no heartbeat for {fmt_dur(h['heartbeat_age_s'])}"
+            L.append((f"    stale: {why}; dropped on the next gpu-lock call", "bad"))
         elif h["alive"] is False:
             L.append(("    its shell and agent have exited: a leaked share until released or stale", "bad"))
     L.append(("", ""))
     L.append((f"QUEUE ({len(snap['queue'])})", "bold"))
+    protected = next((q for q in snap["queue"] if q["backfill_protect_in_s"] is not None), None)
+    if protected:
+        seconds = protected["backfill_protect_in_s"]
+        when = f"in {fmt_dur(seconds)} if still waiting" if seconds else "active"
+        L.append((f"Backfill protection for {protected['name']}: {when}", "warn" if not seconds else "dim"))
+    detailed = width >= 104
+    name_width = 20 if detailed else 16
     if snap["queue"]:
-        L.append((f"{'#':>2} {'NAME':<20} {'WANTS':>12} {'WAITED':>7} {'POLL':>7} {'PID':>6} STATUS", "head"))
+        heading = f"{'#':>2} {'NAME':<{name_width}} {'WANTS':>12} {'PRI':>6} {'WAITED':>7} {'EST RUN':>8} "
+        if detailed:
+            heading += f"{'BOOST':>7} {'PID':>6} "
+        L.append((heading + "STATUS", "head"))
     for q in snap["queue"]:
         want = fmt_mb(q["mb"], pool) + ("?" if q["partial"] else "")
         if q["grow_from"] is not None:
             want = f"{fmt_mb(q['grow_from'], pool)}->{want}"
         pid = str(q["pids"][0]) if q["pids"] else "-"
-        cols = (f"{q['pos']:>2} {q['name'][:20]:<20} {want:>12} {fmt_dur(q['waited_s']):>7} "
-                f"{fmt_dur(q['last_poll_s']):>7} {pid:>6} ")
-        text = f"{q['status']}: {q['reason']}"
+        cols = (f"{q['pos']:>2} {q['name'][:name_width]:<{name_width}} {want:>12} {q['effective_priority']:>6} {fmt_dur(q['waited_s']):>7} "
+                f"{fmt_estimate(q['estimated_duration_s']):>8} ")
+        if detailed:
+            cols += f"{fmt_dur(q['priority_next_in_s']):>7} {pid:>6} "
+        item = f"{q['slice']}/{q['slices']} " if q["slice"] else ""
+        text = f"{item}{q['status']}: {q['reason']}"
         style = {"deadlock": "bad", "stale": "dim", "ready": "bold"}.get(q["status"], "")
         L.append((cols + text[:max(0, width - len(cols))], style))
     return L

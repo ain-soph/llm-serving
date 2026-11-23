@@ -1,0 +1,222 @@
+#!/usr/bin/python3 -I
+"""Process supervisor for gpu-lock run. State changes go through the lock's mutex."""
+import argparse
+import os
+from pathlib import Path
+import re
+import runpy
+import secrets
+import signal
+import subprocess
+import sys
+import time
+
+HERE = Path(__file__).resolve()
+LOCK = HERE.with_name("gpu-lock")
+LOCKS = Path(os.environ.get("GPU_LOCK_DIR") or Path.home() / "llm-serving/.locks")
+SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+POLL_S = 30
+interrupted = None
+
+
+def remember_signal(sig, _frame):
+    global interrupted
+    interrupted = sig
+
+
+def lock(*args, env=None, quiet=False):
+    return subprocess.run([str(LOCK), *args], env=env,
+                          stdout=subprocess.DEVNULL if quiet else None).returncode
+
+
+def read_holder(name):
+    lines = (LOCKS / "holders" / name).read_text().splitlines()
+    fields = dict(line.split(": ", 1) for line in lines[1:] if ": " in line)
+    return int(lines[0].split()[0]), fields
+
+
+def group_exists(child):
+    child.poll()
+    try:
+        os.killpg(child.pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def signal_group(child, sig):
+    try:
+        os.killpg(child.pid, sig)
+    except ProcessLookupError:
+        pass
+
+
+def stop_group(child, grace):
+    if not group_exists(child):
+        return
+    signal_group(child, signal.SIGTERM)
+    deadline = time.monotonic() + grace
+    while group_exists(child) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    signal_group(child, signal.SIGKILL)
+    while group_exists(child):
+        time.sleep(0.1)
+
+
+def memguard_functions():
+    installed = HERE.with_name("memguard")
+    source = HERE.parents[2] / "tools/memguard"
+    return runpy.run_path(str(installed if installed.is_file() else source))
+
+
+def guard(name, command):
+    """Own one worker group. The worker waits on a pipe until its group is recorded."""
+    reserved, fields = read_holder(name)
+    deadline = int(fields["lease_deadline"])
+    parent = int(fields["run_pid"])
+    timeout = time.monotonic() + max(0, deadline - time.time())
+    grace = min(5, max(0.1, (timeout - time.monotonic()) / 4))
+    memory = memguard_functions()
+    child_env = {k: v for k, v in os.environ.items() if not k.startswith("GPU_LOCK_RUN_")}
+    child_env.update(GPU_LOCK_SLICE=fields["slice"], GPU_LOCK_SLICES=fields["slices"],
+                     GPU_LOCK_DEADLINE_EPOCH_S=str(deadline))
+    read_fd, write_fd = os.pipe()
+    child = None
+    try:
+        child = subprocess.Popen([sys.executable, "-I", str(HERE), "_exec", str(read_fd), *command],
+                                 env=child_env, start_new_session=True, pass_fds=(read_fd,))
+        if lock("_managed_child", name, str(child.pid)) != 0:
+            return 5
+        if not interrupted and os.getppid() == parent and time.monotonic() < timeout:
+            os.write(write_fd, b"1")
+        os.close(write_fd)
+        write_fd = None
+        low = 0
+        next_sample = time.monotonic() + 1
+        while child.poll() is None:
+            if interrupted or os.getppid() != parent:
+                return 128 + int(interrupted or signal.SIGTERM)
+            if time.monotonic() >= timeout - grace:
+                print(f"gpu-lock: {name} slice {fields['slice']}/{fields['slices']} reached its lease deadline",
+                      file=sys.stderr, flush=True)
+                return 124
+            if time.monotonic() >= next_sample:
+                low = low + 1 if memory["level"]() < 12 else 0
+                if low >= 3 or memory["tree_rss_gb"](child.pid) > reserved / 1024:
+                    print(f"memguard: {name} exceeded its memory allowance", file=sys.stderr, flush=True)
+                    return 137
+                next_sample = time.monotonic() + 1
+            time.sleep(0.1)
+        return child.returncode if child.returncode >= 0 else 128 - child.returncode
+    finally:
+        os.close(read_fd)
+        if write_fd is not None:
+            os.close(write_fd)
+        if child is not None:
+            stop_group(child, min(grace, max(0, timeout - time.monotonic())))
+        if os.getppid() != parent:
+            lock("release", name, quiet=True)
+
+
+def positive(value):
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("a positive integer is required")
+    return parsed
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(prog="gpu-lock run",
+                                     usage="%(prog)s NAME [MB|all] [options] -- COMMAND [ARGS...]")
+    parser.add_argument("name")
+    parser.add_argument("mb", nargs="?", default="all")
+    parser.add_argument("--priority", choices=("low", "normal", "high"), default="normal")
+    parser.add_argument("--eta-min", type=positive, help="estimated GPU occupancy per slice")
+    parser.add_argument("--lease-min", type=positive, default=30, help="time limit per slice (default 30, maximum 60)")
+    parser.add_argument("--slices", type=positive, default=1, help="number of times to run COMMAND")
+    parser.add_argument("--from-slice", type=positive, default=1, help="resume at a slice number")
+    separator = argv.index("--") if "--" in argv else len(argv)
+    args = parser.parse_args(argv[:separator])
+    args.command = argv[separator + 1:]
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.]*", args.name):
+        parser.error("NAME must begin with a letter, digit or underscore")
+    if not args.command or args.lease_min > 60 or args.from_slice > args.slices:
+        parser.error("provide a command after --, a lease of 1–60 minutes, and a valid starting slice")
+    return args
+
+
+def run(args):
+    token = secrets.token_hex(16)
+    lease_s = args.lease_min * 60
+    poll_s = POLL_S
+    if os.environ.get("GPU_LOCK_DIR") and os.environ.get("GPU_LOCK_NOSWAP"):
+        lease_s = int(os.environ.get("GPU_LOCK_TEST_LEASE_S", lease_s))
+        poll_s = float(os.environ.get("GPU_LOCK_TEST_POLL_S", poll_s))
+    request = [args.name, args.mb, "--priority", args.priority]
+    if args.eta_min:
+        request.extend(("--eta-min", str(args.eta_min)))
+    env = dict(os.environ, GPU_LOCK_RUN_TOKEN=token, GPU_LOCK_RUN_PID=str(os.getpid()),
+               GPU_LOCK_RUN_LEASE_S=str(lease_s), GPU_LOCK_RUN_SLICES=str(args.slices))
+    held = queued = False
+    try:
+        for index in range(args.from_slice, args.slices + 1):
+            env["GPU_LOCK_RUN_SLICE"] = str(index)
+            while not interrupted:
+                result = lock("try", *request, env=env)
+                if result == 0:
+                    held, queued = True, False
+                    break
+                if result != 1:
+                    return result
+                queued = True
+                time.sleep(poll_s)
+            if interrupted:
+                return 128 + int(interrupted)
+            worker = subprocess.Popen([sys.executable, "-I", str(HERE), "_guard", args.name, *args.command],
+                                      env=env, start_new_session=True)
+            while worker.poll() is None:
+                if interrupted:
+                    worker.send_signal(interrupted)
+                    worker.wait()
+                    return 128 + int(interrupted)
+                time.sleep(0.1)
+            if worker.returncode:
+                return worker.returncode if worker.returncode > 0 else 128 - worker.returncode
+            more = index < args.slices
+            if more:
+                env["GPU_LOCK_RUN_SLICE"] = str(index + 1)
+                result = lock("_rotate", *request, env=env)
+            else:
+                result = lock("release", args.name, env=env)
+            if result:
+                return result
+            held, queued = False, more
+        return 0
+    finally:
+        if held:
+            lock("release", args.name, env=env)
+        if queued:
+            lock("cancel", args.name, env=env)
+
+
+def main(argv):
+    if argv[:1] == ["_exec"]:
+        fd = int(argv[1])
+        allowed = os.read(fd, 1)
+        os.close(fd)
+        if allowed == b"1":
+            os.execvp(argv[2], argv[2:])
+        return 125
+    for sig in SIGNALS:
+        signal.signal(sig, remember_signal)
+    if argv[:1] == ["_guard"]:
+        return guard(argv[1], argv[2:])
+    return run(parse_args(argv))
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except (OSError, ValueError) as error:
+        print(f"gpu-lock: {error}", file=sys.stderr)
+        sys.exit(3)

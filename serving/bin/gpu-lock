@@ -9,6 +9,10 @@
 #   gpu-lock heartbeat NAME     refresh your share during long sessions (stale after 60 min without one)
 #   gpu-lock release NAME       give your share back
 #   gpu-lock status             show holders, reserved/free MB and the queue
+#   gpu-lock run NAME [MB] [--lease-min N] [--slices N] -- COMMAND
+#     supervise one process group per slice and yield to waiting work between slices
+#   Add --eta-min MINUTES to acquire/try to publish an estimated GPU session length, or to heartbeat
+#   to update the estimated minutes remaining. gpu-top displays the estimates.
 # bin/gpu-lock-watchdog can force-release shares idle on the GPU; its LaunchAgent was removed on 2026-11-15 at the
 # user's request (plist kept as bin/com.local.gpu-lock-watchdog.plist.disabled). forced/NAME notices still show if present.
 # A holder calling try/acquire again with a different MB resizes its share: shrinking is immediate; growing
@@ -16,8 +20,8 @@
 #
 # MB omitted (or "all") = exclusive: the whole pool, as in the old one-holder lock. Use it for runs that need
 # the GPU to themselves (throughput/latency benchmarks, llama-swap restarts via lsw-apply).
-# Queue: first come, first served, but a later request that fits may pass earlier ones that do not fit
-# ("backfill") until the oldest of those has waited BACKFILL_MAX; then everyone waits behind it.
+# Queue: effective priority first, then FIFO. A later request that fits may backfill until an earlier blocked
+# request has waited BACKFILL_MAX. Spending an aging boost reduces the accumulated boost of tickets behind it.
 # Waiting agents must call try/acquire at least every 15 min or they lose their place. When a waiter's turn comes
 # (it fits and nobody ahead does) and it does not take it within TURN_MAX (5 min), later requests that fit may go
 # first; it keeps its ticket and takes its turn on a later poll.
@@ -36,6 +40,7 @@ DIR=${GPU_LOCK_DIR:-$HOME/llm-serving/.locks}   # override only for tests
 HOLDERS=$DIR/holders
 QUEUE=$DIR/queue
 TURNS=$DIR/turns          # turns/NAME: when NAME's turn came (cleared when it polls or takes)
+GRANTS=$DIR/grant-seq     # successful new grants, used to yield a turn between slices
 LEGACY=$DIR/gpu.lock      # the old single-holder lock: kept as a "busy" sentinel for old copies of this script
 POOL=$($HOME/llm-serving/bin/gpu-pool 2>/dev/null)   # MB, the llama-swap capacity pool: iogpu.wired_limit_mb minus the
 [[ $POOL == <-> ]] || POOL=77000                     # system baseline and the always-loaded models (bin/gpu-pool)
@@ -45,10 +50,22 @@ BASE_TOL=6000             # MB: a grant also needs (wired now) <= BASE_TOL + MB 
 STALE=3600                # holder without heartbeat
 TICKET_STALE=900          # queued agent that stopped polling
 BACKFILL_MAX=1200         # after this long at the head of the queue, nobody may pass a waiting request
+PRIORITY_AGE=1800
+MAX_LEASE=3600
 TURN_MAX=300              # a waiter whose turn has come (it fits, nobody ahead) and that does not take it within
                           # this many seconds stops holding the room: the next ones may go first (user rule)
 KEY_FILE=$HOME/llm-serving/platform/llama-swap/.api_key
-cmd=${1:-status}; name=${2:-}; want=${3:-all}; explicit=${3:+1}
+cmd=${1:-status}; name=${2:-}; want=all; explicit=
+estimate_s=; ticket_estimate_s=; wait_reason=
+priority=; run_token=${GPU_LOCK_RUN_TOKEN:-}; run_pid=${GPU_LOCK_RUN_PID:-}
+slice=${GPU_LOCK_RUN_SLICE:-}; slices=${GPU_LOCK_RUN_SLICES:-}; lease_s=${GPU_LOCK_RUN_LEASE_S:-}
+if [[ $cmd == run ]]; then exec "${0:A:h}/gpu-lock-run" "${@:2}"; fi
+if [[ -n $run_token ]] && {
+  [[ ! $run_token =~ '^[0-9a-f]{32}$' || $run_pid != <2-> || $slice != <1-> || $slices != <1-> || $lease_s != <1-> ]] ||
+    (( slice > slices || lease_s > MAX_LEASE ))
+}; then
+  echo "invalid managed GPU job metadata" >&2; exit 2
+fi
 mkdir -p $HOLDERS $QUEUE $LEGACY $TURNS
 FORCED=$DIR/forced        # gpu-lock-watchdog writes forced/NAME when it releases an idle share
 # Change notice for agents that started before v2 (Codex, Antigravity, Claude sessions): printed on stderr by every
@@ -70,6 +87,22 @@ lock_state() {
 now() { date +%s; }
 mtime() { stat -f %m $1 2>/dev/null || echo 0; }
 mb_of() { local v; v=$(awk 'NR==1{print $1}' $1 2>/dev/null); [[ $v == <-> ]] && echo $v || echo $POOL; }   # empty/old file = exclusive
+field() {
+  local line prefix="$2: "
+  [[ -f $1 ]] || return
+  while IFS= read -r line; do
+    if [[ $line == "$prefix"* ]]; then print -r -- "${line#$prefix}"; return; fi
+  done < "$1"
+}
+number() { [[ ${1:-} == <-> ]] && echo "$1" || echo "${2:-0}"; }
+grant_seq() { [[ -f $GRANTS ]] && number "$(<$GRANTS)" || echo 0; }
+priority_rank() {
+  case $1 in
+    low) echo 0 ;;
+    high) echo 2 ;;
+    *) echo 1 ;;
+  esac
+}
 
 # The caller's shell chain (scripts and shells between this tool and the agent) and the agent process itself:
 # sets CHAIN (pids) and AGENT ("pid name"). Wrappers like tee/nohup/env count as part of the chain.
@@ -79,6 +112,7 @@ ancestry() {
   while (( p > 1 )); do
     c=$(ps -o comm= -p $p 2>/dev/null); pp=$(ps -o ppid= -p $p 2>/dev/null | tr -d ' ')
     [[ -n $c ]] || break
+    if [[ $p == $run_pid ]]; then CHAIN+=($p); p=$pp; continue; fi
     case ${c:t} in
       zsh|-zsh|bash|-bash|sh|dash|fish|env|nohup|timeout|tee|xargs|time) CHAIN+=($p); p=$pp ;;
       *) AGENT="$p ${c:t}"; break ;;
@@ -152,33 +186,150 @@ migrate() {
 sentinel() { echo "v2 shared lock: see $HOLDERS" > $LEGACY/holder; }
 
 prune() {
-  local t
-  for t in $HOLDERS/*(N); do (( $(now) - $(mtime $t) > STALE )) && { echo "dropping stale holder ${t:t} (no heartbeat for $(( ($(now) - $(mtime $t)) / 60 )) min)"; rm -f $t; }; done
-  for t in $QUEUE/*(N); do (( $(now) - $(mtime $t) > TICKET_STALE )) && rm -f $t; done
+  local t owner pgid stamp=$(now)
+  for t in $HOLDERS/*(N); do
+    owner=$(field "$t" run_pid)
+    if [[ $owner == <-> ]] && (( owner > 1 )); then
+      if [[ $cmd == release && ${t:t} == $name && -n $run_token ]]; then continue; fi
+      pgid=$(field "$t" worker_pgid)
+      if ! alive "$owner" && { [[ $pgid != <-> ]] || (( pgid <= 1 )) || ! kill -0 -- -$pgid 2>/dev/null; }; then
+        echo "dropping ended managed holder ${t:t}"
+        rm -f "$t"
+      fi
+    elif (( stamp - $(mtime $t) > STALE )); then
+      echo "dropping stale holder ${t:t} (no heartbeat for $(( (stamp - $(mtime $t)) / 60 )) min)"
+      rm -f "$t"
+    fi
+  done
+  for t in $QUEUE/*(N); do
+    owner=$(field "$t" run_pid)
+    if (( stamp - $(mtime $t) > TICKET_STALE )) || { [[ $owner == <2-> ]] && ! alive "$owner"; }; then
+      rm -f "$t"
+    fi
+  done
   for t in $TURNS/*(N); do [[ -n $(ticket_of ${t:t}) ]] || rm -f $t; done
 }
 used() { local s=0 t; for t in $HOLDERS/*(N); do (( s += $(mb_of $t) )); done; echo $s; }
 nholders() { local t n=0; for t in $HOLDERS/*(N); do (( n++ )); done; echo $n; }
 ticket_of() { local t; for t in $QUEUE/*-$1(N); do echo $t; return; done }
+
+check_owner() {
+  local p=$HOLDERS/$name token
+  [[ -f $p ]] || p=$(ticket_of "$name")
+  [[ -n $p ]] || return 0
+  token=$(field "$p" run_token)
+  if [[ $token != $run_token ]]; then
+    echo "lock name '$name' belongs to another job; use a unique name or stop its runner" >&2
+    exit 5
+  fi
+}
+
+queue_order() {
+  setopt localoptions pipefail
+  local -a tickets=($QUEUE/*(N))
+  (( ${#tickets} )) || return 0
+  awk -v stamp="$1" -v seq="$2" -v interval="$PRIORITY_AGE" '
+    BEGIN {
+      for (i = 1; i < ARGC; i++) {
+        file = ARGV[i]
+        ticket = file
+        sub(/^.*\//, "", ticket)
+        arrived = ticket
+        sub(/-.*/, "", arrived)
+        age = arrived
+        rank = 1
+        enqueued = yielding = 0
+        while ((getline row < file) > 0) {
+          split(row, field, " ")
+          if (field[1] == "priority:") rank = field[2] == "low" ? 0 : (field[2] == "high" ? 2 : 1)
+          if (field[2] !~ /^[0-9]+$/) continue
+          if (field[1] == "age_since:") age = field[2]
+          if (field[1] == "order_ns:") enqueued = field[2]
+          if (field[1] == "yield_after:") yielding = (seq <= field[2] + 0)
+        }
+        close(file)
+        if (stamp > age + 0) rank += int((stamp - age) / interval)
+        print yielding + 0, (rank > 2 ? 2 : rank), arrived, enqueued, ticket
+      }
+    }' "$tickets[@]" | LC_ALL=C sort -k1,1n -k2,2nr -k3,3n -k4,4n -k5,5 | cut -d ' ' -f 5
+}
+
 join_queue() {  # keeps the original arrival time (in the name); refreshes the poll time and the requested MB
-  local t; t=$(ticket_of $1)
-  [[ -n $t ]] || t=$QUEUE/$(now)-$1
-  echo $2 > $t
+  local t tmp=$QUEUE/.$1.tmp eta=$estimate_s base=$priority mark=${3:-} order= age= stamp
+  t=$(ticket_of $1)
+  if [[ -z $t ]]; then
+    stamp=$(date '+%s %N')
+    t=$QUEUE/${stamp%% *}-$1
+    order=${stamp#* }
+  else
+    [[ -n $eta ]] || eta=$(field "$t" estimate_s)
+    [[ -n $base ]] || base=$(field "$t" priority)
+    [[ -n $mark ]] || mark=$(field "$t" yield_after)
+    age=$(field "$t" age_since)
+    order=$(field "$t" order_ns)
+  fi
+  ticket_estimate_s=
+  [[ $eta == <1-59999940> ]] && ticket_estimate_s=$eta
+  {
+    echo "$2"
+    if [[ -n $ticket_estimate_s ]]; then echo "estimate_s: $ticket_estimate_s"; fi
+    echo "priority: ${base:-normal}"
+    if [[ $order == <-> ]]; then echo "order_ns: $order"; fi
+    if [[ $age == <-> ]]; then echo "age_since: $age"; fi
+    if [[ $mark == <-> ]]; then echo "yield_after: $mark"; fi
+    if [[ -n $run_token ]]; then
+      printf 'run_token: %s\nrun_pid: %s\nslice: %s\nslices: %s\nlease_s: %s\n' "$run_token" "$run_pid" "$slice" "$slices" "$lease_s"
+    fi
+  } > "$tmp" && mv "$tmp" "$t" || { echo "could not write queue ticket for $1" >&2; exit 3; }
+}
+
+# When an aged request is dispatched, spend its accumulated boost on tickets behind it.
+# Preserve their original FIFO order, last poll time and backfill clock.
+consume_age() {
+  local me=$1 stamp=$2 seq=$3 t n arrived age spent rank next tmp seen=0
+  t=$(ticket_of "$me")
+  arrived=${${t:t}%%-*}
+  age=$(number "$(field "$t" age_since)" "$arrived")
+  rank=$(priority_rank "$(field "$t" priority)")
+  (( rank < 2 && stamp - age >= PRIORITY_AGE )) || return 0
+  spent=$(( stamp - age ))
+  for t in ${(f)"$(queue_order "$stamp" "$seq")"}; do
+    n=${t#*-}; arrived=${t%%-*}; t=$QUEUE/$t
+    if [[ $n == $me ]]; then
+      seen=1
+    elif (( seen )) && [[ ! -e $HOLDERS/$n ]]; then
+      age=$(number "$(field "$t" age_since)" "$arrived")
+      (( age < stamp )) || continue
+      next=$(( age + spent < stamp ? age + spent : stamp ))
+      tmp=$QUEUE/.$n.age
+      awk -v age="$next" '!/^age_since: / {print} END {print "age_since: " age}' "$t" > "$tmp" &&
+        touch -r "$t" "$tmp" && mv "$tmp" "$t" || echo "could not update aging for $n" >&2
+    fi
+  done
 }
 
 # 0 if NAME's request fits now and nobody ahead of it has a better claim.
 # A holder asking to grow goes first: it keeps its share while waiting, so making it wait behind a request that
 # needs that share would deadlock both. Its own current share counts as free room for it.
 may_take() {
-  local me=$1 free=$(( POOL - $(used) )) own=0 t n mb arrived
+  local me=$1 free=$(( POOL - $(used) )) initial_free own=0 t n mb arrived stamp=$(now) seq=$(grant_seq) mark yielding=0 ordered
+  decision_at=$stamp
+  initial_free=$free
   if [[ -e $HOLDERS/$me ]]; then
     own=$(mb_of $HOLDERS/$me)
     mb=$(mb_of $(ticket_of $me)); (( mb <= free + own )); return
   fi
-  for t in $QUEUE/*(Non); do
-    n=${${t:t}#*-}; mb=$(mb_of $t); arrived=${${t:t}%%-*}
+  mark=$(field "$(ticket_of "$me")" yield_after)
+  [[ $mark == <-> ]] && (( seq <= mark )) && yielding=1
+  ordered=$(queue_order "$stamp" "$seq") || { echo "could not sort the GPU queue" >&2; exit 3; }
+  for t in ${(f)ordered}; do
+    n=${t#*-}; arrived=${t%%-*}; t=$QUEUE/$t; mb=$(mb_of "$t")
     if [[ $n == $me ]]; then
-      (( mb <= free )); return
+      (( mb <= free )) && return 0
+      if (( free < initial_free )); then
+        wait_reason="earlier requests have priority; $(( free > 0 ? free : 0 )) MB available for $me"
+      fi
+      return 1
     fi
     if [[ -e $HOLDERS/$n ]]; then
       (( mb - $(mb_of $HOLDERS/$n) <= free )) && (( free -= mb - $(mb_of $HOLDERS/$n) ))   # a growing holder: room for its growth
@@ -188,9 +339,14 @@ may_take() {
       # it fits and came first: its turn. Leave room for it, unless it has let the turn pass for TURN_MAX
       [[ -f $TURNS/$n ]] || now > $TURNS/$n
       (( $(now) - $(<$TURNS/$n) > TURN_MAX )) && continue
+      if (( yielding )); then
+        wait_reason="yielding a turn to $n between slices"
+        return 1
+      fi
       (( free -= mb ))
     elif (( $(now) - arrived > BACKFILL_MAX )); then
-      return 1                                          # it has waited long enough: nobody passes it any more
+      wait_reason="backfill blocked by $n (waiting > $(( BACKFILL_MAX / 60 )) min; needs $(( mb - free )) MB more)"
+      return 1
     fi
   done
   return 1
@@ -247,9 +403,23 @@ swap_resume() {
     || echo "WARNING: could not resume llama-swap; check ~/llm-serving/platform/llama-swap/logs/server.log"
 }
 
+estimated_release() { echo "estimated_release: $(( $(now) + $1 ))"; }
+
+update_holder() {  # NAME [new MB] [remaining seconds]; preserve the original acquisition time and ancestry
+  local f=$HOLDERS/$1 tmp=$HOLDERS/.$1.tmp release=
+  [[ -z $3 ]] || release=$(estimated_release "$3")
+  awk -v mb="$2" -v release="$release" '
+    NR == 1 && mb != "" { if (!sub(/^[0-9]+/, mb)) $0 = mb " since " $0 }
+    release != "" && /^estimated_release: / { next }
+    { print }
+    END { if (release != "") print release }
+  ' "$f" > "$tmp" && mv "$tmp" "$f" || { echo "could not update holder $1" >&2; exit 3; }
+}
+
 take() {  # take NAME MB: 0 and a share if possible
   local first=0
-  local cur
+  local cur duration=$estimate_s tmp=$HOLDERS/.$1.tmp stamp seq base
+  wait_reason=
   if [[ -e $HOLDERS/$1 ]]; then
     cur=$(mb_of $HOLDERS/$1)
     # a holder that names a different MB resizes its share in place: shrinking always works, growing only into free room
@@ -260,11 +430,13 @@ take() {  # take NAME MB: 0 and a share if possible
         join_queue $1 $2
         may_take $1 || { echo "cannot grow $1 from $cur to $2 MB yet: free $(( POOL - $(used) )) MB; queued, you keep $cur MB meanwhile"; return 1; }
         phys_ok || return 1
-        rm -f $(ticket_of $1)
+        duration=$ticket_estimate_s
       fi
-      { echo "$2 since $(sed -n '1s/^[0-9]* since //p' $HOLDERS/$1)"; sed -n '2,$p' $HOLDERS/$1; } > $HOLDERS/$1.tmp && mv $HOLDERS/$1.tmp $HOLDERS/$1
+      update_holder "$1" "$2" "$duration"
+      (( $2 > cur )) && rm -f $(ticket_of $1)
       echo "share of $1 resized: $cur -> $2 MB (reserved $(used) of $POOL MB)"; return 0
     fi
+    if [[ -n $duration ]]; then update_holder "$1" "" "$duration"; fi
     echo "you already hold a share ($cur MB)"; return 0
   fi
   deadlock_check $1 $2
@@ -273,8 +445,22 @@ take() {  # take NAME MB: 0 and a share if possible
   may_take $1 || return 1
   (( $(nholders) == 0 )) && first=1
   phys_ok || return 1
+  stamp=$(now)
+  seq=$(grant_seq)
+  base=$(field "$(ticket_of "$1")" priority)
   rm -f $FORCED/$1
-  printf '%s\nchain: %s\nagent: %s\n' "$2 since $(date '+%F %T')" "${CHAIN[*]}" "$AGENT" > $HOLDERS/$1
+  {
+    printf '%s\nchain: %s\nagent: %s\n' "$2 since $(date '+%F %T')" "${CHAIN[*]}" "$AGENT"
+    if [[ -n $ticket_estimate_s ]]; then estimated_release "$ticket_estimate_s"; fi
+    printf 'priority: %s\n' "${base:-normal}"
+    if [[ -n $run_token ]]; then
+      printf 'run_token: %s\nrun_pid: %s\nslice: %s\nslices: %s\nlease_deadline: %s\n' \
+        "$run_token" "$run_pid" "$slice" "$slices" "$(( stamp + lease_s ))"
+    fi
+  } > "$tmp" && mv "$tmp" "$HOLDERS/$1" || { echo "could not write holder $1" >&2; exit 3; }
+  consume_age "$1" "$decision_at" "$seq"
+  printf '%s\n' "$(( seq + 1 ))" > "$DIR/.grant-seq.tmp" && mv "$DIR/.grant-seq.tmp" "$GRANTS" ||
+    echo "could not record successful GPU grant" >&2
   rm -f $(ticket_of $1)
   echo "gpu share acquired by $1: $2 MB (reserved $(used) of $POOL MB)"
   (( first && ! PAUSED )) && swap_pause
@@ -282,10 +468,10 @@ take() {  # take NAME MB: 0 and a share if possible
 }
 
 busy_msg() {
-  echo "waiting: $1 needs $2 MB, free $(( POOL - $(used) )) of $POOL MB; holders: $(holder_list); queue: $(queue_list)"
+  echo "waiting: $1 needs $2 MB, free $(( POOL - $(used) )) of $POOL MB${wait_reason:+; $wait_reason}; holders: $(holder_list); queue: $(queue_list)"
 }
 holder_list() { local t; for t in $HOLDERS/*(N); do echo -n "${t:t}=$(mb_of $t) "; done; }
-queue_list() { local t; for t in $QUEUE/*(Non); do echo -n "${${t:t}#*-}=$(mb_of $t) "; done; }
+queue_list() { local t; for t in ${(f)"$(queue_order "$(now)" "$(grant_seq)")"}; do echo -n "${t#*-}=$(mb_of "$QUEUE/$t") "; done; }
 
 need() {
   [[ -n $name ]] || { echo "usage: gpu-lock $cmd NAME${1:+ [MB]}"; exit 2; }
@@ -298,17 +484,65 @@ parse_mb() {
   (( want < 1 )) && { echo "MB must be at least 1"; exit 2; }
 }
 
+parse_estimate() {
+  (( $# == 0 )) && return 0
+  if (( $# != 2 )) || [[ $1 != --eta-min || ! $2 =~ '^[0-9]{1,6}$' ]] || (( 10#$2 == 0 )); then
+    echo "use --eta-min MINUTES with a positive whole number (up to 999999)" >&2
+    exit 2
+  fi
+  estimate_s=$(( 10#$2 * 60 ))
+}
+
+parse_request() {
+  if (( $# )) && [[ $1 != --* ]]; then
+    want=${1:-all}; explicit=${1:+1}; shift
+  fi
+  parse_mb
+  while (( $# )); do
+    case $1 in
+      --eta-min) parse_estimate "${@[1,2]}" ;;
+      --priority)
+        if [[ ${2:-} != (low|normal|high) ]]; then echo "use --priority low|normal|high" >&2; exit 2; fi
+        priority=$2 ;;
+      *) echo "unknown option: $1" >&2; exit 2 ;;
+    esac
+    shift 2
+  done
+}
+
+release_holder() {
+  local pgid
+  [[ -e $HOLDERS/$name ]] || { echo "not a holder: $name (holders: $(holder_list))"; exit 1; }
+  pgid=$(field "$HOLDERS/$name" worker_pgid)
+  if [[ $pgid == <2-> ]] && kill -0 -- -$pgid 2>/dev/null; then
+    echo "managed worker group $pgid is still running; retaining $name" >&2; exit 5
+  fi
+  if [[ $cmd == _rotate ]]; then
+    [[ -n $run_token && -z $(ticket_of "$name") ]] || exit 5
+    join_queue "$name" "$want" "$(grant_seq)"
+  fi
+  rm -f "$HOLDERS/$name" || exit 3
+  if (( $(nholders) > 0 )); then
+    echo "gpu share released by $name; still held by: $(holder_list)(llama-swap left paused)"
+  elif [[ -n "$(queue_list)" ]]; then
+    echo "gpu share released by $name; queue: $(queue_list)(llama-swap left as is)"
+  else
+    swap_resume
+    echo "gpu share released by $name; no holders, queue empty"
+  fi
+}
+
 [[ -n $name && -f $FORCED/$name ]] && cat $FORCED/$name >&2
 case $cmd in
   try)
-    need 1; parse_mb
-    lock_state; migrate; sentinel; prune
+    need 1; parse_request "${@:3}"
+    lock_state; migrate; sentinel; prune; check_owner
     take $name $want && exit 0
     busy_msg $name $want; exit 1 ;;
   acquire)
-    need 1; parse_mb
+    need 1; parse_request "${@:3}"
     for i in $(seq 1 18); do
-      lock_state; migrate; sentinel; prune
+      lock_state; migrate; sentinel; prune; check_owner
       take $name $want && exit 0
       echo -n "$(date '+%H:%M:%S') "; busy_msg $name $want
       unlock_state; trap - EXIT
@@ -316,27 +550,32 @@ case $cmd in
     done
     echo "still waiting (your place in the queue is kept for 15 min): call try/acquire again"; exit 1 ;;
   heartbeat)
-    need
-    lock_state; migrate; sentinel
-    [[ -e $HOLDERS/$name ]] && touch $HOLDERS/$name && echo "heartbeat ok" || { echo "not a holder: $name (holders: $(holder_list))"; exit 1; } ;;
-  release)
-    need
-    lock_state; migrate; sentinel; prune
+    need; parse_estimate "${@:3}"
+    lock_state; migrate; sentinel; check_owner
     [[ -e $HOLDERS/$name ]] || { echo "not a holder: $name (holders: $(holder_list))"; exit 1; }
-    rm -f $HOLDERS/$name
-    if (( $(nholders) > 0 )); then
-      echo "gpu share released by $name; still held by: $(holder_list)(llama-swap left paused)"
-    elif [[ -n "$(queue_list)" ]]; then
-      echo "gpu share released by $name; queue: $(queue_list)(llama-swap left as is)"
+    if [[ -n $estimate_s ]]; then
+      update_holder "$name" "" "$estimate_s"
     else
-      swap_resume
-      echo "gpu share released by $name; no holders, queue empty"
-    fi ;;
+      touch "$HOLDERS/$name" || exit 3
+    fi
+    echo "heartbeat ok" ;;
+  release|_rotate)
+    need
+    if [[ $cmd == _rotate ]]; then parse_request "${@:3}"; fi
+    lock_state; migrate; sentinel; prune; check_owner
+    release_holder ;;
+  _managed_child)
+    need
+    local_pgid=${3:-}
+    [[ -n $run_token && $local_pgid == <2-> ]] || exit 2
+    lock_state; check_owner
+    [[ -e $HOLDERS/$name && -z $(field "$HOLDERS/$name" worker_pgid) ]] || exit 5
+    printf 'worker_pgid: %s\n' "$local_pgid" >> "$HOLDERS/$name" || exit 3 ;;
   cancel)
     # leave the queue without ever holding a share (2026-11-18: agents deleted ticket files by hand). A waiting
     # `acquire` loop would queue again on its next poll, so stop that process first.
     need
-    lock_state; migrate; sentinel
+    lock_state; migrate; sentinel; check_owner
     t=$(ticket_of $name)
     [[ -n $t ]] || { echo "not queued: $name (queue: $(queue_list))"; exit 1; }
     rm -f $t; echo "queue ticket removed: $name" ;;
@@ -346,6 +585,6 @@ case $cmd in
       echo "reserved $(used) of $POOL MB; holders:"
       for t in $HOLDERS/*(N); do echo "  ${t:t}: $(mb_of $t) MB, $(sed -n '1s/^[0-9]* //p' $t), agent $(agent_of $t || true) (idle $(( $(now) - $(mtime $t) ))s)"; done
     fi
-    echo -n "queue:"; for t in $QUEUE/*(Non); do echo -n " ${${t:t}#*-}=$(mb_of $t)MB(waiting $(( $(now) - ${${t:t}%%-*} ))s)"; done; echo ;;
-  *) echo "usage: gpu-lock try|acquire NAME [MB|all] | heartbeat|release|cancel NAME | status"; exit 2 ;;
+    echo -n "queue:"; for t in ${(f)"$(queue_order "$(now)" "$(grant_seq)")"}; do echo -n " ${t#*-}=$(mb_of "$QUEUE/$t")MB(waiting $(( $(now) - ${t%%-*} ))s)"; done; echo ;;
+  *) echo "usage: gpu-lock run NAME [MB|all] [options] -- COMMAND | try|acquire NAME [MB|all] [--priority LEVEL] [--eta-min MINUTES] | heartbeat NAME [--eta-min MINUTES] | release|cancel NAME | status"; exit 2 ;;
 esac

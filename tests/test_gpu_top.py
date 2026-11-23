@@ -1,6 +1,4 @@
-"""serving/bin/gpu-top on fake gpu-lock state directories: holders, queue, dead pids, half-written files, the
-mutex, concurrent rewrites. Never calls gpu-lock; the only processes started are sleep and a fake `gpu-lock` script
-in the temporary directory."""
+"""gpu-top and gpu-lock on isolated state directories, with llama-swap disabled for lock tests."""
 import contextlib
 import importlib.machinery
 import importlib.util
@@ -17,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "serving/bin/gpu-top"
+LOCK_SCRIPT = ROOT / "serving/bin/gpu-lock"
 # the installed script runs under the system Python (3.9 on macOS): test it there when present
 PY = "/usr/bin/python3" if Path("/usr/bin/python3").exists() else sys.executable
 POOL = 10000
@@ -96,6 +95,21 @@ class GpuTopTests(unittest.TestCase):
                "GPU_LOCK_FAKE_WIRED": "5000"}
         return subprocess.run([PY, "-I", str(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=60)
 
+    def run_lock(self, *args):
+        return subprocess.run([str(LOCK_SCRIPT), *args], env=self.lock_env(), capture_output=True, text=True, timeout=15)
+
+    def lock_env(self, **extra):
+        return dict(os.environ, HOME=str(self.home), GPU_LOCK_DIR=str(self.locks), GPU_LOCK_NOSWAP="1",
+                    GPU_LOCK_FAKE_WIRED="5000", GPU_LOCK_INFLIGHT_CMD="", GPU_LOCK_TEST_POLL_S="0.1", **extra)
+
+    def wait_for(self, predicate, timeout=10):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return
+            time.sleep(0.05)
+        self.fail("condition did not become true")
+
     def snap(self):
         return gt.build(self.locks, swap=False, now=self.now)
 
@@ -133,9 +147,14 @@ class GpuTopTests(unittest.TestCase):
         now = 10_000
         # nobody passes a request that waited longer than BACKFILL_MAX
         q = [(now - gt.BACKFILL_MAX - 5, "big", 9000), (now - 10, "small", 1000)]
-        ok, why = gt.may_take("small", POOL, {"h": 5000}, q, {}, now)
+        ok, why, _ = gt.may_take("small", POOL, {"h": 5000}, q, {}, now)
         self.assertFalse(ok)
         self.assertIn("nobody may pass big", why)
+        q = [(now - gt.BACKFILL_MAX, "big", 9000), (now - 10, "small", 1000)]
+        self.assertEqual(gt.may_take("big", POOL, {"h": 5000}, q, {}, now)[2], 1)
+        self.assertTrue(gt.may_take("small", POOL, {"h": 5000}, q, {}, now)[0])
+        self.assertEqual(gt.may_take("big", POOL, {"h": 5000}, q, {}, now + 1)[2], 0)
+        self.assertFalse(gt.may_take("small", POOL, {"h": 5000}, q, {}, now + 1)[0])
         # a waiter whose turn lapsed (TURN_MAX) no longer keeps its room
         q = [(now - 50, "a", 3000), (now - 40, "b", 3000)]
         self.assertFalse(gt.may_take("b", POOL, {"h": 5000}, q, {"a": now - 10}, now)[0])
@@ -143,6 +162,134 @@ class GpuTopTests(unittest.TestCase):
         # a growing holder: its own share counts as room
         self.assertTrue(gt.may_take("h", POOL, {"h": 5000}, [(now, "h", POOL)], {}, now)[0])
         self.assertFalse(gt.may_take("h", POOL, {"h": 5000, "x": 1}, [(now, "h", POOL)], {}, now)[0])
+
+    def test_backfill_diagnostic_and_countdown(self):
+        self.holder("h", 3000)
+        big = self.ticket("big", 9000, waited=120)
+        self.assertEqual(self.snap()["queue"][0]["backfill_protect_in_s"], gt.BACKFILL_MAX - 120 + 1)
+        text = "\n".join(t for t, _ in gt.render(self.snap(), 80))
+        self.assertIn("Backfill protection for big: in", text)
+        self.assertEqual(self.run_lock("try", "small", "1000").returncode, 0)
+        self.assertEqual(self.run_lock("release", "small").returncode, 0)
+        big.rename(self.locks / "queue" / f"{int(self.now) - gt.BACKFILL_MAX - 10}-big")
+        blocked = self.run_lock("try", "small", "1000")
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertIn("backfill blocked by big (waiting > 20 min; needs 2000 MB more)", blocked.stdout)
+        snapshot = self.snap()
+        self.assertEqual(snapshot["queue"][0]["backfill_protect_in_s"], 0)
+        self.assertIn("Backfill protection for big: active", "\n".join(t for t, _ in gt.render(snapshot, 80)))
+
+    def test_declared_estimate_survives_retry_grant_and_heartbeat(self):
+        self.assertEqual(self.run_lock("acquire", "h", "5000", "--eta-min", "20").returncode, 0)
+        h = self.snap()["holders"][0]
+        self.assertAlmostEqual(h["estimated_remaining_s"], 1200, delta=3)
+        original = h["estimated_release_epoch_s"]
+
+        for args in (("try", "w", "9000", "--eta-min", "15"), ("try", "w", "9000")):
+            self.assertEqual(self.run_lock(*args).returncode, 1)
+            self.assertEqual(self.snap()["queue"][0]["estimated_duration_s"], 900)
+        self.assertEqual(self.run_lock("try", "h", "6000").returncode, 0)
+        self.assertEqual(self.snap()["holders"][0]["estimated_release_epoch_s"], original)
+        self.assertEqual(self.run_lock("heartbeat", "h", "--eta-min", "5").returncode, 0)
+        updated = self.snap()["holders"][0]["estimated_release_epoch_s"]
+        self.assertAlmostEqual(updated - int(time.time()), 300, delta=3)
+        self.assertEqual(self.run_lock("heartbeat", "h").returncode, 0)
+        self.assertEqual(self.snap()["holders"][0]["estimated_release_epoch_s"], updated)
+        self.assertEqual(self.run_lock("release", "h").returncode, 0)
+        self.assertEqual(self.run_lock("try", "w", "9000").returncode, 0)
+        granted = self.snap()["holders"][0]
+        self.assertAlmostEqual(granted["estimated_release_epoch_s"] - int(time.time()), 900, delta=3)
+        snap = gt.build(self.locks, swap=False, now=granted["estimated_release_epoch_s"] + 60)
+        self.assertEqual(snap["holders"][0]["estimated_remaining_s"], -60)
+        self.assertIn("+1m00s", "\n".join(t for t, _ in gt.render(snap, 80)))
+
+    def test_estimate_with_implicit_exclusive_and_invalid_input(self):
+        for args in (("--eta-min",), ("--eta-min", "0"), ("--eta-min", "1.5"), ("--eta-min", "1000000")):
+            self.assertEqual(self.run_lock("try", "h", *args).returncode, 2)
+        self.assertEqual(self.snap()["holders"], [])
+        self.assertEqual(self.snap()["queue"], [])
+        self.assertEqual(self.run_lock("try", "h", "--eta-min", "08").returncode, 0)
+        holder = self.snap()["holders"][0]
+        self.assertTrue(holder["exclusive"])
+        self.assertAlmostEqual(holder["estimated_remaining_s"], 480, delta=3)
+
+    def test_priority_and_spending_accumulated_age(self):
+        a = self.ticket("a", 2000, waited=36002)
+        b = self.ticket("b", 2000, waited=36001)
+        c = self.ticket("c", 2000, waited=36000)
+        urgent = self.ticket("urgent", 9000, waited=60)
+        urgent.write_text("9000\npriority: high\n")
+        b_poll = b.stat().st_mtime
+        before = self.snap()["queue"]
+        self.assertEqual([(q["name"], q["effective_priority"]) for q in before],
+                         [("a", "high"), ("b", "high"), ("c", "high"), ("urgent", "high")])
+        result = self.run_lock("try", "a", "2000")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(a.exists())
+        self.assertTrue(b.exists() and c.exists())
+        self.assertAlmostEqual(b.stat().st_mtime, b_poll, delta=0.01)
+        after = gt.build(self.locks, swap=False)["queue"]
+        self.assertEqual([(q["name"], q["effective_priority"]) for q in after],
+                         [("urgent", "high"), ("b", "normal"), ("c", "normal")])
+        self.assertGreater(after[1]["waited_s"], 36000)
+        self.assertLess(after[1]["priority_credit_s"], 5)
+        self.assertGreater(after[1]["priority_next_in_s"], gt.PRIORITY_AGE - 5)
+        now = int(self.now)
+        for passed, expected in ((0, "low"), (1, "normal"), (2, "high")):
+            self.assertEqual(gt.ticket_priority(now - passed * gt.PRIORITY_AGE, "8000\npriority: low\n", now, 0)
+                             ["effective_priority"], expected)
+
+    def test_managed_slices_yield_to_another_actual_grant(self):
+        started = self.home / "slices-started"
+        finish_first = self.home / "finish-first"
+        job = ('printf "%s\\n" "$GPU_LOCK_SLICE" >> "$1"; '
+               'if [[ "$GPU_LOCK_SLICE" == 1 ]]; then while [[ ! -f "$2" ]]; do sleep 0.05; done; fi')
+        runner = subprocess.Popen([str(LOCK_SCRIPT), "run", "a", "8000", "--priority", "high", "--slices", "2",
+                                   "--", "/bin/zsh", "-c", job, "job", str(started), str(finish_first)],
+                                  env=self.lock_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.procs.append(runner)
+        self.wait_for(started.exists)
+        self.assertEqual(self.snap()["holders"][0]["slice"], 1)
+        self.assertEqual(self.run_lock("try", "a", "8000").returncode, 5)
+        self.ticket("b", 1000, waited=60)
+        finish_first.touch()
+        self.wait_for(lambda: any(q["name"] == "a" and q["yielding"] for q in self.snap()["queue"]))
+        self.assertEqual(started.read_text().splitlines(), ["1"])
+        self.assertEqual(self.run_lock("try", "b", "1000").returncode, 0)
+        self.assertEqual(runner.wait(timeout=10), 0)
+        self.assertEqual(started.read_text().splitlines(), ["1", "2"])
+        self.assertEqual([h["name"] for h in self.snap()["holders"]], ["b"])
+        self.assertFalse(self.snap()["queue"])
+
+    def test_managed_deadline_kills_ignoring_worker_group(self):
+        worker_pid = self.home / "worker-pid"
+        command = 'trap "" TERM; echo $$ > "$1"; /bin/sleep 30 & wait'
+        start = time.monotonic()
+        result = subprocess.run([str(LOCK_SCRIPT), "run", "lease", "8000", "--", "/bin/zsh", "-c",
+                                 command, "job", str(worker_pid)],
+                                env=self.lock_env(GPU_LOCK_TEST_LEASE_S="3"), capture_output=True, text=True,
+                                timeout=10)
+        self.assertEqual(result.returncode, 124, result.stdout + result.stderr)
+        self.assertIn("lease deadline", result.stderr)
+        self.assertLess(time.monotonic() - start, 8)
+        self.assertFalse(self.snap()["holders"])
+        with self.assertRaises(ProcessLookupError):
+            os.killpg(int(worker_pid.read_text()), 0)
+
+    def test_guard_cleans_up_if_runner_is_killed(self):
+        marker = self.home / "orphan-pgid"
+        commands = 'echo $$ > "$1"; /bin/sleep 30'
+        runner = subprocess.Popen([str(LOCK_SCRIPT), "run", "orphan", "8000",
+                                   "--", "/bin/zsh", "-c", commands, "job", str(marker)],
+                                  env=self.lock_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.procs.append(runner)
+        self.wait_for(lambda: marker.exists() and marker.stat().st_size)
+        pgid = int(marker.read_text())
+        runner.kill()
+        runner.wait(timeout=10)
+        self.wait_for(lambda: not (self.locks / "holders/orphan").exists())
+        with self.assertRaises(ProcessLookupError):
+            os.killpg(pgid, 0)
 
     def test_deadlocks_flagged(self):
         a, b = self.spawn(), self.spawn()
@@ -276,7 +423,7 @@ class GpuTopTests(unittest.TestCase):
 
     def test_constants_match_gpu_lock(self):
         src = (ROOT / "serving/bin/gpu-lock").read_text()
-        for name in ("BASE_TOL", "STALE", "TICKET_STALE", "BACKFILL_MAX", "TURN_MAX"):
+        for name in ("BASE_TOL", "STALE", "TICKET_STALE", "BACKFILL_MAX", "TURN_MAX", "PRIORITY_AGE"):
             self.assertEqual(int(re.search(rf"^{name}=(\d+)", src, re.M).group(1)), getattr(gt, name), name)
         self.assertEqual(int(re.search(r"\|\| POOL=(\d+)", src).group(1)), gt.DEFAULT_POOL)
         self.assertIn("> 30 ))", src)                              # its stale-mutex age
