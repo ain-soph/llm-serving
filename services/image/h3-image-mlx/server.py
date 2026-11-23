@@ -51,8 +51,11 @@ from PIL import Image
 MAX_REFERENCES = 16
 MAX_N = 4
 DEFAULT_SIDE = 1024
-# Up to the official 16 MP sizes (4736x3552, 5024x3360, 5472x3072, 6272x2688 are a little above 4096²).
-MAX_SIDE = int(os.environ.get("H3_MAX_SIDE") or 8192)
+# h3_image_mlx.pipeline.generate renders sides that are multiples of 32 from 256 through 4096 and raises ValueError
+# otherwise (a 500 here before 2026-11-23); requests are checked against that limit up front and refused with 400.
+# The official 16 MP sizes with a side above 4096 (4736x3552, 5024x3360, 5472x3072, 6272x2688) are not supported.
+PIPELINE_MAX_SIDE = 4096
+MAX_SIDE = min(int(os.environ.get("H3_MAX_SIDE") or PIPELINE_MAX_SIDE), PIPELINE_MAX_SIDE)
 MAX_AREA = int(os.environ.get("H3_MAX_AREA") or 17_000_000)
 MIN_GENERATION_AREA = int(os.environ.get("H3_MIN_GENERATION_AREA") or 0)
 OUTPUT_FORMATS = {"png": "PNG", "jpeg": "JPEG", "webp": "WEBP"}
@@ -105,8 +108,8 @@ def fit_ratio(ratio, area):
 
 def parse_size(size, references=()):
     """Returns (width, height), or None for "auto"/missing (decided after prompt expansion by default_size).
-    Any side from 256 through MAX_SIDE with an area up to MAX_AREA is accepted (1920x1080, 3840x2160, 5472x3072):
-    see render_size."""
+    Any side from 256 through MAX_SIDE (4096, the pipeline's limit) with an area up to MAX_AREA is accepted
+    (1920x1080, 3840x2160, 4096x4096): see render_size."""
     if size in (None, "", "auto"):
         return None
     try:
@@ -114,7 +117,8 @@ def parse_size(size, references=()):
     except ValueError:
         raise BadRequest(f"size must be WIDTHxHEIGHT or auto, got {size!r}")
     if not all(256 <= v <= MAX_SIDE for v in (w, h)):
-        raise BadRequest(f"width and height must be from 256 through {MAX_SIDE}")
+        raise BadRequest(f"size {w}x{h} is not supported: width and height must each be from 256 through {MAX_SIDE} "
+                         f"pixels (MiniMax-H3-Image renders at most {MAX_SIDE}x{MAX_SIDE})")
     if w * h > MAX_AREA:
         raise BadRequest(f"width x height must be at most {MAX_AREA} pixels")
     return w, h
@@ -143,6 +147,16 @@ def render_size(width, height, min_area=0):
         scale = math.sqrt(min_area / (width * height))
         return tuple(-(-round(v * scale) // 32) * 32 for v in (width, height))
     return tuple(-(-v // 32) * 32 for v in (width, height))
+
+
+def check_render_size(width, height, min_area):
+    """BadRequest unless the canvas render_size picks stays within the pipeline's side limit (a min_generation_area
+    larger than the requested image scales the canvas up and can push a side past it)."""
+    rw, rh = render_size(width, height, min_area)
+    if max(rw, rh) > MAX_SIDE:
+        raise BadRequest(f"min_generation_area {min_area} would render {width}x{height} on a {rw}x{rh} canvas; "
+                         f"MiniMax-H3-Image renders at most {MAX_SIDE} pixels per side: lower min_generation_area "
+                         f"(0 = off) or the size")
 
 
 def reduced_ratio(width, height):
@@ -267,6 +281,8 @@ def run_generation(models, prompt, size, n, seed, output_format, references=(), 
     if seed is None:
         seed = secrets.randbelow(2**31)
     min_area = MIN_GENERATION_AREA if min_area is None else min_area
+    if size:
+        check_render_size(*size, min_area)      # before the prompt expansion
     revised = None
     ratio = None
     if enhance != "off":
@@ -274,6 +290,7 @@ def run_generation(models, prompt, size, n, seed, output_format, references=(), 
         selection = "auto" if size is None else reduced_ratio(*size)
         revised, ratio, _ = expand_prompt(prompt, enhance, references, selection)
     width, height = size or default_size(references, ratio)
+    check_render_size(width, height, min_area)
     # Always the streamed DiT (2026-11-16): with zero-copy weights (H3_ZERO_COPY=1, set by llama-swap) it runs at
     # resident speed with 2-6 GB wired. llama-swap targets differ only in the memory they declare.
     data = []
