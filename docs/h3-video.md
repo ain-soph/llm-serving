@@ -41,11 +41,12 @@ h3.c `70f657e` 起，零拷贝 DiT 默认按 block 建、放 Metal buffer（每 
 
 **视频 VAE（h3.c `67a014a` 起）**：解码器融合 BF16 输入与 tile 流水线、去噪期间预读 VAE 权重页，编码器 buffer arena 与融合 GroupNorm+SiLU+pad；
 输出逐字节不变，768p 解码 24.5 → 21.2 s，首帧编码每张 5.0 → 3.3 s，Ref2VA 编码快约 19%。默认全开，`H3_VAE_FUSED=0`、`H3_VAE_PREFETCH=0`、
-`H3_VAE_ENC_OPT=0` 分别退回原路径；`H3_VAE_ENC_FAST=1`、`H3_VAE_ENC_BF16=1` 为可选的非逐字节变体（默认关）。
+`H3_VAE_ENC_OPT=0` 分别退回原路径；`H3_VAE_ENC_BF16=1` 为可选的非逐字节变体（默认关）。
+h3.c `243d6ab` 起，单张图（首／尾帧）编码只跑因果 3x3x3 卷积最后一个时间 tap 的 1x3x3 卷积（前两个 tap 只乘零帧），输出逐字节不变，768p 每张 3.3 → 1.25 s；原 `H3_VAE_ENC_FAST` 开关已删除，视频上下文（Ref2VA、续写）不受影响。
 
 **旋转 W8A8 DiT（h3.c `0feaa4c` 起）**：`FL2VA/transformer-int8-rot256` 是 qkv／fc1／fc2 的 K 维乘 Hadamard H256 后再 INT8 的 pack
 （`h3_pack_int8 --rot qkv,fc1,fc2`，再 `tools/align_int8_pack.py`），DiT 对官方 BF16 的误差约降 27%、去噪快约 1.5%。包装器对 fast／standard／best 的文本与首尾帧渲染设
-`H3_DIT_VARIANT=rot256` 并加 `--use-int8-row-fc2`；turbo、Ref2VA 用各自原 pack。没有这个 pack 时自动用原 pack；`H3_VIDEO_DIT_ROT=0` 关闭。
+`H3_DIT_VARIANT=rot256` 并加 `--use-int8-row-fc2`；Ref2VA 用自己的原 pack。turbo 也可用旋转 pack（`minimax-h3-turbo/FL2VA/transformer-int8-rot256`，见下文“Turbo 权重”）。没有这个 pack 时自动用原 pack；`H3_VIDEO_DIT_ROT=0` 关闭。
 旋转类别写在 marker 和每个权重文件的元数据里，h3 加载时比对，不一致直接报错。不要把它改名成 `transformer-int8`：旧版 h3 不读旋转信息。
 
 **提示词条件磁盘缓存**（h3.c `0ff19ee` 起，`H3_COND_CACHE_DIR`）：每次渲染是新进程，同一提示词原来每次都要重跑 tokenizer 和 INT8 文本编码器
@@ -131,3 +132,4 @@ rm -rf "$T/src/FL2VA"                                                           
   - 官方分片的 QKV 行按 head 交错存放，LoRA 是在 `[q;k;v]` 布局上训练的，折叠前先把增量交错回去；
   - LoRA 增量比半个 BF16 最小精度单位还小，四舍五入会把大部分增量舍掉（实测只剩 10–55%），默认改用按张量设种子的随机舍入（保留约 100%）。
 - 磁盘：INT8 包约 22 GB，其余部件是符号链接。
+- 旋转 W8A8（推荐，2026-11-23 起本机用它）：打包一步改为 `"$H3/h3_pack_int8" "$T/src/FL2VA/transformer" "$T/FL2VA/transformer-int8-rot256" --rot qkv,fc1,fc2 --max-steps 20`，再对该目录跑 `align_int8_pack.py`。包装器在非 stream 模式下优先用它；只有它而没有 `transformer-int8` 时，`H3_VIDEO_DIT_ROT=0` 或 stream 模式的 turbo 请求退回 standard。实测（对 BF16 turbo 参考，6 步 124 帧，3 种子 × 2 提示词）：平均 PSNR 512² 18.57 → 19.41 dB、768p 17.48 → 17.68 dB，个别种子更低（轨迹分岔）；768p 去噪 160.7 → 158.0 s，加载与内存不变。

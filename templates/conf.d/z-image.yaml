@@ -1,0 +1,31 @@
+# Z-Image-Turbo (Tongyi-MAI, Apache-2.0, 6B single-stream DiT, distilled 9-step text-to-image) via mflux from
+# github.com/ain-soph/mflux@serving behind z-image/server.py: POST /v1/images/generations
+# (sizes 256-2048 per side, area <= 2048²; n <= 4; seed; steps, default 9). Weight preparation: docs/z-image.md. Numbers: docs/performance.md.
+# DiT: W8A8 (ConvRot int8 attention + feed-forward, the rest BF16; @MODELS@/z-image-turbo/serve/dit-w8a8.safetensors,
+# written from the official weights by mflux.models.z_image.weights.z_image_w8a8). Text encoder (Qwen3-4B) and VAE: BF16.
+# Zero-copy page-aligned files; the text encoder and the DiT are each mapped only while they run (MFLUX_ZERO_COPY_STREAM);
+# MLX cache 2 GB. Measured wired peak of a whole generation: 1024² 8.8 GiB,
+# 2048² 8.4 GiB (the text-encoder stage sets the peak) -> capacity 11000 fits beside Flash-Next (69500 + 11000 < 82032).
+macros:
+  "z-image-cmd": >
+    @PYTHON@ @ROOT@/z-image/server.py
+    --port ${PORT}
+
+models:
+  "z-image-turbo":
+    name: "Z-Image Turbo"
+    description: "Tongyi Z-Image-Turbo, 9 steps, W8A8: 1024² ~5.5 s, 2048² ~34 s; text-to-image only"
+    cmd: ${z-image-cmd} --model @MODELS@/z-image-turbo/serve --model-id z-image-turbo
+    env:
+      - "MFLUX_ZERO_COPY=1"
+      - "MFLUX_ZERO_COPY_STREAM=1"
+      - "MFLUX_ZIMAGE_W8A8=@MODELS@/z-image-turbo/serve/dit-w8a8.safetensors"
+      - "ZIMAGE_CACHE_MB=2048"
+    capabilities:
+      in: [text]
+      out: [image]
+    checkEndpoint: /health
+    ttl: 600
+    capacities:
+      gpu: 11000
+    evict_cost: 0

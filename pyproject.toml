@@ -38,7 +38,7 @@ environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
 
 [tool.uv.sources]
 h3-image-mlx = { git = "https://github.com/ain-soph/h3-image-mlx", rev = "dd38f9515920d7dc84474e273cfbbaae11320f57" }
-mflux = { git = "https://github.com/ain-soph/mflux", rev = "adec835fd5ed37e5c40aaaed02f11b05335b63a7" }
+mflux = { git = "https://github.com/ain-soph/mflux", rev = "e52598bd8f6f31a1b23742ec9a3e0d69ac337e53" }
 mlx = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx-0.32.4%2Bserving.005fe7a2-cp315-cp315-macosx_26_0_arm64.whl" }
 mlx-metal = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx_metal-0.32.4%2Bserving.005fe7a2-py3-none-macosx_26_0_arm64.whl" }
 mlx-audio = { git = "https://github.com/ain-soph/mlx-audio", rev = "fc3820aa4d3405249a2de92695eca1e8d2cc407a" }

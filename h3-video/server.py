@@ -181,8 +181,10 @@ SPARSE_LAYOUTS = {"fast": "t0=1,r0=4,rmin=0,sink=0", "relaxed": "t0=1,r0=12,rmin
 # renders of fast / standard / best load FL2VA/transformer-int8-rot256 (h3 H3_DIT_VARIANT=rot256; qkv, fc1, fc2 inputs
 # rotated by H256 before INT8, the classes read from the pack's marker and checked against every weight file) with
 # row-wise FC2 activation scales (--use-int8-row-fc2, which this pack was validated with and does not record). DiT
-# velocity error vs BF16 -27 %, 768p denoise -1.4 % (best) / -1.8 % (standard). Not for turbo (its LoRA-folded pack was
-# not re-packed with rotation), Ref2VA (own unrotated pack) or --ssd-streaming (h3 refuses row FC2 there): those keep
+# velocity error vs BF16 -27 %, 768p denoise -1.4 % (best) / -1.8 % (standard). Turbo too since 2026-11-22: its
+# LoRA-folded DiT re-packed the same way into minimax-h3-turbo/FL2VA/transformer-int8-rot256 (if the unrotated turbo pack is
+# not kept, docs/h3-video.md "Turbo 权重": H3_VIDEO_DIT_ROT=0 and stream-mode turbo requests
+# fall back to standard). Not for Ref2VA (own unrotated pack) or --ssd-streaming (h3 refuses row FC2 there): those keep
 # the base pack and no row FC2. Without the pack's marker the base pack is used. Off switch: H3_VIDEO_DIT_ROT=0 in the
 # wrapper's environment; the base FL2VA/transformer-int8 stays on disk.
 ROT_DIT = "FL2VA/transformer-int8-rot256"
@@ -852,7 +854,8 @@ class Handler(BaseHTTPRequestHandler):
                             "references and continuations use standard")
             elif frames > legal_frames(math.ceil(TURBO_MAX_SECONDS * FPS - 1e-9)):
                 fallback = f"turbo is limited to {TURBO_MAX_SECONDS:g} s; longer videos use standard"
-            elif not (turbo_dir / "FL2VA/transformer-int8/h3-int8-pack.json").is_file():
+            elif not ((turbo_dir / "FL2VA/transformer-int8/h3-int8-pack.json").is_file() or
+                      (ROT_DIT_ENABLED and mode != "stream" and (turbo_dir / ROT_DIT / "h3-int8-pack.json").is_file())):
                 fallback = "the turbo weights are not installed; standard is used"
             if fallback:
                 preset_name = "standard"
@@ -915,7 +918,7 @@ class Handler(BaseHTTPRequestHandler):
         if mode == "stream":
             argv.append("--ssd-streaming")
         rot_dit = Path(models_dir) / ROT_DIT
-        use_rot = (ROT_DIT_ENABLED and preset_name != "turbo" and not ref2va and mode != "stream"
+        use_rot = (ROT_DIT_ENABLED and not ref2va and mode != "stream"
                    and (rot_dit / "h3-int8-pack.json").is_file())
         if use_rot:
             argv.append("--use-int8-row-fc2")

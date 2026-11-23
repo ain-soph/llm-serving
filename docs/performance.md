@@ -28,6 +28,7 @@
 | 图片 | `qwen-image-2.1-turbo` | mflux fork | W8A8 DiT + W8A16 文本编码器 | 1024² 7.8 s（经 API，中位）；2048² 约 43 s（8 步，融合前） | 生成期 wired 6.7–9.0 GB | 26.80 GB¹ |
 | 图片 | `qwen-image-2.1` | mflux fork | 同上 | 1024² 约 28 s（40 步） | 同上 | 同上¹ |
 | 图片 | `qwen-image-2.1-turbo-pe` | mflux fork | 同 Turbo | 先由聊天模型改写提示词：文生图 36.3 s、编辑 27.6 s（中位） | 同上 | 同上¹ |
+| 图片 | `z-image-turbo` | mflux fork | W8A8 DiT（注意力＋前馈），文本编码器／VAE BF16 | 1024² 5.6 s；2048² 36.1 s（经 API，9 步） | 生成期 wired 8.0–8.8 GiB | 14.51 GB |
 | 视频＋音频 | `minimax-h3-video`（旧名 `-stream` 为别名） | h3.c fork | INT8 DiT（零拷贝）、W8A16 文本编码器、BF16 VAE 计算 | fast 768p：5 s 片段 165–170 s；15 s 片段 758 s | standard 768p wired +14.3 GB（按 block 释放）；DiT GPU 峰值 22.20／33.00 GiB（fast） | 58.90 GB² |
 
 ¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享 VAE；文本编码器链接到 H3 图片的 INT8 文件，不另计。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。⁶ 2026-11-18（pa1b）起每个尺寸一个入口：原精确入口与 `-int8` 入口合并为 `common/qwen3_w8a8.py mix` 写出的预量化混合副本（`mix.json`，零拷贝），见 [w8a8.md](w8a8.md)；下文 11-16／11-17 的 `-int8` 数据保留作记录。
@@ -693,6 +694,27 @@ M5 Ultra 独占 GPU，六步、INT8 ConvRot、流式零拷贝，缓存预算 800
 - 人工抽查（9 条 × 4 个变体）与评判方向一致；评判可能偏爱细节更丰富的画面，改写本来就会让画面更丰富。评测脚本见 `qwen-image/eval/`。
 - `mflux` 改写和 `auto_mask` 时 Qwen 进程 wired 峰值 4.7–8.0 GB（容量 11000 内）。
 
+## 图片：Z-Image-Turbo
+
+M5 Ultra，独占 GPU，9 步，seed 0；部署 = DiT 注意力＋前馈 W8A8（ConvRot int8），其余 BF16，零拷贝，文本编码器与 DiT 分别流式，MLX 缓存 2 GB。
+
+| 场景 | 1024² | 2048² |
+| --- | ---: | ---: |
+| 经 API，与聊天模型同驻（热态） | 5.6 s | 36.1 s |
+| 冷启动（进程启动＋加载＋生成） | 7.5 s | — |
+| 阶段：文本编码／去噪／VAE | 0.14／4.50／0.80 s | 0.14／30.8／3.3 s |
+| 生成期 wired 峰值 | 8.7–8.8 GiB | 8.0–8.4 GiB |
+
+| 修改 | 前 → 后 | 输出 |
+| --- | --- | --- |
+| W8A8 DiT（`MFLUX_ZIMAGE_W8A8`） | 1024² 6.97 → 5.31 s，2048² 38.9 → 32.5 s；DiT 12.3 → 6.3 GB | 对 diffusers FP32（6 个提示词）：首步速度场均值 3.09 % → 4.88 %，终图 PSNR 均值 28.4 → 26.4 dB |
+| 文本编码器与 DiT 分别流式 | wired 峰值 1024² 15.9 → 8.8 GiB，2048² 12.4 → 8.4 GiB；速度不变 | 逐字节相同 |
+
+- 逐层类：MLX 8-bit（W8A16）比 BF16 慢 7–10 %，误差与 W8A8 相当，不用；文本编码器 8-bit 不提速、首步速度场误差 5.3 %（对 diffusers FP32），保持 BF16。
+- mflux BF16 对官方 diffusers FP32：文本嵌入 0.11 %，首步速度场均值 3.09 %（6 个提示词；diffusers 自己换 BF16 在 2 个提示词上为 2.0 / 2.4 %）。
+- 官方 FP32 DiT 的数值全部能精确用 BF16 表示；W8A8 由转换器直接从 FP32 张量量化，权重相对 L2 误差均值 0.889 %。
+- 流式下峰值在文本编码阶段（8 GB BF16 文本编码器），不在去噪阶段。
+
 ## 视频＋音频：MiniMax H3 Video
 
 **条件**：1344×768；5 s 片段 = 124 帧（约 5.17 s），15 s 片段 = 362 帧（约 15.08 s）；45 层、reuse 2；fast 档（V1、V2）。
@@ -742,9 +764,9 @@ M5 Ultra 独占 GPU，六步、INT8 ConvRot、流式零拷贝，缓存预算 800
 
 - 解码器：RMSNorm／SwiGLU／QK-norm+RoPE 直接写 BF16 GEMM 输入、tile 流水线、去噪期间后台预读 VAE 权重页（`H3_VAE_FUSED`、`H3_VAE_PREFETCH`，默认开）。
   编码器：buffer arena、每 tile 一条命令链、GroupNorm+SiLU+pad 融合（`H3_VAE_ENC_OPT`，默认开）。去噪耗时不变，峰值不增。
-- 可选、默认关、非逐字节：`H3_VAE_ENC_FAST=1`（单张图 2D 卷积，每张 0.62 s，latent 相对误差 2.6e-6）、`H3_VAE_ENC_BF16=1`（BF16 卷积，再快 13%，相对误差 2.2–2.7%）。
+- 可选、默认关、非逐字节：`H3_VAE_ENC_BF16=1`（BF16 卷积，再快 13%，相对误差 2.2–2.7%）。（原 `H3_VAE_ENC_FAST` 已由 2026-11-23 的逐字节 last-tap 路径取代并删除。）
 
-**2026-11-22：Hadamard 旋转 W8A8 DiT**（h3.c `0feaa4c`；`FL2VA/transformer-int8-rot256`，`H3_DIT_VARIANT=rot256` + `--use-int8-row-fc2`；fast／standard／best 的文本与首尾帧，turbo 与 Ref2VA 不变；独占）
+**2026-11-22：Hadamard 旋转 W8A8 DiT**（h3.c `0feaa4c`；`FL2VA/transformer-int8-rot256`，`H3_DIT_VARIANT=rot256` + `--use-int8-row-fc2`；fast／standard／best 的文本与首尾帧（turbo 2026-11-23 起也用旋转 pack），Ref2VA 不变；独占）
 
 | 项 | 原 pack | 旋转 pack |
 | --- | ---: | ---: |
@@ -756,6 +778,16 @@ M5 Ultra 独占 GPU，六步、INT8 ConvRot、流式零拷贝，缓存预算 800
 
 - 权重 W8（逐行 F32 scale），激活 A8：qkv／fc1 输入在融合 AdaLN 量化里乘 H256，FC2 输入乘 H256 后按行单尺度；注意力 BF16。
 - 同 seed 输出与原来不同。端到端对 BF16 参考的单对 PSNR 判据（≥ 原 pack −0.5 dB）有 3 组未过（轨迹分岔成另一合理样本，无伪影）；用户 2026-11-22 认为误差可接受。
+
+**2026-11-23：编码器单图 last-tap 卷积、turbo 旋转 pack**（h3.c `243d6ab`；独占）
+
+| 项 | 旧 | 新 | 说明 |
+| --- | ---: | ---: | --- |
+| VAE 编码，首／尾帧 1344×768（每张，×3） | 3.34 s | 1.25 s | latent 逐字节相同（只跑 3x3x3 因果卷积的最后一个时间 tap） |
+| 编码器 GPU 分配峰值／footprint（首尾帧 768p） | 0.865／1.98 GiB | 0.672／1.72 GiB | |
+| 首帧 512² 完整渲染的编码 | 1.14 s | 0.51 s | MP4 相同 |
+| turbo 平均 PSNR 对 BF16 turbo 参考，512²／1344×768（6 组） | 18.57／17.48 dB | 19.41／17.68 dB | 旋转 W8A8 pack；个别种子更低（轨迹分岔） |
+| turbo 去噪 1344×768 124 帧（6 次中位数） | 160.7 s | 158.0 s | 加载 0.34 s、wired 10.53 GiB 不变 |
 
 **四档实测**（2026-11-18，1344×768 124 帧，独占，seed 42；`turbo` 6 步、50 层、放宽稀疏）
 
