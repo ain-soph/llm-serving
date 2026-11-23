@@ -1,6 +1,6 @@
 """Serving copy of an embedding checkpoint for server.py (2026-11-16). Runs on the CPU (no GPU lock needed).
 
-  .venv/bin/python embedding/qwen3/convert_embed.py HF_DIR OUT_DIR --fp16|--q8_0
+  .venv/bin/python services/embedding/qwen3/convert_embed.py HF_DIR OUT_DIR --fp16|--q8_0
 --fp16: the BF16 weights stored as float16, so activations run in fp16 (10x closer to the float32 reference than
         bf16 at the same speed) without a load-time cast, which briefly held both copies (4B: 15 GiB peak).
 --q8_0: exact llama.cpp Q8_0 in MLX 8-bit (fp16 scales) via rerank/q8_0_to_mlx.apply_q8_0, fp16 activations.

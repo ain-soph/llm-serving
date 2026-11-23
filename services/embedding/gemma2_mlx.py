@@ -418,7 +418,7 @@ class Gemma2Embedder:
         self.w16 = {}
         if q8:
             import sys
-            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "common"))
+            sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared/common"))
             import mlx_q8
             classes = W8A8_CLASSES if q8 is True else {c: W8A8_CLASSES[c] for c in q8}
             suffixes = tuple(x for v in classes.values() for x in v)
@@ -428,14 +428,14 @@ class Gemma2Embedder:
         self.embed8 = None
         if embed8:            # token table as symmetric 8-bit rows (gathered, then dequantized): half of the file
             import sys
-            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "common"))
+            sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared/common"))
             import mlx_q8
             self.embed8 = mlx_q8.quantize_weight(w.pop("token_embd.weight"), mx.float32 if self.dtype == mx.float32
                                                  else self.dtype)
         self.q8 = {}
         if w8a8:
             import sys
-            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "common"))
+            sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared/common"))
             import mlx_w8a8
             self._w8 = mlx_w8a8
             classes = W8A8_CLASSES if w8a8 is True else {c: W8A8_CLASSES[c] for c in w8a8}

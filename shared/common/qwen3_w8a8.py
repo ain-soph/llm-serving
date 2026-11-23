@@ -1,7 +1,7 @@
 """Qwen3 backbones (mlx_lm Qwen3Model) as W8A8 + zero-copy checkpoints, for the reranker and embedding servers (2026-11-17).
 
-  .venv/bin/python common/qwen3_w8a8.py rerank|embed SRC_DIR DST_DIR [--float] [--dtype bfloat16|float16]
-  .venv/bin/python common/qwen3_w8a8.py mix rerank|embed FLOAT_DIR DST_DIR qkv=w8a8,o=w8a8,gateup=w8a8,down=w8a16
+  .venv/bin/python shared/common/qwen3_w8a8.py rerank|embed SRC_DIR DST_DIR [--float] [--dtype bfloat16|float16]
+  .venv/bin/python shared/common/qwen3_w8a8.py mix rerank|embed FLOAT_DIR DST_DIR qkv=w8a8,o=w8a8,gateup=w8a8,down=w8a16
       (2026-11-18: one copy with per-class precision, mix.json; the servers load it zero-copy like the others)
 
 SRC_DIR is one of our MLX copies (BF16 / FP16, or exact Q8_0 = MLX 8-bit affine with fp16 scales, which is

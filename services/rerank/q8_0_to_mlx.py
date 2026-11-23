@@ -1,6 +1,6 @@
 """Write an MLX 8-bit model whose linear weights are exactly llama.cpp Q8_0 (2026-11-16).
 
-  .venv/bin/python rerank/q8_0_to_mlx.py HF_DIR OUT_DIR [--act-dtype bfloat16|float16]
+  .venv/bin/python services/rerank/q8_0_to_mlx.py HF_DIR OUT_DIR [--act-dtype bfloat16|float16]
 
 Q8_0: blocks of 32 along the input dimension, d = max|w| / 127 stored as float16, q = round(w / d) in [-127, 127].
 MLX 8-bit affine (group 32) dequantizes w = scale * u + bias with u in [0, 255]; u = q + 128, scale = d and

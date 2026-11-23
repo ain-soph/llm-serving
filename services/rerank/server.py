@@ -1,6 +1,6 @@
 """Qwen3-Reranker on MLX behind a llama.cpp-compatible /v1/rerank (2026-11-16).
 
-  .venv/bin/python rerank/server.py --port PORT --model MLX_DIR [--max-batch-tokens 8192] [--cache-mb 256] [--copy]
+  .venv/bin/python services/rerank/server.py --port PORT --model MLX_DIR [--max-batch-tokens 8192] [--cache-mb 256] [--copy]
 
 MLX_DIR is an mlx_lm checkpoint, or a W8A8 / zero-copy copy written by ../common/qwen3_w8a8.py (w8a8.json): its
 projections run on the INT8 TensorOps GEMM and its weights are mapped from the page cache instead of copied
@@ -22,7 +22,7 @@ import mlx.core as mx
 from mlx_lm import load
 from mlx_lm.tokenizer_utils import load as load_tokenizer
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "common"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared/common"))
 import mlx_w8a8, qwen3_w8a8  # noqa: E402
 
 from prompts import INSTRUCTION, PREFIX, SUFFIX

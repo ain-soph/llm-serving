@@ -229,8 +229,11 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=32768, help="mlx: longest input, BOS/EOS included")
     ap.add_argument("--max-batch-tokens", type=int, default=8192, help="mlx: tokens packed into one forward pass")
     ap.add_argument("--cache-mb", type=int, default=256, help="mlx: MLX buffer cache kept between requests")
-    ap.add_argument("--mlx-dtype", choices=("float32", "bfloat16"), default="float32",
-                    help="mlx: activation dtype (float32 matches the official model to cosine 1.000000)")
+    ap.add_argument("--mlx-dtype", choices=("float32", "bfloat16", "mixed", "mixed-f16"), default="float32",
+                    help="mlx: activation dtype (float32 matches the official model to cosine 1.000000; mixed = "
+                    "float32 elementwise with BF16 matrix products; mixed-f16 = with FP16 products and attention, as accurate "
+                    "as float32 and llama.cpp, docs/performance.md)")
+    ap.add_argument("--mlx-q8", action="store_true", help="mlx: 8-bit projection weights, BF16 products (W8A16)")
     ap.add_argument("--mlx-w8a8", nargs="?", const="all", help="mlx: int8 convrot projections, BF16 activations "
                     "(all, or comma-separated classes of gemma2_mlx.W8A8_CLASSES)")
     args = ap.parse_args()
@@ -289,8 +292,11 @@ def serve_mlx(args):
         from gemma2_mlx import Gemma2Embedder
         mx.set_cache_limit(args.cache_mb << 20)
         tokenizer = args.tokenizer or os.path.join(os.path.dirname(args.model), "tokenizer.json")
-        state["model"], state["mx"] = Gemma2Embedder(args.model, tokenizer, getattr(mx, args.mlx_dtype),
-            True if args.mlx_w8a8 == "all" else tuple(args.mlx_w8a8.split(",")) if args.mlx_w8a8 else False), mx
+        mixed = args.mlx_dtype.startswith("mixed")
+        f16 = mx.float16 if args.mlx_dtype == "mixed-f16" else None
+        state["model"], state["mx"] = Gemma2Embedder(args.model, tokenizer, mx.float32 if mixed else getattr(mx, args.mlx_dtype),
+            True if args.mlx_w8a8 == "all" else tuple(args.mlx_w8a8.split(",")) if args.mlx_w8a8 else False,
+            mixed=mixed, q8=args.mlx_q8, mm_dtype=f16, attn_dtype=f16), mx
         state["model"].forward([[2, 1]])
 
     def embed(texts):

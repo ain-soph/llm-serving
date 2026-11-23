@@ -1,6 +1,6 @@
 """OpenAI-style /v1/embeddings for Qwen3-Embedding and voyage-4-nano on MLX, behind llama-swap (2026-11-16).
 
-  .venv/bin/python embedding/qwen3/server.py --port PORT --model DIR [--model-id ID] [--max-batch-tokens 8192]
+  .venv/bin/python services/embedding/qwen3/server.py --port PORT --model DIR [--model-id ID] [--max-batch-tokens 8192]
 
 DIR is a copy written by convert_embed.py: float16 (--fp16) or exact Q8_0 with fp16 activations (--q8_0). The original
 BF16 checkpoint also loads (--dtype float16 casts it, but briefly holds both copies). A W8A8 / zero-copy copy written by
@@ -32,7 +32,7 @@ from mlx_lm.models.qwen3 import ModelArgs, Qwen3Model
 from transformers import AutoTokenizer
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "shared/common"))
 import mlx_w8a8, qwen3_w8a8  # noqa: E402
 
 log = logging.getLogger("embed")
