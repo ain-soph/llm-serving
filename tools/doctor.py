@@ -12,6 +12,28 @@ import llm_collab_bridge
 from service import environment
 
 ROOT = Path(__file__).resolve().parents[1]
+# The serving glue's archive-restore (installed under ~/llm-serving/bin): its manifest checks decide "archived".
+ARCHIVE_RESTORE = Path(os.environ.get("ARCHIVE_RESTORE", Path.home() / "llm-serving/bin/archive-restore"))
+
+
+def archived(models, name):
+    """Why <models>/<name> may be absent: a manifest <name>.archive exists and the local copy is missing or
+    incomplete (same rule as bin/regress, using archive-restore's load_manifest / problems). None otherwise."""
+    shortcut, local = models / f"{name}.archive", models / name
+    if not shortcut.is_file():
+        return None
+    if not os.path.lexists(local):
+        return "missing"
+    if not ARCHIVE_RESTORE.is_file():   # without the tool only "missing" can be told apart
+        return None
+    import importlib.util
+    from importlib.machinery import SourceFileLoader
+    loader = SourceFileLoader("archive_restore", str(ARCHIVE_RESTORE))
+    spec = importlib.util.spec_from_loader("archive_restore", loader)
+    ar = importlib.util.module_from_spec(spec)
+    loader.exec_module(ar)
+    bad = ar.problems(local, ar.load_manifest(shortcut)[2])
+    return f"incomplete ({len(bad)}: {', '.join(bad[:2])})" if bad else None
 
 
 def main():
@@ -63,12 +85,18 @@ def main():
         errors.append("Missing decisions/OneJev checkout (elephant-1); see docs/decisions.md")
     if not a.skip_models:
         required = json.loads((ROOT / "models.required.json").read_text())
-        for name in required["directories"]:
-            if not (Path(c["models"]) / name).is_dir():
-                errors.append(f"Missing model directory: {name}")
-        for name in required["files"]:
-            if not (Path(c["models"]) / name).is_file():
-                errors.append(f"Missing model file: {name}")
+        models = Path(c["models"])
+        cache = {}
+        for kind, names, present in (("directory", required["directories"], Path.is_dir),
+                                     ("file", required["files"], Path.is_file)):
+            for name in names:
+                top = name.split("/")[0]   # the unit that is archived: the top-level model directory
+                if top not in cache:
+                    cache[top] = archived(models, top)
+                if cache[top]:   # archived on purpose (<models>/<top>.archive): its entry restores it on demand
+                    print(f"SKIP(archived) model {kind}: {name} ({top} {cache[top]})")
+                elif not present(models / name):
+                    errors.append(f"Missing model {kind}: {name}")
     # Agent rules and the local worker are optional for serving: report drift, do not fail.
     try:
         claude = install_agents.install_claude_md(Path.home() / ".claude/CLAUDE.md", None, Path.home(), check=True)[0]

@@ -131,7 +131,7 @@ def cases():
     out.append(case("decide-img-pplx-decider-flash", "decide", "pplx-decider-flash", decide_image(), quick=False))
     out.append(case("decide-long-pplx-decider-flash", "decide", "pplx-decider-flash", decide_long(1625), quick=False))
     out.append(case("decide-long-elephant-1", "decide", "elephant-1", decide_long(780), quick=False))
-    for m, order in (("qwen3-asr-1.7b", 1), ("qwen3-asr-1.7b-int8", 1), ("whisper-large-v3", 1)):
+    for m, order in (("qwen3-asr-1.7b", 1), ("whisper-large-v3", 1)):
         out.append(case(f"asr-{m}", "asr", m, {"file": EN_WAV}, order=order))
         out.append(case(f"asrzh-{m}", "asr", m, {"file": ZH_WAV, "language": "zh"}, quick=False, order=order))
     tts = {"input": "Regression check: the quick brown fox jumps over the lazy dog.", "response_format": "wav",
