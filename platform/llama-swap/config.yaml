@@ -56,6 +56,11 @@ models:
       - "H3_ZERO_COPY=1"
       - "H3_ASYNC=1"
       - "H3_GPU_BUDGET_MB=8000"    # DiT buffer cache within the 10000 below
+      # Stage caches on disk (fork 971caf7, 2026-11-23): text-stage output per prompt + pictures and VAE latent per
+      # picture; LRU-capped at 1024 / 256 MB, byte-identical images (opt/cache-20261123). Sequences over 35000 rows
+      # (e.g. 2048^2 + 16 pictures) run the DiT in 16384-row slices to stay within 10000 (H3_ROW_SLICE=0 turns it off).
+      - "H3_EMBED_CACHE=${env.LLM_SERVING}/data/cache/h3-image/text"
+      - "H3_REF_CACHE=${env.LLM_SERVING}/data/cache/h3-image/refs"
     cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model minimax-h3-image --model minimax-h3-image-pe -- ${h3-image-cmd} --model-id minimax-h3-image
     capacities:
       gpu: 10000            # wired peak 2-6 GB (1024²-4096²); 2160p beside Flash-Next + 116k prompt: compressor 9.5 GB, no swap
