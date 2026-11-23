@@ -322,7 +322,8 @@ def install(home, backup_dir, mode="apply", sources=None, bins=None, register_cl
 
     def note(item, action, extra=""):
         nonlocal pending
-        changed = action != "unchanged" and not action.startswith("skipped")
+        # "in place": the bridge directory is this checkout (~/llm-serving), so the file is already the template
+        changed = action not in ("unchanged", "in place") and not action.startswith("skipped")
         pending |= changed
         shown = f"{verb}{action}" if changed else ("up to date" if action == "unchanged" else action)
         lines.append(f"bridge {item}: {shown}{extra}")

@@ -167,6 +167,14 @@ class BridgeInstallTests(unittest.TestCase):
         self.install()
         self.assertFalse(self.install("check")[1])
 
+    def test_check_in_place_is_not_pending(self):
+        # Production layout: the bridge directory is the checkout itself, so source and target are the same file.
+        self.install()
+        with patch.object(bridge_mod, "TEMPLATES", self.bridge):
+            lines, pending = self.install("check")
+        self.assertFalse(pending, lines)
+        self.assertIn("bridge mcp: in place", lines)
+
     def test_registration_updates_foreign_entry(self):
         (self.home / ".claude.json").write_text(json.dumps({"mcpServers": {"llm-collab": {"command": "/old/mcp"}}}))
         lines, _ = self.install()
