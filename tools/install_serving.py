@@ -46,13 +46,13 @@ H3_VIDEO_SHARE_BASE=@SHARE_BASE@
 H3_VIDEO_FETCH_HOSTS=@FETCH_HOSTS@
 """
 VERBATIM = [f"bin/{n}" for n in ("archive-restore", "gpu-lock", "gpu-lock-run", "gpu-lock-watchdog", "gpu-pool",
-                                 "gpu-top", "health-check", "lsw-apply", "lsw-inflight", "memguard", "model-archive",
+                                 "gpu-top", "health-check", "flashnext-prefetch", "lsw-apply", "lsw-inflight", "memguard", "model-archive",
                                  "regress")] \
     + [f"platform/llama-swap/{n}" for n in ("serve.sh", "start.sh", "stop.sh")]
 VERBATIM_DATA = ["platform/llama-swap/env.sh", "platform/llama-swap/config.yaml", "platform/gateway/Caddyfile"] \
     + sorted(f"platform/llama-swap/conf.d/{p.name}" for p in (ROOT / "platform/llama-swap/conf.d").glob("*.yaml"))
 STRATA = "services/text/strata/configs/"
-AGENTS = ("llama-server", "llm-gateway", "decisions", "h3-video-files", "health")
+AGENTS = ("llama-server", "llm-gateway", "decisions", "h3-video-files", "health", "flashnext-prefetch")
 # destination relative to the target home -> (source relative to this checkout, kind, mode)
 FILES = {S + p: (p, "verbatim", 0o755) for p in VERBATIM}
 FILES.update({S + p: (p, "verbatim", 0o644) for p in VERBATIM_DATA})

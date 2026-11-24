@@ -21,7 +21,7 @@ LaunchAgent 模板都已在运行位置。每台机器不同的只有几样，�
 
 | 线上文件（相对 `~`） | 来源 | 方式 | 说明 |
 | --- | --- | --- | --- |
-| `llm-serving/bin/*`（gpu-lock、gpu-lock-run、gpu-pool、gpu-top、memguard、lsw-inflight、lsw-apply、gpu-lock-watchdog、archive-restore、model-archive、regress、health-check） | 仓库 | 原位 | 规则见 [gpu-lock.md](gpu-lock.md)；archive-restore 在入口启动时按清单从归档机拷回缺失的权重 |
+| `llm-serving/bin/*`（gpu-lock、gpu-lock-run、gpu-pool、gpu-top、memguard、lsw-inflight、lsw-apply、gpu-lock-watchdog、archive-restore、model-archive、regress、health-check、flashnext-prefetch） | 仓库 | 原位 | 规则见 [gpu-lock.md](gpu-lock.md)；archive-restore 在入口启动时按清单从归档机拷回缺失的权重 |
 | `llm-serving/platform/llama-swap/{config.yaml,conf.d/*.yaml}` | 仓库 | 原位 | 本机路径写成 `${env.LLM_SERVING}`、`${env.LLM_MODELS}`、`${env.STRATA_RELEASE}`；key 只以 `${env.LLAMA_API_KEY}` 出现 |
 | `llm-serving/platform/llama-swap/{env.sh,serve.sh,start.sh,stop.sh}` | 仓库 | 原位 | `env.sh` 读 `.local/serving.env` 和 `bin/gpu-pool`；serve.sh 和 lsw-apply 都 source 它 |
 | `llm-serving/platform/gateway/Caddyfile` | 仓库 | 原位 | `{$LLM_SERVING}`、`{$LLM_TRUSTED_PROXY}`，Caddy 用 `--envfile .local/serving.env` 读取 |

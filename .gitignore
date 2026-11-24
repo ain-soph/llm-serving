@@ -9,6 +9,7 @@
 !/bin/
 /bin/*
 !/bin/archive-restore
+!/bin/flashnext-prefetch
 !/bin/gpu-lock
 !/bin/gpu-lock-run
 !/bin/gpu-lock-watchdog

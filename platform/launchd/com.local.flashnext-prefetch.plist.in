@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>com.local.flashnext-prefetch</string>
+	<!-- Warm Flash-Next's weight files in the page cache while it is not loaded (bin/flashnext-prefetch, 2026-11-23).
+	     Off: touch @SERVING_ROOT@/.local/flashnext-prefetch.off (or launchctl bootout this agent). -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/python3</string><string>-I</string><string>@SERVING_ROOT@/bin/flashnext-prefetch</string>
+	</array>
+	<key>StartInterval</key><integer>15</integer>
+	<key>RunAtLoad</key><true/>
+	<key>ProcessType</key><string>Background</string>
+	<key>LowPriorityIO</key><true/>
+	<key>Nice</key><integer>10</integer>
+	<key>StandardOutPath</key><string>@SERVING_ROOT@/logs/prefetch/launchd.out</string>
+	<key>StandardErrorPath</key><string>@SERVING_ROOT@/logs/prefetch/launchd.out</string>
+</dict>
+</plist>

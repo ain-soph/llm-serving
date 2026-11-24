@@ -180,8 +180,8 @@ class InstallServingTests(unittest.TestCase):
         rc, out = run("--home", self.home, "--values", self.values)
         agents = self.home / "Library/LaunchAgents"
         self.assertEqual(sorted(p.name for p in agents.iterdir()),
-                         ["com.local.decisions.plist", "com.local.h3-video-files.plist", "com.local.health.plist",
-                          "com.local.llama-server.plist", "com.local.llm-gateway.plist"])
+                         ["com.local.decisions.plist", "com.local.flashnext-prefetch.plist", "com.local.h3-video-files.plist",
+                          "com.local.health.plist", "com.local.llama-server.plist", "com.local.llm-gateway.plist"])
         for plist in agents.iterdir():
             doc = plistlib.loads(plist.read_bytes())
             self.assertEqual(doc["Label"], plist.stem)
