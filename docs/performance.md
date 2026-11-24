@@ -156,7 +156,7 @@
 
 - 经 :8080 切换（首请求减去热请求，两轮）：Flash-Next → `hy4-flash` 14.2 / 13.2 s；`hy4-flash` → Flash-Next 10.1 / 10.0 s。
 - 服务（server.py，会话复用 1 槽、不落盘）：空载 +59,400 MiB，130,815 token 提示 + 图片 +67,215，31 题评测峰值 +68,037；
-  llama-swap 容量 69,500。磁盘 130.5 GB（SQ-64 62.03 + Engram 67.58 + Vision 0.93 GB）。
+  llama-swap 容量 71,000（2026-11-24 由 69,500 提高）。磁盘 130.5 GB（SQ-64 62.03 + Engram 67.58 + Vision 0.93 GB）。
 - 31 题（T0.9）复核 31/31。详见 `reports/hy4-flash.md`（不公开）。
 
 ## 嵌入：EmbeddingGemma 2
