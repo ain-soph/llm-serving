@@ -17,8 +17,8 @@
 | LobeChat | 决策 | 不支持：LobeChat 只对内置模型目录里的决策模型 ID 走 `/decisions`，自定义 ID 退化为 `/chat/completions` 模拟，而网关上的决策模型只提供 `/v1/decisions` 和 SystemOne，没有对话接口；用 MCP `decide` |
 | OpenClaw | 对话采样 | `agents.defaults.models["<provider>/qwen3.8-flash-next"].params.extra_body.top_k = 20`（同 Open WebUI） |
 | OpenClaw | TTS | `tts.provider = openai`，`baseUrl` 网关，`model` `qwen3-tts`，`speakerVoice` `vivian`，`responseFormat` mp3 |
-| OpenClaw | 出图（**目前不可用**） | `plugins.entries.litellm.enabled = true`；`models.providers.litellm`（`baseUrl` = 网关 `/v1`，`api: openai-completions`）；`agents.defaults.mediaModels.image` = `litellm/minimax-h3-image`，fallback `litellm/qwen-image-2.1-turbo`。OpenClaw 的 SSRF 防护拦下内网地址：`Blocked hostname or private/internal/special-use IP address`，请求没有到网关。见下“已知限制” |
-| OpenClaw | 语音转文字（**目前不可用**） | `tools.media.models` 一项：提供方 `openai`、模型 `qwen3-asr-1.7b`、`baseUrl` 网关、`request.auth` bearer 网关 key、`capabilities: [audio]`。`request.auth` 没有生效，报 `ProviderAuthError: No API key found for provider "openai"`，请求没有到网关 |
+| OpenClaw | 出图 | `plugins.entries.litellm.enabled = true`；`models.providers.litellm`（`baseUrl` = 网关 `/v1`，`api: openai-completions`，`request.allowPrivateNetwork: true`：只对这一个提供方放行内网地址，不是全局 SSRF 开关）；`agents.defaults.mediaModels.image` = `litellm/minimax-h3-image`，fallback 只有 `litellm/qwen-image-2.1-turbo`。写了显式的 primary/fallbacks，对话里的 `image_generate` 只试这两个，不会自动追加其他已登录的提供方。CLI `openclaw infer image generate` 一律带 `--model litellm/<模型>`（原因见“已知限制”）；`--output` 要指向真实目录（`/tmp` 是符号链接，会报 `directory component must be a directory`），或者不写 `--output`，图就存进 `~/.openclaw/media/generated/` |
+| OpenClaw | 语音转文字 | `tools.media.models` 只有一项 `type: cli`：`~/.openclaw/local-asr/transcribe {{AttachmentPath}} --model qwen3-asr-1.7b --language {{Language}}`，`capabilities: [audio]`，`timeoutSeconds 600`。这个脚本（Python 标准库）运行时从 `openclaw.json` 的 `models.providers.litellm` 读网关地址和本机 key，不另存 key，key 也不出现在进程参数里；它 POST `/v1/audio/transcriptions`，只输出文本。没有用 `openai` 提供方：OpenClaw 2026.11.6 里自定义的提供方 ID 只有图片理解能力，做不了音频；借用 `openai` 又会和用户自己的 OpenAI 登录冲突。列表是显式的，所以失败也不会自动转去别的提供方 |
 | OpenClaw | 视频 | 不能原生接：OpenClaw（2026.11.6）的 `video_generate` 只有内置的云厂商提供方，不能指向自定义的 OpenAI `/v1/videos` 端点；用 MCP `generate_video` |
 | 任何 MCP 客户端 | 工具 | `clients/mcp/server.py`（见下） |
 
@@ -57,6 +57,6 @@ MCP 服务在容器里运行（Python 3.12，`clients/mcp/requirements.txt`）�
 
 ## 已知限制（2026-11-23）
 
-- **OpenClaw 出图**：网关在内网地址（`http://<gateway-lan-ip>:8080`）上，被 OpenClaw 的 URL 抓取防护拦下，两个候选模型都没有发出请求。可选修法（待定）：找 OpenClaw 允许私网地址的开关（提供方级或 URL 抓取白名单），或 `baseUrl` 改用公网 https 域名。注意：两个本地候选都失败后，OpenClaw 会继续尝试其他已配置的出图提供方（例如用户自己的 OpenAI 账户）；在修好之前，默认出图可能走到云端。
-- **OpenClaw 语音转文字**：`tools.media` 里给 `openai` 提供方写的 `request.auth` 没有被用上，OpenClaw 去找 OpenAI 的 API key，找不到就报错，请求没有发出。可选修法（待定）：`tools.media` 改为 `type: cli` 调 curl（带网关 key），或另建一个 apiKey 为网关 key 的独立提供方 ID，不碰用户的 `openai` 提供方。
+- **OpenClaw 出图的自动回退（2026-11-23 已修）**：OpenClaw 2026.11.6 的出图在候选都失败后，默认会自动追加所有已登录的出图提供方（代码里 `autoProviderFallback` 默认为 true；文档说显式配置就不追加，与代码不符）。对话里的 `image_generate` 只要 `mediaModels.image` 写了 primary/fallbacks，就会关掉追加；但 CLI `openclaw infer image generate` 不带 `--model` 时一直会追加，也没有配置项能关掉（除非停用 `openai` 插件或删掉它的登录）。所以 CLI 一律带 `--model`：按次指定的模型只试这一个。另外，对话模型如果是用户自己的 OpenAI（Codex 运行时），这个模型可以自己调用 Codex 内置的出图。那是用户选定的模型在用它自己的工具，不属于回退，不在这里管。
+- **OpenClaw 访问内网**：OpenClaw 默认拦截内网地址（`Blocked hostname or private/internal/special-use IP address`）。出图走 `litellm` 提供方，需要它的 `request.allowPrivateNetwork: true`；对话（`vllm` 提供方）和记忆检索会自动信任自己配置的 `baseUrl`，不用另设。
 - **llama-swap playground 的出图尺寸**：尺寸下拉框的选择存在浏览器 localStorage（`playground-image-size`），每次请求都带上；“总是 1792x1024” 是这个浏览器记住了上次的选择，在下拉框里改选即可。没有“跟随模型默认”的选项或配置项，不改。
