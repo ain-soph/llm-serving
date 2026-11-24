@@ -1,7 +1,8 @@
-# Flash-Next via ain-soph/Strata serving at 64091c8e2 (upstream main 73d4f4196 = v0.2.20+13, + our 9 + README + the Metal
-# down+combine dispatch, on by default, and --dump-routing; release worktree serving-20261123b, 2026-11-23; c=1 decode
-# 151.5 -> 153.4 tok/s, outputs byte-identical; rollback: STRATA_METAL_DOWN_COMB=0, or the release serving-20261123 at
-# 53a6becb8 via .local/serving-values.json, see services/text/strata/decode-opt-20261123/deploy/).
+# Flash-Next via ain-soph/Strata serving at 4a6415f4e (upstream main 73d4f4196 = v0.2.20+13, + our 9 + README + the Metal
+# down+combine dispatch and --dump-routing (64091c8e2) + Metal concurrent MTP: each batch slot drafts, STRATA_METAL_BATCH_MTP=1
+# in configs/*-c262k-p2-compact.json.in); release worktree serving-20261123c, 2026-11-23; c=2 aggregate decode 156.6 -> 174.9
+# tok/s, c=1 / prefill unchanged, outputs byte-identical; rollback: drop STRATA_METAL_BATCH_MTP (or "0") from the two templates,
+# or the release serving-20261123b at 64091c8e2 via .local/serving-values.json, see services/text/strata/concurrent-mtp-20261123/deploy/.
 # Upstream defaults kept (user 2026-11-23): a request with no sampling field is decoded
 # greedily with MTP drafts (d35353903; before: the model card's sampling); a 'model' naming another Strata catalogue id gets
 # 404 model_not_found (#6621; our IDs are aliases in the configs); the conversation cache has no --conversation-cache-mib

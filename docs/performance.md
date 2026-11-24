@@ -7,7 +7,7 @@
 
 | 类别 | 模型 ID | 后端 | 权重精度 | 速度（关键数） | 内存（关键数） | 权重磁盘 |
 | --- | --- | --- | --- | --- | --- | ---: |
-| 文本／视觉 | `qwen3.8-flash-next` | Strata Metal fork | AD-4.27 混合（3.57 bpw 主体） | prefill 2,725 tok/s（26K）／2,694（116K）；decode 152.4（单路）／158.2（双路合计）tok/s（`82d63e19e`） | wired +65,880 MiB（262K × 2 槽） | 96.94 GB |
+| 文本／视觉 | `qwen3.8-flash-next` | Strata Metal fork | AD-4.27 混合（3.57 bpw 主体） | prefill 2,748 tok/s（26K）／2,681（116K）；decode 154.1（单路）／174.8（双路合计）tok/s（`4a6415f4e`） | wired +66,601 MiB（262K × 2 槽） | 96.94 GB |
 | 文本／视觉 | `qwen3.8-flash-next-uncensored` | Strata Metal fork | 同上 | prefill 2,762 tok/s（26K）／2,701（116K）；decode 148.9（单路）／154.3（双路合计）tok/s；260K 续问 TTFT 0.25–0.49 s | wired +65,684 MiB（262K × 2 槽） | 96.95 GB |
 | 文本嵌入 | `embeddinggemma-2` | MLX，M5 TensorOps | BF16 权重，FP32 激活 | 16-token 查询 5.6 ms，64 × 400 token 达 57,814–58,226 tok/s（独占 GPU 内核验收） | 服务 wired 峰值增量 2680 MiB，常驻预留 3160 MiB | 0.558 GB + 32 MB 分词器 |
 | 多模态嵌入 | `embeddinggemma-2-multimodal` | llama.cpp + 适配层 | BF16 | 图片 0.04–0.12 s；5 s 音频 0.035 s；4 s 视频 0.34 s | wired +2996 MiB | 1.540 GB |
@@ -45,7 +45,17 @@
 
 - 固定输出 43/43 相同，wired 不变。代价：缓存装满时停放的会话占约 6.7–7.4 GiB 主机内存；此时同时生成 Z-Image，第二张图最多慢 21%，没有失败。
 
-**现行：Strata `53a6becb8`，2026-11-23**。fork `serving` 改为上游 main `73d4f4196`（v0.2.20+13）+ 我们的提交（rebase），配置不变。与 `82d63e19e` 同场对比（独占，AtomicChat AD-4.27，主体约 3.57 bpw、MTP Q2_0，INT8 KV，262144 ctx × 2）：温度 0 的 36 个固定输出逐字节相同；单路 decode 151.63 → 151.78 tok/s，2 并发合计 155.1 → 154.1，prefill 26–28K 2,758 → 2,747、104–116K 2,696 → 2,687 tok/s，短提示 TTFT 0.146 → 0.134 s，wired 峰值增量 66,330 → 66,338 MiB，都在噪声内。不带采样字段的请求按上游改为贪心解码（d35353903）。下面是 `82d63e19e` 的完整实测。
+**现行：Strata `4a6415f4e`，2026-11-23 20:38**。两项 Metal 改动：routed down 与 shared-expert combine 合成一个 dispatch（`64091c8e2`，默认开），以及并发 MTP（引擎 env `STRATA_METAL_BATCH_MTP=1`）：两路同时 decode 时每个槽也带 1 个 MTP 草稿，在共享的批窗口里一起验证。上游在 Metal 上关闭了 `--batch-mtp`，之前两路时都不做草稿。同场对比在独占锁下进行，配置同下（AtomicChat AD-4.27，MTP Q2_0 spec 3，INT8 KV，262144 × 2 compact），每臂测两次：
+
+| 版本 | c=1 decode tok/s | c=2 合计 tok/s | c=4 合计（2 路运行 2 路排队） | prefill 26–28K／104–116K tok/s | wired 峰值增量 MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `53a6becb8` | 151.8 | 153.4–158.3 | 150.3–152.8 | 2,720–2,743／2,676–2,684 | 66,326–66,339 |
+| `64091c8e2`（down+combine） | 153.8 | 156.6–160.5 | 152.5–156.5 | 2,742–2,746／2,678–2,683 | 66,339–66,340 |
+| `4a6415f4e`（+ 并发 MTP，现行） | 153.9–154.1 | 172.8–175.5 | 174.9–180.7 | 2,745–2,748／2,681–2,683 | 66,601–66,605 |
+
+- 温度 0 的 34 个固定输出逐字节相同；2 路、4 路时每个请求的回答与单独运行时相同（含图片请求与文本同批）。两路约 258K needle 同时 decode 正常。草稿 K/V 每个槽 set 一份，多 0.28 GB。
+
+**上一版：Strata `53a6becb8`，2026-11-23**。fork `serving` 改为上游 main `73d4f4196`（v0.2.20+13）+ 我们的提交（rebase），配置不变。与 `82d63e19e` 同场对比（独占，AtomicChat AD-4.27，主体约 3.57 bpw、MTP Q2_0，INT8 KV，262144 ctx × 2）：温度 0 的 36 个固定输出逐字节相同；单路 decode 151.63 → 151.78 tok/s，2 并发合计 155.1 → 154.1，prefill 26–28K 2,758 → 2,747、104–116K 2,696 → 2,687 tok/s，短提示 TTFT 0.146 → 0.134 s，wired 峰值增量 66,330 → 66,338 MiB，都在噪声内。不带采样字段的请求按上游改为贪心解码（d35353903）。下面是 `82d63e19e` 的完整实测。
 
 **上一版：Strata `82d63e19e`，2026-11-22**。fork `serving` 改为上游 main `6e38f588a`（v0.2.18 之后）+ 我们的提交（rebase）。配置同下面的省内存双槽：262144 ctx × 2，AD-4.27，INT8 KV，MTP Q2_0（spec 3），两项改变精度的开关关闭。按上游默认：Strata 自有 Qwen 视觉塔、draft-cost 表开（每台机器从前约 100 个真实请求被动学到）、GPU keep-alive 开。M5 Ultra 独占；c=1 为 36–62 token 提示各解码 400 token，c=2 为两路各 400 token 合计，prefill 为服务端计时，均为三次中位数。
 
