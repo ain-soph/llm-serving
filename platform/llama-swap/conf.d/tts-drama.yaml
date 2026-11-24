@@ -1,0 +1,32 @@
+# Fish Audio Drama 3 (fishaudio/drama-3, Fish Audio Community License: research / non-commercial; mlx-community 8-bit
+# conversion @fedc7cc9: routed experts 8-bit group 64 re-quantized from the official block-FP8, everything else bf16 as
+# shipped) via mlx-audio fish_drama3 behind ~/llm-serving/services/tts/server.py (the same server as qwen3-tts).
+# Owner: T4 backlog (2026-11-23). Report: ~/llm-serving/reports/tts.md (Drama 3 section).
+# POST /v1/audio/speech: the whole input goes to the model, which chunks long text itself and keeps one voice;
+# delivery cues inline ("[whispers] ...", "[laughs]"), `<|speaker:N|>` switches speakers; `voice` zh / en = built-in
+# prompt voices (services/tts/voices), OpenAI names or none = the model picks a voice (varies with the seed);
+# ref_audio + ref_text clone a voice; `instructions` is refused (400). 44.1 kHz output (pcm resampled to 24 kHz).
+# Correctness: the official reference implementation (SGLang-Omni) runs on CUDA only, so this port is checked by ASR
+# read-back (qwen3-asr) of the 16 tts/eval sentences, not against official outputs.
+# Capacity: EXCLUSIVE by choice (the whole pool): ~40 GB of weights cannot sit beside Flash-Next (71000), and a long
+# text keeps the GPU busy for minutes. Measured wired peak: +41340 MiB (direct server).
+models:
+  "fish-drama-3":
+    name: "Fish Audio Drama 3 (8-bit)"
+    description: "Expressive multi-speaker TTS with inline cues ([whispers], [laughs]), zh/en/ja/ko/...; voices zh/en or ref_audio clone; unloads the chat model"
+    env:
+      - "MLX_ZERO_COPY_LOAD=1"
+    cmd: >
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model fish-audio-drama-3-8bit --
+      ${env.LLM_SERVING}/.venv/bin/python ${env.LLM_SERVING}/services/tts/server.py --port ${PORT}
+      --model ${env.LLM_MODELS}/fish-audio-drama-3-8bit --model-id fish-drama-3
+      --voices ${env.LLM_SERVING}/services/tts/voices/voices.json
+    capabilities:
+      in: [text]
+      out: [audio]
+      disableAuto: true
+    checkEndpoint: /health
+    ttl: 600
+    capacities:
+      gpu: ${env.LSW_GPU_EXCLUSIVE}   # EXCLUSIVE by choice; measured wired peak +41340 MiB (server, all checks incl. 1449-char text), +41339 MiB in-process (live-1123-1523)
+    evict_cost: 10

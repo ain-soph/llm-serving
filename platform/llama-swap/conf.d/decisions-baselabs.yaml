@@ -31,3 +31,26 @@ models:
     capacities:
       gpu: 10000             # peak wired +8730 MiB at the 16,384-token limit, direct server, 1024 MB cache (dq1-1118-0056)
     evict_cost: 0
+
+  # joey-1 (2026-11-23, T4 backlog): baselabs/joey-1 @87eb48acc94c1ed7ebc7bff6c66ca326ce578bf9 (2B, Qwen3.5-2B post-trained;
+  # MIT as modified by Baseten + Apache-2.0 for the Qwen base), same port and OneJev serve.patch as elephant / mammoth.
+  # Per-class choice (services/backlog-t4-20261123/out/s2-1123-1509): W8A8 with linear-attention in_proj_z and out_proj
+  # kept at 8-bit weight-only: vs the official float32 reference max |dp| 0.0065 / mean 0.00080 (all-W8A8 0.0113, bf16
+  # 0.0045), no answer flips; 16K-token request 0.947 s (bf16 1.112 s). Stored pre-quantized (save_mix.py, bit-identical
+  # to quantizing at load). Rebuild: hf download baselabs/joey-1, save_mix.py --quant w8a8 --w8a8-skip in_proj_z,out_proj.
+  "joey-1":
+    name: "Base Labs joey-1 (decisions)"
+    description: "Small decision model (2B): predicate / choice / score probabilities, text, up to 16K tokens; fastest Base Labs model"
+    cmd: >
+      ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model joey-1-mix8 -- ${env.LLM_SERVING}/.venv/bin/python
+      ${env.LLM_SERVING}/services/decisions/jev/server.py
+      --model ${env.LLM_MODELS}/joey-1-mix8 --model-id joey-1 --dtype bfloat16 --cache-mb 1024
+      --host 127.0.0.1 --port ${PORT}
+    capabilities:
+      in: [text]
+      out: [decisions]
+    checkEndpoint: /health
+    ttl: 1800
+    capacities:
+      gpu: 4500             # peak wired +3101 MiB at the 16,384-token limit, direct server, 1024 MB cache (live2-1123-1540)
+    evict_cost: 0

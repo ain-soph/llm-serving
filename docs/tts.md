@@ -1,4 +1,4 @@
-# 语音合成：Qwen3-TTS
+# 语音合成：Qwen3-TTS 与 Fish Audio Drama 3
 
 服务 `services/tts/server.py` 用 mlx-audio fork（commit 固定在 `uv.lock`）运行 Qwen3-TTS 12Hz 1.7B（Apache-2.0；2026-11-23 起用预量化的 8 位权重），
 接口 `POST /v1/audio/speech`（OpenAI 字段，音频边生成边发送）和 `GET /v1/audio/voices`。路由模板：`platform/llama-swap/conf.d/tts.yaml`。
@@ -33,6 +33,23 @@ done
 （W8A16，group 32），激活 BF16，语音解码器保持官方 FP32。和 BF16 比（同一会话独占测量）：实时率低 19–23%，MLX 峰值少 1.5–1.8 GB，
 16 句 × 3 变体的 ASR 回写错误都是 0%（与 BF16 相同）。三个 `-q8` 目录合计 7.19 GB（BF16 原版 12.2 GB，只在重新生成时需要，
 生成后可以删除）。要改回 BF16，把 `tts.yaml` 里的 `--model` 指回不带 `-q8` 的目录即可。
+
+## Fish Audio Drama 3（`fish-drama-3`，2026-11-23）
+
+同一个 `services/tts/server.py`，模型目录的 `config.json` 是 `fish_drama3` 时走 mlx-audio 的 `fish_drama3`。路由模板：`platform/llama-swap/conf.d/tts-drama.yaml`。
+35B MoE（3B 激活），表现力强：语气提示直接写在文本里（`[whispers]`、`[laughs]`），`<|speaker:N|>` 切换说话人；长文本整段交给模型，
+模型自己分块并保持同一音色。权重 39 GiB，放不进聊天模型旁边，所以是**独占入口**（加载时卸下其他模型）。许可：Fish Audio Community / Research License（非商用）。
+
+- `voice`：`--voices` 里的内置提示音（JSON `{名字: {wav, text}}`，例如 `zh`、`en`）；OpenAI 音色名或不填 = 模型自选音色（随 seed 变）；
+  也可以发 `ref_audio`（1–60 s）+ `ref_text`（必须）克隆。`instructions` 不支持（400）。
+- 输出 44.1 kHz；`pcm` 按 OpenAI 的定义重采样到 24 kHz。
+- 速度（M5 Ultra）：约 2.6 倍实时，首段音频约 0.17 s；锁定内存约 +41 GB。
+- 正确性：官方参照实现只能在 CUDA 上运行，这里用 ASR 回写（16 句错误 0%）验证，没有逐样本对官方的误差。
+
+```sh
+hf download mlx-community/fish-audio-drama-3-8bit --revision fedc7cc9 --local-dir "$HOME/models/fish-audio-drama-3-8bit"   # 39 GiB
+# 内置提示音（可选）：services/tts/voices/voices.json 写 {"zh": {"wav": "zh.wav", "text": "<转写>"}, ...}，wav 放同目录
+```
 
 ## CosyVoice3（2026-11-18 下线）
 

@@ -21,10 +21,12 @@
 | 重排 | `qwen3-reranker-0.6b`／`4b`／`8b` | MLX，自写服务 | `/v1/rerank`；RAG 用 `4b` |
 | 决策 | `pplx-decider-flash`¹ | MLX 移植 | 4B；文本与图片，最长 32K token |
 | 决策 | `elephant-1`¹、`mammoth-1`¹ | MLX 移植 + 官方 OneJev | 9B／27B，文本，最长 16K token；`mammoth-1` 加载时卸下聊天模型 |
+| 决策 | `joey-1` | MLX 移植 + 官方 OneJev | 2B，文本，最长 16K token（约 0.95 s）；与聊天模型共存 |
 | 决策 | `drex-v1.5` | nace-ai llama.cpp 分支（未改） | 9B，文本，最长 16K token |
 | 语音转写 | `qwen3-asr-1.7b` | [mlx-audio fork](https://github.com/ain-soph/mlx-audio/tree/serving) + 自写引擎 | 默认；中文、中英混合、长音频；词级时间戳 |
 | 语音转写 | `whisper-large-v3` | [mlx-whisper fork](https://github.com/ain-soph/mlx-examples/tree/serving/whisper) | 多语种 |
 | 语音合成 | `qwen3-tts`、`-clone`、`-design` | [mlx-audio fork](https://github.com/ain-soph/mlx-audio/tree/serving) | 预设音色（含四川话、北京话）、声音克隆、声音设计；边生成边输出 |
+| 语音合成 | `fish-drama-3` | [mlx-audio fork](https://github.com/ain-soph/mlx-audio/tree/serving) | Fish Audio Drama 3（35B MoE，8 位）：文本内语气提示、多说话人、克隆；约 2.6 倍实时；独占入口；非商用许可 |
 | 图片生成／编辑 | `minimax-h3-image` | [h3-image-mlx fork](https://github.com/ain-soph/h3-image-mlx/tree/serving) | 单边最大 4096，超出返回 400；与聊天模型共存 |
 | 图片生成／编辑 | `minimax-h3-image-pe` | 同上 + mlx-vlm 跑官方 [MiniMax-H3-Image-PE](https://huggingface.co/MiniMaxAI/MiniMax-H3-Image-PE) | 可选：先用官方提示词扩写，返回 `revised_prompt`；扩写时卸下聊天模型² |
 | 图片生成／编辑 | `qwen-image-2.1-turbo`、`-turbo-pe`、`qwen-image-2.1` | [mflux fork](https://github.com/ain-soph/mflux/tree/serving) | 8／40 步；最多 10 张参考图、遮罩、透明 PNG、提示词增强；非商用许可 |
@@ -70,14 +72,16 @@
 **决策** · [说明](docs/decisions.md)
 - `pplx-decider-flash`：按层类 W8A8 预量化存盘、MLX 缓存 4096 MB：32.6K token 12.70 → 5.64 s，加载 1.2 → 0.5 s，对官方 FP32 最大概率差 0.0009。
 - `elephant-1`、`mammoth-1`：只换模型前向，其余用官方代码，比官方在 Mac 上（MPS BF16）快 5–10 倍；按层类混合比全 8 位快，16K token elephant 4.03 → 2.82 s、mammoth 13.5 → 8.5 s；预量化存盘后加载 2.2／6.2 → 0.4 s。
+- `joey-1`（2B）：按层类 W8A8（`in_proj_z`、`out_proj` 8 位只量化权重），对官方 FP32 最大概率差 0.0065（全 W8A8 0.0113），16K token 1.112 → 0.947 s。
 - `drex-v1.5`：`-ub 512`，wired 峰值 12.5 → 11.0 GiB，放得进聊天模型旁边（长请求 4.0 → 4.3 s）。
 
 **语音转写**
 - Qwen3-ASR：8 位存盘（W8A16）快 1.27–1.31×；换 mlx-audio 加自写快速路径和长音频批处理，短集再快 4.5–7.6%，12–16 分钟音频 2.3–2.9×；错误率不变。
 - Whisper：融合注意力 1.26–1.31×；8 位存盘，wired 4545 → 3198 MiB（容量 6000 → 4500）；按需导入词级对齐，导入 0.53 → 0.13 s（[说明](docs/whisper-startup.md)）。
 
-**语音合成：Qwen3-TTS** · [说明](docs/tts.md)
+**语音合成：Qwen3-TTS、Fish Audio Drama 3** · [说明](docs/tts.md)
 - 8 位存盘（W8A16）：实时率低 19–23%，MLX 峰值少 1.5–1.8 GB，ASR 回写错误仍为 0%。首段音频 0.08–0.14 s。
+- Drama 3：零拷贝加载 2 s；实时率 0.37，首段 0.17 s；官方只能在 CUDA 上跑，用 ASR 回写验证（16 句 0%）。
 
 **图片：MiniMax H3 Image** · [说明](docs/h3-image.md)
 - 零拷贝：1024² 13.1 → 4.2 s。

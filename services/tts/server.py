@@ -18,6 +18,13 @@ CosyVoice3 (Fun-CosyVoice3-0.5B via mlx-audio-plus, run from tts/cosyvoice/.venv
   `voice` picks a built-in prompt voice (voices.json; OpenAI names map to the first), or send `ref_audio`
   (<= 30 s) with its exact transcript `ref_text` (zero-shot) or without it (cross-lingual);
   `instructions` switches to instruct mode (dialect, emotion, speed, e.g. "请用四川话表达。"), ref_text is then unused.
+Fish Audio Drama 3 (config.json model_type fish_drama3, mlx-audio fish_drama3, 2026-11-23):
+  the whole input goes to the model, which splits it itself and keeps the first and previous chunk as history (one
+  voice across a long text). `ref_audio` + `ref_text` (both required) clone a voice; otherwise `voice` picks a
+  built-in prompt voice from --voices (zh / en), and anything else (OpenAI names, none) lets the model choose a
+  voice (it varies with the seed). Delivery cues go inline in the text ("[whispers]", "[laughs]"); `instructions`
+  is refused. `<|speaker:N|>` tags (0-15) switch speakers. Native rate 44.1 kHz (wav / mp3 / ...); pcm is
+  resampled to 24 kHz as OpenAI defines it.
 
 Audio is streamed as it is generated (chunked transfer; pcm = 24 kHz mono s16le). Long input is split into
 paragraphs and sentences of at most --max-chars characters, generated one after another; each piece stops after
@@ -67,10 +74,10 @@ class BadRequest(Exception):
     pass
 
 
-def decode_audio(raw: bytes) -> np.ndarray:
-    """Any container ffmpeg reads -> 24 kHz mono float32."""
+def decode_audio(raw: bytes, sr: int = SR) -> np.ndarray:
+    """Any container ffmpeg reads -> mono float32 at `sr` (24 kHz by default)."""
     p = subprocess.run([FFMPEG, "-nostdin", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ac", "1",
-                        "-ar", str(SR), "-f", "f32le", "pipe:1"], input=raw, capture_output=True)
+                        "-ar", str(sr), "-f", "f32le", "pipe:1"], input=raw, capture_output=True)
     if p.returncode != 0 or not p.stdout:
         raise BadRequest("could not decode ref_audio: " + p.stderr.decode(errors="replace")[-300:])
     return np.frombuffer(p.stdout, dtype=np.float32).copy()
@@ -126,6 +133,7 @@ class Engine:
         self.model_dir, self.cache_mb, self.max_chars = model_dir, cache_mb, max_chars
         self.voices_file, self.s3tokenizer = voices, s3tokenizer
         self.ready = False
+        self.sr = SR
         self.pool = cf.ThreadPoolExecutor(1)
         self.pool.submit(self._load).result()
 
@@ -146,6 +154,15 @@ class Engine:
             self.prompts = {name: (decode_audio((Path(self.voices_file).parent / v["wav"]).read_bytes()), v["text"])
                             for name, v in spec.items()}
             self.speakers = list(self.prompts)
+        elif getattr(self.model.config, "model_type", None) == "fish_drama3":
+            self.kind = "fish_drama3"
+            self.sr = int(self.model.sample_rate)
+            self.prompts = {}
+            if self.voices_file:
+                spec = json.loads(Path(self.voices_file).read_text())
+                self.prompts = {name: (decode_audio((Path(self.voices_file).parent / v["wav"]).read_bytes(), self.sr),
+                                       v["text"]) for name, v in spec.items()}
+            self.speakers = list(self.prompts)
         else:
             self.kind = getattr(self.model.config, "tts_model_type", "base")
             self.speakers = sorted(s.lower() for s in (self.model.supported_speakers or []))
@@ -160,6 +177,8 @@ class Engine:
         if len(text) > MAX_INPUT:
             raise BadRequest(f"input is longer than {MAX_INPUT} characters")
         opts = {"pieces": split_text(text, self.max_chars), "instruct": (req.get("instructions") or "").strip() or None}
+        if self.kind == "fish_drama3":
+            return self._drama_options(req, text, opts)
         lang = str(req.get("language") or "auto").lower()
         opts["language"] = LANGUAGES.get(lang, lang)
         if self.kind == "custom_voice":
@@ -224,6 +243,44 @@ class Engine:
             opts["seed"] = int(req["seed"])
         return opts
 
+    def _drama_options(self, req: dict, text: str, opts: dict) -> dict:
+        if opts["instruct"]:
+            raise BadRequest("Drama 3 takes delivery cues inline in the text, e.g. [whispers], not `instructions`")
+        opts["pieces"] = [text.strip()]  # the model chunks long text itself, keeping one voice
+        opts["ref_audio"] = opts["ref_text"] = None
+        if req.get("ref_audio"):
+            ref, ref_text = req["ref_audio"], (req.get("ref_text") or "").strip()
+            if not ref_text:
+                raise BadRequest("ref_audio needs its exact transcript in ref_text")
+            if ref.startswith("data:"):
+                ref = ref.split(",", 1)[1]
+            try:
+                audio = decode_audio(base64.b64decode(ref, validate=False), self.sr)
+            except ValueError:
+                raise BadRequest("ref_audio is not valid base64")
+            if not 1.0 <= len(audio) / self.sr <= 60.0:
+                raise BadRequest("ref_audio must be 1-60 s long")
+            opts["ref_audio"], opts["ref_text"] = audio, ref_text
+        else:
+            voice = req.get("voice")
+            if isinstance(voice, dict):
+                voice = voice.get("id") or voice.get("name")
+            voice = str(voice or "").lower()
+            if voice in self.prompts:
+                opts["ref_audio"], opts["ref_text"] = self.prompts[voice]
+            elif voice not in ("", "none", "auto") and voice not in OPENAI_VOICES:
+                raise BadRequest(f"unknown voice {voice!r}; built-in: {', '.join(self.speakers) or 'none'}; "
+                                 "or send ref_audio + ref_text; OpenAI names and none let the model choose")
+        speed = float(req.get("speed") or 1.0)
+        if not 0.25 <= speed <= 4.0:
+            raise BadRequest("speed must be between 0.25 and 4.0")
+        opts["speed"] = speed
+        if req.get("temperature") is not None:
+            opts["temperature"] = float(req["temperature"])
+        if req.get("seed") is not None:
+            opts["seed"] = int(req["seed"])
+        return opts
+
     def stream(self, opts: dict, out: "queue.Queue"):
         """Runs on the worker thread: puts float32 chunks, then None (or an Exception)."""
         import mlx.core as mx
@@ -234,6 +291,13 @@ class Engine:
             kw = {"stream": True, "streaming_interval": 0.32}
             if "temperature" in opts:
                 kw["temperature"] = opts["temperature"]
+            if self.kind == "fish_drama3":
+                kw.pop("max_tokens", None)
+                for r in self.model.generate(text=opts["pieces"][0], ref_audio=opts["ref_audio"],
+                                             ref_text=opts["ref_text"], **kw):
+                    out.put(np.array(r.audio, dtype=np.float32))
+                out.put(None)
+                return
             for piece in opts["pieces"]:
                 # 12.5 codec frames/s; normal speech needs <= 3 frames per CJK character and < 1 per Latin letter.
                 # The cap stops a degenerate generation (e.g. a clone prompt whose transcript does not match the
@@ -272,9 +336,9 @@ class Server(ThreadingHTTPServer):
         self.server_name, self.server_port = self.server_address[:2]
 
 
-def wav_header() -> bytes:
+def wav_header(sr: int = SR) -> bytes:
     """Streaming WAV header (sizes unknown: 0xFFFFFFFF, as ffmpeg and OpenAI do)."""
-    return (b"RIFF" + struct.pack("<I", 0xFFFFFFFF) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, SR, SR * 2, 2, 16)
+    return (b"RIFF" + struct.pack("<I", 0xFFFFFFFF) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, sr, sr * 2, 2, 16)
             + b"data" + struct.pack("<I", 0xFFFFFFFF))
 
 
@@ -311,6 +375,7 @@ class Handler(BaseHTTPRequestHandler):
                 {"id": self.server.model_id, "object": "model", "owned_by": "local"}]})
         elif path == "/v1/audio/voices":
             mapped = ({k: engine.speakers[0] for k in OPENAI_VOICES} if engine.kind == "cosyvoice3"
+                      else {k: "(model's choice)" for k in OPENAI_VOICES} if engine.kind == "fish_drama3"
                       else OPENAI_VOICES if engine.speakers else {})
             self._send(200, "application/json", {"kind": engine.kind, "voices": engine.speakers,
                                                  "openai_voices": mapped})
@@ -361,13 +426,16 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 write(data)
 
-        direct = opts["speed"] == 1.0 and fmt in ("pcm", "wav")
+        sr = self.server.engine.sr
+        direct = opts["speed"] == 1.0 and (fmt == "wav" or (fmt == "pcm" and sr == SR))
         encoder = reader = None
         if not direct:
-            args = [FFMPEG, "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "s16le", "-ar", str(SR),
+            args = [FFMPEG, "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "s16le", "-ar", str(sr),
                     "-ac", "1", "-i", "pipe:0"]
             if opts["speed"] != 1.0:
                 args += ["-filter:a", atempo(opts["speed"])]
+            if fmt == "pcm" and sr != SR:
+                args += ["-ar", str(SR)]  # OpenAI pcm is 24 kHz
             encoder = subprocess.Popen(args + ENCODE[fmt] + ["pipe:1"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 
             def pump():
@@ -382,7 +450,7 @@ class Handler(BaseHTTPRequestHandler):
             reader = threading.Thread(target=pump, daemon=True)
             reader.start()
         elif fmt == "wav":
-            emit(wav_header())
+            emit(wav_header(sr))
         samples, chunk, failed = 0, first, None
         try:
             while chunk is not None:
@@ -412,7 +480,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
-        log.info("speech: %d pieces, %.2f s audio in %.2f s%s", len(opts["pieces"]), samples / SR, time.time() - t0,
+        log.info("speech: %d pieces, %.2f s audio in %.2f s%s", len(opts["pieces"]), samples / sr, time.time() - t0,
                  f" FAILED: {failed}" if failed else "")
 
     def log_message(self, fmt, *args):
@@ -427,7 +495,7 @@ def main():
     ap.add_argument("--model-id", required=True)
     ap.add_argument("--cache-mb", type=int, default=512)
     ap.add_argument("--max-chars", type=int, default=220)
-    ap.add_argument("--voices", help="CosyVoice3: JSON of built-in prompt voices {name: {wav, text}}")
+    ap.add_argument("--voices", help="CosyVoice3 / Drama 3: JSON of built-in prompt voices {name: {wav, text}}")
     ap.add_argument("--s3tokenizer", help="CosyVoice3: local speech_tokenizer_v3 MLX directory")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s", stream=sys.stderr)
