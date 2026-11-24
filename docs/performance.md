@@ -45,7 +45,18 @@
 
 - 固定输出 43/43 相同，wired 不变。代价：缓存装满时停放的会话占约 6.7–7.4 GiB 主机内存；此时同时生成 Z-Image，第二张图最多慢 21%，没有失败。
 
-**现行：Strata `4a6415f4e`，2026-11-23 20:38**。两项 Metal 改动：routed down 与 shared-expert combine 合成一个 dispatch（`64091c8e2`，默认开），以及并发 MTP（引擎 env `STRATA_METAL_BATCH_MTP=1`）：两路同时 decode 时每个槽也带 1 个 MTP 草稿，在共享的批窗口里一起验证。上游在 Metal 上关闭了 `--batch-mtp`，之前两路时都不做草稿。同场对比在独占锁下进行，配置同下（AtomicChat AD-4.27，MTP Q2_0 spec 3，INT8 KV，262144 × 2 compact），每臂测两次：
+**现行：Strata `4a6415f4e` + prompt chunk 2048，2026-11-23 23:07**。引擎 env `STRATA_METAL_PROMPT_CHUNK=2048`。Metal 的 prompt 每块从 1024 行改成 2048 行，每次 prompt 调用 8192 token。这是有意偏离上游默认（`--prefill auto` 用 1024 行）。同场对比在独占锁下进行，配置同下，每臂测两次：
+
+| chunk | c=1 decode tok/s | c=2 合计 tok/s | 短提示 TTFT s | prefill 2K／8K／32K／128K tok/s | 两路约 258K | wired 峰值增量 MiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1024（上游默认） | 153.7–153.9 | 172.9–181.1 | 0.143 | 2,020–2,056／2,606–2,624／2,732–2,745／2,677–2,680 | 2,539 | 65,969–66,615 |
+| 2048（现行） | 153.5–153.7 | 172.5–181.5 | 0.144 | 2,134–2,172／2,843–2,855／3,106–3,108／3,050–3,051 | 2,891 | 68,001–68,486 |
+
+- 输出与 1024 逐位相同：温度 0 输出（含 26K／116K、1.5K–48K 长生成、续问、图片、并发）全部逐字节相同，每 token 的 top-20 logprob 也相同（KL = 0）。
+- 代价一：prompt 缓冲区多约 1.9 GiB wired，仍在 69,500 MiB 预约内。
+- 代价二：一路正在 decode 时读入另一路的长 prompt，decode 那一路的最长停顿从约 1.55 s 变成约 2.65 s；平均速度不变。
+
+**上一版：Strata `4a6415f4e`，2026-11-23 20:38**。两项 Metal 改动：routed down 与 shared-expert combine 合成一个 dispatch（`64091c8e2`，默认开），以及并发 MTP（引擎 env `STRATA_METAL_BATCH_MTP=1`）：两路同时 decode 时每个槽也带 1 个 MTP 草稿，在共享的批窗口里一起验证。上游在 Metal 上关闭了 `--batch-mtp`，之前两路时都不做草稿。同场对比在独占锁下进行，配置同下（AtomicChat AD-4.27，MTP Q2_0 spec 3，INT8 KV，262144 × 2 compact），每臂测两次：
 
 | 版本 | c=1 decode tok/s | c=2 合计 tok/s | c=4 合计（2 路运行 2 路排队） | prefill 26–28K／104–116K tok/s | wired 峰值增量 MiB |
 | --- | ---: | ---: | ---: | ---: | ---: |
