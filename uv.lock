@@ -220,7 +220,7 @@ wheels = [
 [[package]]
 name = "h3-image-mlx"
 version = "0.1.0a10"
-source = { git = "https://github.com/ain-soph/h3-image-mlx?rev=971caf773f55e503ef83726319a14cb60173a949#971caf773f55e503ef83726319a14cb60173a949" }
+source = { git = "https://github.com/ain-soph/h3-image-mlx?rev=4ada520192980f85663b2da128206e142e592eeb#4ada520192980f85663b2da128206e142e592eeb" }
 dependencies = [
     { name = "httpx" },
     { name = "mlx" },
@@ -435,7 +435,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "h3-image-mlx", git = "https://github.com/ain-soph/h3-image-mlx?rev=971caf773f55e503ef83726319a14cb60173a949" },
+    { name = "h3-image-mlx", git = "https://github.com/ain-soph/h3-image-mlx?rev=4ada520192980f85663b2da128206e142e592eeb" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "jiwer", specifier = ">=4.0.0" },
     { name = "mflux", git = "https://github.com/ain-soph/mflux?rev=e52598bd8f6f31a1b23742ec9a3e0d69ac337e53" },
