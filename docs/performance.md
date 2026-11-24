@@ -32,7 +32,7 @@
 | 图片 | `z-image-turbo` | mflux fork | W8A8 DiT（注意力＋前馈），文本编码器／VAE BF16 | 1024² 5.6 s；2048² 36.1 s（经 API，9 步） | 生成期 wired 8.0–8.8 GiB | 14.51 GB |
 | 视频＋音频 | `minimax-h3-video`（旧名 `-stream` 为别名） | h3.c fork | INT8 DiT（零拷贝）、W8A16 文本编码器、BF16 VAE 计算 | fast 768p：5 s 片段 165–170 s；15 s 片段 758 s | standard 768p wired +14.3 GB（按 block 释放）；DiT GPU 峰值 22.20／33.00 GiB（fast） | 58.90 GB² |
 
-¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享 VAE；文本编码器链接到 H3 图片的 INT8 文件，不另计。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `services/decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份；2026-11-23 起为 `services/tts/save_q8.py` 写出的 8 位副本，官方 BF16（12.22 GB）只在重新生成时需要。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `services/decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。⁶ 2026-11-18（pa1b）起每个尺寸一个入口：原精确入口与 `-int8` 入口合并为 `shared/common/qwen3_w8a8.py mix` 写出的预量化混合副本（`mix.json`，零拷贝），见 [w8a8.md](w8a8.md)；下文 11-16／11-17 的 `-int8` 数据保留作记录。
+¹ 三个 Qwen-Image 入口共用一套文件；另有 ControlNet W8A8 控制分支 4.06 GB（2026-11-24，按请求 `control_image` 才映射）。² FL2VA 与 Ref2VA 两个检查点合计，共享 VAE；文本编码器链接到 H3 图片的 INT8 文件，不另计。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `services/decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份；2026-11-23 起为 `services/tts/save_q8.py` 写出的 8 位副本，官方 BF16（12.22 GB）只在重新生成时需要。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `services/decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。⁶ 2026-11-18（pa1b）起每个尺寸一个入口：原精确入口与 `-int8` 入口合并为 `shared/common/qwen3_w8a8.py mix` 写出的预量化混合副本（`mix.json`，零拷贝），见 [w8a8.md](w8a8.md)；下文 11-16／11-17 的 `-int8` 数据保留作记录。
 
 ## 文本：Qwen3.8 Flash-Next（Strata）
 
@@ -747,11 +747,13 @@ M5 Ultra 独占 GPU，六步、INT8 ConvRot、流式零拷贝，缓存预算 800
 | `qwen-image-2.1-turbo` | 8 | W8A8 | W8A16 | 约 9 s；经 API 含进程启动 14.0 s | 2048² 约 43 s；透明 8.2 s；编辑 10.5 s；遮罩 12.3 s |
 | `qwen-image-2.1` | 40 | W8A8 | W8A16 | 约 28 s；经 API 32 s（W8A16 上线后 28 s） | — |
 | `qwen-image-2.1-turbo-pe` | 8 | W8A8 | W8A16 | 先由聊天模型改写（见下）；经 API 42 s | — |
+| 三个入口加 `control_image`（ControlNet，2026-11-24） | 同上 | 同上 + W8A8 控制分支 | 同上 | Turbo 1 MP 9.4–10.0 s（无控制 6.6 s） | 2048² 55.4 s（无控制 38.4）；2752×1536 60.1 s；2400×1792 61.1 s；编辑 inpaint + pose 9.8 s；base 40 步 + CFG 1024² 69.8 s |
 
 | 内存与磁盘 | 数值 |
 | --- | --- |
 | 生成期 wired 峰值：文生图 | 6.7–9.0 GB（1024² 约 7 GB；2048²、2752×1536、2400×1792 为 8.2–9.0 GB） |
 | 生成期 wired 峰值：3／6／10 张参考图 | 5.6–8.4 GB |
+| 生成期 wired 峰值：带 `control_image` | 1024² +5287 MiB；2048² +8480；2752×1536 +8794；2400×1792 +9617（控制图 VAE 编码时 MLX 缓存设 0，原 12.2–16.6 GB） |
 | llama-swap 容量 | 11000 MiB（与 Flash-Next 共存：71000 + 11000 < 83192） |
 | MLX 缓存 | 去噪 6 GB（带参考图 2 GB）；VAE 2 GB |
 | 磁盘 | 26.80 GB（W8A8 DiT 7.26 × 2、W8A16 文本编码器 10.91、FP32 VAE 1.35）；BF16 文本编码器 17.53 GB 只作转换来源与回退 |
@@ -769,6 +771,7 @@ M5 Ultra 独占 GPU，六步、INT8 ConvRot、流式零拷贝，缓存预算 800
 | INT8 文本编码器（2026-11-17 撤下） | 页缓存 −8.8 GB，不提速 | embedding 误差 2.6% → 6.2%；W8A8 只用在能提速的地方，所以撤掉 |
 | W8A16 文本编码器（2026-11-17 17:47 上线，默认） | 文件 16.4 → 10.9 GB；MLX 加载 29.4 → 22.8 GB；编码 0.22 → 0.17 s，整图 6.8／6.4 → 6.7／6.6 s（持平） | embedding 2.58% → 3.55%；第一步速度场 Turbo 3.51 → 3.64%、base 4.60 → 4.75%；32 条评判胜率 46%（打平）；API 出图与测试渲染逐像素相同 |
 | 逐元素融合（调制广播、Q/K norm + RoPE 融合内核、门控残差编译） | 每 block 1024² 20.0 → 17.7 ms（−12%），2048² 121.0 → 108.0 ms（−11%）；每步 0.656 → 0.576 s／3.90 → 3.48 s | 输出逐字节相同；`QWEN21_FUSION` 可关 |
+| ControlNet 控制分支 W8A8（qkv／out／gate_up／down；skip 投影 BF16） | 分支 7.55 → 4.06 GB；每步 1024² 0.935 → 0.817 s（−12.6%），2048² 5.796 → 5.246 s（−9.5%） | 第一步速度场误差（对 BF16 原权重 + FP32 计算）canny／depth／pose／inpaint：BF16 分支 1.67／2.65／1.12／0.90% → W8A8 1.56／1.54／1.04／1.05%；不带控制的请求逐字节不变；详见 reports/qwen-image.md 8d 节 |
 
 **正确性**（同噪声与官方 diffusers 对比，第一步速度场相对 L2；官方自身 BF16 → FP16 为 10.9%）
 

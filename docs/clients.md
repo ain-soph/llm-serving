@@ -24,6 +24,39 @@
 | OpenClaw | 视频 | 不能原生接：OpenClaw（2026.11.6）的 `video_generate` 只有内置的云厂商提供方，不能指向自定义的 OpenAI `/v1/videos` 端点；用 MCP `generate_video` |
 | 任何 MCP 客户端 | 工具 | `clients/mcp/server.py`（见下） |
 
+## Qwen-Image ControlNet（2026-11-24）
+
+三个 qwen-image 入口（`qwen-image-2.1-turbo`、`-turbo-pe`、`qwen-image-2.1`）接受两个可选字段，不带时输出与以前逐字节相同，客户端的默认设置都不变：
+
+| 字段 | 说明 |
+| --- | --- |
+| `control_image` | **预处理好的**控制图（服务端不做预处理）：canny / depth / pose / HED / lineart / MLSD / scribble / grayscale。`/v1/images/generations` 里给 base64 或 data URL；`/v1/images/edits` 里是 multipart 文件，这时对 `image` 在 `mask` 透明处按控制图局部重绘（恰好 1 张图 + mask） |
+| `control_strength` | 0–2，默认 1.0 |
+
+不给 `size` 时画布按控制图比例，所以控制图最好就按想要的输出比例给（最大 2400×1792 面积）。不能和 `auto_mask` 同用。
+Turbo 1 MP 约 10 s（无控制约 7 s），2048² 约 55 s。细节和数字：`reports/qwen-image.md` 8d 节。
+
+**预处理在客户端做**（例子用 Python；mflux 在部署环境 `.venv` 里，客户端机器上要另装 `pip install mflux opencv-python`）：
+
+| 控制类型 | 做法 |
+| --- | --- |
+| canny | `cv2.Canny(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), 100, 200)`（OpenCV） |
+| depth | `mflux-save-depth --image-path photo.jpg`（Apple DepthPro，写出 `photo_depth.png`；第一次运行下载权重） |
+| HED（软边缘） | `from mflux.models.hed.hed import HED; HED().edge_map(pil_image)`（MLX 推理，但加载 `lllyasviel/Annotators` 的 `.pth` 需要 **torch**） |
+| OpenPose（人体姿态） | `from mflux.models.openpose.openpose import OpenPoseBody; OpenPoseBody().pose_map(pil_image)`（同上，需要 torch） |
+| grayscale / scribble / lineart | 灰度图、手绘线稿直接当控制图 |
+
+```sh
+img=$(base64 -i edges.png)
+curl -s http://127.0.0.1:8080/v1/images/generations -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"qwen-image-2.1-turbo\",\"prompt\":\"a red brick house, photo\",\"control_image\":\"data:image/png;base64,$img\",\"control_strength\":1.0}"
+curl -s http://127.0.0.1:8080/v1/images/edits -H "Authorization: Bearer $KEY" -F model=qwen-image-2.1-turbo \
+  -F prompt='a person waving' -F image=@photo.png -F mask=@mask.png -F control_image=@pose.png
+```
+
+**哪些客户端能用**：Open WebUI、LobeChat、OpenClaw 的出图界面都只发 prompt / size（编辑时发图），**传不了 `control_image`**，在它们里面照常出图，不受影响。
+要用 ControlNet，用上面的脚本 / curl 或自己的 OpenAI SDK 调用（`extra_body={"control_image": ...}`）。MCP `generate_image` / `edit_image` 目前也不转发这个字段（要用需在 `clients/mcp/server.py` 加参数，未做）。
+
 ## MCP 服务（`clients/mcp/server.py`）
 
 把本机模型包装成 MCP 工具（streamable HTTP，`/mcp`，Bearer 令牌）。工具：`list_models`、`chat`、`web_search`、`fetch_url`、
