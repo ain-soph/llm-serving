@@ -14,7 +14,10 @@ side each reference is resized to; default 1024 for 1-3 references, smaller for 
 prompt_enhance (off | mflux: the text encoder rewrites | llm: the chat model rewrites with the official Qwen system
 prompts; the result is returned as revised_prompt, and with size auto its aspect ratio picks the canvas),
 auto_mask (edits: a phrase; the text encoder locates it and only that box is repainted), lora + lora_scale (an
-adapter registered in QWEN_IMAGE_LORAS by name, default scale 1.0, applied to this request only).
+adapter registered in QWEN_IMAGE_LORAS by name, default scale 1.0, applied to this request only), control_image +
+control_strength (alibaba-pai's Fun ControlNet-Union branch, QWEN_IMAGE_CONTROLNET: a preprocessed control map such as
+canny / depth / pose / HED / lineart / MLSD / scribble / grayscale steers the layout; generations take it as base64 or a
+data URL, edits as a multipart file and then inpaint image[0] where the mask is transparent; strength 0-2, default 1).
 background="transparent" uses the official RGBA prompt template and returns RGBA PNG/WebP.
 mask follows OpenAI: fully transparent pixels of the mask are repainted, the rest of image[0] is kept.
 
@@ -54,6 +57,13 @@ MEDIA_DIR = Path(os.environ.get("H3_MEDIA_IMAGES") or Path(__file__).resolve().p
 MEDIA_KEEP_DAYS, MEDIA_KEEP_BYTES = 30, 2 << 30
 
 log = logging.getLogger("qwen-image-server")
+
+# ---- ControlNet (request field `control_image`, 2026-11-24) -------------------------------------------------------
+# QWEN_IMAGE_CONTROLNET names the control branch (the W8A8 file written by mflux's qwen21_controlnet_w8a8, zero-copy
+# streamed like the DiT). It is attached to the loaded model on the first request with a control image and shares its
+# transformer, text encoder and VAE (QwenImage21Controlnet.from_model); requests without control_image never touch it.
+CONTROLNET = os.environ.get("QWEN_IMAGE_CONTROLNET") or None
+MAX_CONTROL_BYTES = 32 << 20
 
 
 class BadRequest(Exception):
@@ -343,6 +353,30 @@ def openai_mask(raw, size):
     return im.getchannel("A").point(lambda a: 255 - a)
 
 
+def decode_image(value, name):
+    """A PIL image from a base64 string or a data URL (JSON requests) or raw bytes (multipart)."""
+    if isinstance(value, (bytes, bytearray)) and value[:5] == b"data:":
+        value = value.decode("ascii", "replace")  # a data URL sent as a multipart text field
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("data:"):
+            text = text.partition(",")[2]
+        try:
+            value = base64.b64decode(text, validate=False)
+        except Exception:
+            raise BadRequest(f"{name} must be base64 image data or a data URL")
+    if not isinstance(value, (bytes, bytearray)) or not value:
+        raise BadRequest(f"{name} must be an image")
+    if len(value) > MAX_CONTROL_BYTES:
+        raise BadRequest(f"{name} is larger than {MAX_CONTROL_BYTES >> 20} MB")
+    try:
+        with Image.open(io.BytesIO(value)) as im:
+            from PIL import ImageOps
+            return ImageOps.exif_transpose(im).convert("RGB")
+    except Exception:
+        raise BadRequest(f"{name} is not a readable image")
+
+
 class Generator:
     def __init__(self, model_dir, turbo, quantize):
         # MLX keeps freed buffers in a cache that is resident (wired) while the GPU runs. A large one makes the
@@ -352,6 +386,11 @@ class Generator:
         self.cache_bytes = int(float(os.environ.get("QWEN_IMAGE_CACHE_MB", "6144")) * 2**20)
         self.ref_cache_bytes = int(float(os.environ.get("QWEN_IMAGE_REF_CACHE_MB", "2048")) * 2**20)
         self.turbo = turbo
+        # Control requests run the uncached joint stream plus the control chain; QWEN_IMAGE_CONTROL_CACHE_MB sets their
+        # MLX cache (default: QWEN_IMAGE_CACHE_MB).
+        self.control_cache_bytes = int(float(os.environ.get("QWEN_IMAGE_CONTROL_CACHE_MB")
+                                             or os.environ.get("QWEN_IMAGE_CACHE_MB", "6144")) * 2**20)
+        self.control_model = None
         # MLX streams are per thread, and the HTTP server answers each request on a new thread: load the model
         # and run every generation on one worker thread (this also serializes generations).
         self.worker = ThreadPoolExecutor(1, thread_name_prefix="mlx")
@@ -364,7 +403,34 @@ class Generator:
         self.lora = LoRAState(self.model.transformer)
         log.info("model ready in %.1fs (%s, q=%s)", time.time() - t, "turbo" if turbo else "base", quantize)
 
-    def run(self, req, references=(), mask=None):
+    def _controlnet(self):
+        # worker thread only (MLX streams are per thread)
+        if self.control_model is None:
+            from mflux.models.qwen21.variants.controlnet.qwen_image_21_controlnet import QwenImage21Controlnet
+            t = time.time()
+            self.control_model = QwenImage21Controlnet.from_model(self.model, CONTROLNET)
+            log.info("controlnet %s attached in %.1fs", Path(CONTROLNET).name, time.time() - t)
+        return self.control_model
+
+    def parse_control(self, req, references, mask, control):
+        """(control image, strength) or None. In edits the control branch inpaints image[0] (mask required)."""
+        if control is None and req.get("control_image") not in (None, ""):
+            control = req.get("control_image")
+        strength = req.get("control_strength")
+        if control is None:
+            if strength not in (None, ""):
+                raise BadRequest("control_strength needs control_image")
+            return None
+        if CONTROLNET is None:
+            raise BadRequest("control_image is not available on this model")
+        image = decode_image(control, "control_image")
+        if references and (len(references) != 1 or mask is None):
+            raise BadRequest("with control_image, edits take exactly one image and a mask (the region to repaint)")
+        if req.get("auto_mask"):
+            raise BadRequest("auto_mask cannot be combined with control_image")
+        return image, parse_float(strength, "control_strength", 1.0, 0.0, 2.0)
+
+    def run(self, req, references=(), mask=None, control=None):
         prompt = req.get("prompt")
         if not isinstance(prompt, str) or not prompt.strip():
             raise BadRequest("prompt is required")
@@ -381,6 +447,7 @@ class Generator:
             if (req.get("prompt_enhance") or DEFAULT_ENHANCE) == "off":
                 prompt = RGBA_TEMPLATE.format(prompt.strip().rstrip("."))
         lora = self.lora.parse(req)
+        control = self.parse_control(req, references, mask, control)
         enhance = req.get("prompt_enhance") or DEFAULT_ENHANCE
         if enhance not in PROMPT_ENHANCE:
             raise BadRequest(f"prompt_enhance must be one of {', '.join(PROMPT_ENHANCE)}")
@@ -391,6 +458,11 @@ class Generator:
             raise BadRequest("give either mask or auto_mask")
         auto_size = req.get("size") in (None, "", "auto") and not references
         width, height = parse_size(req.get("size"), references)
+        if control is not None:
+            # the canvas follows the control map (or the image to inpaint); a rewrite's aspect ratio does not move it
+            auto_size = False
+            if req.get("size") in (None, "", "auto"):
+                width, height = parse_size(None, references or [control[0]])
         n = parse_int(req.get("n"), "n", 1, 1, MAX_N)
         seed = parse_int(req.get("seed"), "seed", None, 0, 2**31 - 1)
         seed = secrets.randbelow(2**31) if seed is None else seed
@@ -401,7 +473,7 @@ class Generator:
                   "guidance": parse_float(req.get("guidance"), "guidance", 4.0, 1.0, 20.0)}
         if mask is not None:
             kw["mask_image"] = mask
-        if references:
+        if references and control is None:
             kw["output_resolution"] = reference_side(len(references), req.get("reference_resolution"))
         if auto_mask:
             kw["auto_mask"] = str(auto_mask)
@@ -409,7 +481,7 @@ class Generator:
         if enhance == "llm":
             t = time.time()
             try:
-                revised, ratio = llm_rewrite(req["prompt"], references)
+                revised, ratio = llm_rewrite(req["prompt"], () if control is not None else references)
             except Exception as e:
                 raise BadRequest(f"prompt_enhance=llm failed: {e}")
             log.info("llm rewrite in %.1fs: %r", time.time() - t, revised[:120])
@@ -417,8 +489,11 @@ class Generator:
                 width, height = ratio_size(ratio)
             prompt = RGBA_TEMPLATE.format(revised.rstrip(".")) if background == "transparent" else revised
         rw, rh = render_size(width, height)
-        return self.worker.submit(self._generate_with_lora, lora, prompt, fmt, fmt_name, background, width, height, rw,
-                                  rh, n, seed, steps, references, mask, kw, enhance, auto_size, revised).result()
+        args = (prompt, fmt, fmt_name, background, width, height, rw, rh, n, seed, steps, references, mask, kw, enhance,
+                auto_size, revised)
+        if control is not None:
+            args += (control,)
+        return self.worker.submit(self._generate_with_lora, lora, *args).result()
 
     def _generate_with_lora(self, lora, *args):
         self.lora.apply(lora)
@@ -428,15 +503,18 @@ class Generator:
             self.lora.remove()
 
     def _generate(self, prompt, fmt, fmt_name, background, width, height, rw, rh, n, seed, steps, references, mask, kw,
-                  enhance="off", auto_size=False, revised=None):
-        mx.set_cache_limit(self.ref_cache_bytes if references else self.cache_bytes)
+                  enhance="off", auto_size=False, revised=None, control=None):
+        if control is not None:
+            mx.set_cache_limit(self.control_cache_bytes)
+        else:
+            mx.set_cache_limit(self.ref_cache_bytes if references else self.cache_bytes)
         mx.clear_cache()
         if enhance == "mflux":
             # The text encoder itself rewrites (its generation head): edits with mflux's condensation of the
             # official edit recipe, text-to-image with ours of the t2i recipe.
             t = time.time()
             try:
-                if references:
+                if references and control is None:
                     revised = self.model.rewrite_prompt(prompt, list(references))
                 else:
                     revised, ratio = self.model.rewrite_text_prompt(prompt)
@@ -450,9 +528,16 @@ class Generator:
         data = []
         for i in range(n):
             t = time.time()
-            result = self.model.generate_image(seed=seed + i, prompt=prompt, width=rw, height=rh,
-                                               num_inference_steps=steps, image_paths=list(references) or None,
-                                               **kw)
+            if control is not None:
+                source = {"image_path": references[0], "mask_image": mask} if references else {}
+                extra = {k: v for k, v in kw.items() if k in ("negative_prompt", "guidance")}
+                result = self._controlnet().generate_image(
+                    seed=seed + i, prompt=prompt, controlnet_image_path=control[0], controlnet_strength=control[1],
+                    num_inference_steps=steps, width=rw, height=rh, **source, **extra)
+            else:
+                result = self.model.generate_image(seed=seed + i, prompt=prompt, width=rw, height=rh,
+                                                   num_inference_steps=steps, image_paths=list(references) or None,
+                                                   **kw)
             image = result.image
             mx.clear_cache()
             if (rw, rh) != (width, height):
@@ -466,8 +551,9 @@ class Generator:
             if revised:
                 item["revised_prompt"] = revised
             data.append(item)
-            log.info("generated %dx%d refs=%d mask=%s seed=%d lora=%s in %.1fs", width, height, len(references),
-                     mask is not None, seed + i, self.lora.active, time.time() - t)
+            log.info("generated %dx%d refs=%d mask=%s seed=%d lora=%s control=%s in %.1fs", width, height,
+                     len(references), mask is not None, seed + i, self.lora.active,
+                     None if control is None else control[1], time.time() - t)
         return {"created": int(time.time()), "output_format": fmt_name, "background": background, "data": data}
 
 
@@ -533,13 +619,15 @@ class Handler(BaseHTTPRequestHandler):
             raise BadRequest("edits require multipart/form-data")
         msg = email.parser.BytesParser(policy=email.policy.HTTP).parsebytes(
             f"Content-Type: {ctype}\r\n\r\n".encode() + self._body())
-        fields, images, mask_raw = {}, [], None
+        fields, images, mask_raw, control_raw = {}, [], None, None
         for part in msg.iter_parts():
             name = part.get_param("name", header="content-disposition")
             if name in ("image", "image[]"):
                 images.append(part.get_payload(decode=True))
             elif name == "mask":
                 mask_raw = part.get_payload(decode=True)
+            elif name == "control_image":
+                control_raw = part.get_payload(decode=True)
             elif name:
                 fields[name] = part.get_content().strip() if part.get_content_maintype() == "text" else None
         if not images:
@@ -554,7 +642,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 raise BadRequest(f"image {i + 1} is not a readable image")
         mask = openai_mask(mask_raw, refs[0].size) if mask_raw else None
-        return self.server.generator.run(fields, refs, mask)
+        return self.server.generator.run(fields, refs, mask, control_raw)
 
     def log_message(self, fmt, *args):
         log.info("%s %s", self.address_string(), fmt % args)

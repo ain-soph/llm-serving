@@ -20,6 +20,14 @@
 # image-to-image, trigger "Transform the image into a voxel style"); mndf-pixel = handful/mndf-pixel-qwen-image-2.1
 # @876d03a9 (Apache-2.0; trained on Google 3D Tiles renders, whose terms restrict use; personal non-commercial use here).
 # Report: reports/qwen-image.md (LoRA section).
+# ControlNet per request (2026-11-24): request fields `control_image` (a preprocessed control map: canny, depth, pose, HED,
+# lineart, MLSD, scribble, grayscale; base64 / data URL in generations, a multipart file in edits, where it inpaints
+# image[0] under the mask) and `control_strength` (0-2, default 1). Branch: alibaba-pai/Qwen-Image-2.1-Fun-Controlnet-Union
+# @8a470201 (Qwen Research License), W8A8 for qkv/out/gate_up/down (skip projections BF16), written by mflux's
+# qwen21_controlnet_w8a8 to ~/models/qwen-image-2.1/w8a8/controlnet-union (4.06 GB, zero-copy streamed); attached to the
+# loaded model on the first control request, never touched otherwise (requests without control_image byte-identical).
+# Control runs the uncached joint stream plus 16 control blocks: Turbo 1 MP ~9.5 s, 2048² ~55 s. Measured wired peak with control (largest sizes, encode without cache, s4-1124-0332): +9617 MiB -> capacity 11000.
+# Report: reports/qwen-image.md section 8d.
 macros:
   "qwen-image-cmd": >
     ${env.LLM_SERVING}/.venv/bin/python ${env.LLM_SERVING}/services/image/qwen-image/server.py
@@ -28,7 +36,7 @@ macros:
 models:
   "qwen-image-2.1-turbo":
     name: "Qwen Image 2.1 Turbo"
-    description: "8 steps, W8A8: 1024² ~9 s, 2048² ~43 s; edits, masks, transparent PNG"
+    description: "8 steps, W8A8: 1024² ~9 s, 2048² ~43 s; edits, masks, transparent PNG, ControlNet (control_image)"
     cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen-image-2.1 -- ${qwen-image-cmd} --turbo --model ${env.LLM_MODELS}/qwen-image-2.1/turbo --model-id qwen-image-2.1-turbo
     env: &qwen-image-env-turbo
       - "MFLUX_ZERO_COPY=1"
@@ -38,6 +46,7 @@ models:
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
       - "QWEN_IMAGE_CACHE_MB=6144"
       - "QWEN_IMAGE_REF_CACHE_MB=2048"
+      - "QWEN_IMAGE_CONTROLNET=${env.LLM_MODELS}/qwen-image-2.1/w8a8/controlnet-union/model.safetensors"
       - "QWEN_IMAGE_LORAS=voxel=${env.LLM_MODELS}/lora-qwen21-voxel/Qwen-Image-2.1-Voxel-Style-3000.safetensors,mndf-pixel=${env.LLM_MODELS}/lora-qwen21-mndf-pixel/pytorch_lora_weights.safetensors"
     capabilities: &qwen-image-caps
       in: [text, image]
@@ -60,6 +69,7 @@ models:
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
       - "QWEN_IMAGE_CACHE_MB=6144"
       - "QWEN_IMAGE_REF_CACHE_MB=2048"
+      - "QWEN_IMAGE_CONTROLNET=${env.LLM_MODELS}/qwen-image-2.1/w8a8/controlnet-union/model.safetensors"
       - "QWEN_IMAGE_LORAS=voxel=${env.LLM_MODELS}/lora-qwen21-voxel/Qwen-Image-2.1-Voxel-Style-3000.safetensors,mndf-pixel=${env.LLM_MODELS}/lora-qwen21-mndf-pixel/pytorch_lora_weights.safetensors"
       - "QWEN_IMAGE_DEFAULT_ENHANCE=llm"   # judged better than no rewrite on 32 prompts (reports/qwen-image.md section 8)
     capabilities: *qwen-image-caps
@@ -70,7 +80,7 @@ models:
 
   "qwen-image-2.1":
     name: "Qwen Image 2.1"
-    description: "40 steps, W8A8, best quality and negative prompts: 1024² ~28 s"
+    description: "40 steps, W8A8, best quality and negative prompts: 1024² ~28 s; ControlNet (control_image)"
     cmd: ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model qwen-image-2.1 -- ${qwen-image-cmd} --model ${env.LLM_MODELS}/qwen-image-2.1/base --model-id qwen-image-2.1
     env:
       - "MFLUX_ZERO_COPY=1"
@@ -80,6 +90,7 @@ models:
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
       - "QWEN_IMAGE_CACHE_MB=6144"
       - "QWEN_IMAGE_REF_CACHE_MB=2048"
+      - "QWEN_IMAGE_CONTROLNET=${env.LLM_MODELS}/qwen-image-2.1/w8a8/controlnet-union/model.safetensors"
       - "QWEN_IMAGE_LORAS=voxel=${env.LLM_MODELS}/lora-qwen21-voxel/Qwen-Image-2.1-Voxel-Style-3000.safetensors,mndf-pixel=${env.LLM_MODELS}/lora-qwen21-mndf-pixel/pytorch_lora_weights.safetensors"
     capabilities: *qwen-image-caps
     checkEndpoint: /health
