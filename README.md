@@ -37,6 +37,26 @@
 ¹ 权重归档在另一台机器，第一次请求时由 `bin/archive-restore` 拷回并校验，之后与其他模型相同。
 ² `/v1/models` 里的 `minimax-h3-image-pe-expander` 是它内部用的扩写模型，客户端不直接调用。
 
+### 内存与并存
+
+GPU 调度池 **82,032 MiB**（wired 上限 88,064 − 系统 2,872 − 常驻嵌入 3,160）。默认聊天模型 Flash-Next 常驻，预约 69,500，旁边还剩 **12,532 MiB**：
+其他入口的预约之和不超过这个数才能与它同驻，放不下时 llama-swap 先卸图片、嵌入、重排、决策，最后才卸聊天模型。
+逐个入口的精度、实测峰值、并存组合、切换时间和速度见 **[模型、内存与速度一览](docs/models.md)**。
+
+| 入口 | 预约 MiB | 与 Flash-Next 同驻 | 大致速度（M5 Ultra，独占，单路） |
+| --- | ---: | --- | --- |
+| `qwen3.8-flash-next` | 69,500 | — | prefill 约 3,100 tok/s（32K）／3,050（128K）；decode 154 tok/s，2 路合计 173–181 |
+| `hy4-flash` | 71,000 | 否，分时切换 10–14 s | prefill 约 2,000 tok/s（32K）；decode 68–133 tok/s |
+| `minimax-h3-image` | 10,000 | 是（这时不能再加其他入口） | 1024² 3.2 s；2048² 约 10 s；4096² 约 60 s |
+| `qwen-image-2.1-turbo`／`-turbo-pe`／`qwen-image-2.1` | 11,000 | 是（同上） | Turbo 1024² 约 8–9 s、2048² 约 43 s；带 ControlNet 1024² 约 10 s；base 1024² 约 28 s |
+| `z-image-turbo` | 11,000 | 是（同上） | 1024² 5.6 s；2048² 36 s |
+| `qwen3-asr-1.7b`／`whisper-large-v3` | 6,500／4,500 | 是（两者可同时） | 约 60 倍实时（长音频约 220–290 倍）／约 35 倍实时 |
+| `qwen3-tts`（三个变体） | 6,500–7,000 | 是（与 ASR 二选一，与 Whisper 可同时） | 首段 0.1 s，约 6 倍实时 |
+| 嵌入、重排、决策（除 `mammoth-1`） | 3,000–12,000 | 是（两三个小的可同时） | 毫秒到数秒，见一览 |
+| `mammoth-1`、`minimax-h3-image-pe`（扩写时） | 28,500、30,000 | 否，卸下 Flash-Next | 16K token 7.8 s；扩写 + 出图约 26 s |
+| `fish-drama-3` | 整个池（独占） | 否 | 约 2.6 倍实时 |
+| `minimax-h3-video` | 整个池（独占） | 否 | 768p 5 s：fast 约 2.7 min、turbo 3.2、standard 4.7、best 11.5 min |
+
 ## 通用优化
 
 跨模型共用的做法；各模型条目只写本模型特有的部分。
@@ -58,7 +78,8 @@
 - 修 Metal `--prefill auto` 的分块：prefill +8.6%／+11.3%（26K／116K token），不再需要手动参数。
 - 省内存双槽：262k × 2 路的 wired 峰值 70,962 → 67,695 MiB。
 - 对话缓存用上游默认（按空闲内存定，现网 8192 MiB）并溢出到 SSD：108K token 会话续问 40.4 → 0.85 s。
-- 现网：单路 decode 约 152 tok/s，prefill 约 2,700 tok/s（26K–116K token）。
+- Metal prompt 块 1024 → 2048 行：prefill 32K／128K +13–14%，输出逐位相同。并发 MTP：两路合计 decode +9–12%。
+- 现网（2026-11-24）：单路 decode 约 154 tok/s，两路合计 173–181 tok/s；prefill 约 3,100 tok/s（26K–32K）／3,050（104K–128K）。
 
 **嵌入**
 - EmbeddingGemma 2 文本入口换 MLX（FP32 激活）：4 × 8000 token 35,300 tok/s（原 llama.cpp 19,000）；对 FP32 参照 SciFact top-10 重合 2997/3000。
@@ -222,4 +243,4 @@ GPU 池由 `bin/gpu-pool` 按当前 `iogpu.wired_limit_mb` 计算（减去系统
 
 2026-11-23 仓库与部署合并时，从 GitHub 新 clone 到临时目录做过恢复演练：`uv sync`、渲染出的 LaunchAgent／Strata JSON／`serving.env` 与线上逐字节相同，llama-swap 与 Caddy 配置校验通过，单元测试通过；合并前后完整 `bin/regress` 逐例相同。尚未在干净系统完成全套原生重编译和端到端推理恢复演练，首次切换前仍需运行真实 API 冒烟检查。`doctor.py` 不加载模型，不替代正确性/性能验证。
 
-更多说明：[多 agent 分工与恢复](docs/multi-agent.md)、[设计与硬件优化](docs/design.md)、[GPU 预约](docs/gpu-lock.md)、[运维：回归测试与健康检查](docs/operations.md)、[部署流程](docs/deploy-process.md)、[客户端接入与 MCP](docs/clients.md)、[发布与隐私](docs/privacy.md)、[零拷贝与 W8A8](docs/w8a8.md)、[SOV 语音转写（已下线）](docs/sov.md)。
+更多说明：[模型、内存与速度一览](docs/models.md)、[多 agent 分工与恢复](docs/multi-agent.md)、[设计与硬件优化](docs/design.md)、[GPU 预约](docs/gpu-lock.md)、[运维：回归测试与健康检查](docs/operations.md)、[部署流程](docs/deploy-process.md)、[客户端接入与 MCP](docs/clients.md)、[发布与隐私](docs/privacy.md)、[零拷贝与 W8A8](docs/w8a8.md)、[SOV 语音转写（已下线）](docs/sov.md)。
