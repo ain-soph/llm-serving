@@ -1176,8 +1176,9 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
     elephant-1／mammoth-1 0 翻转、正确数不变，长例对 FP32 注意力参照 elephant 0.00088 → 0.00053、mammoth 0.01208 → 0.00083（融合比回退更准）。
   - regress：`--quick` 30 PASS／1 SKIP／2 SKIP(archived)，与上线前相同；decide 全集 11 PASS、2 WARN（decide-long-pplx-decider-flash
     |Δp| 0.00003、warm 5.62 → 4.43 s；decide-long-elephant-1 |Δp| 0.00026、2.85 → 2.52 s；答案相同），这两个的 golden 已重录，复查 2 PASS。
-  - 回滚：`.backup/{pyproject.toml,uv.lock,services/decisions/decider/decider_mlx.py,services/decisions/jev/jev_mlx.py}.20261123-s3`
-    拷回原路径，`uv sync --frozen`（旧 Release `serving-0.32.4-005fe7a2` 仍在），`bin/regress --quick`。
+  - 回滚：`pyproject.toml` 的 `mlx` / `mlx-metal` 两行改回 `serving-0.32.4-005fe7a2`（旧 Release 仍在），`uv lock`、`uv sync --frozen`；
+    两个模型文件从 `.backup/services/decisions/{decider/decider_mlx.py,jev/jev_mlx.py}.20261123-s3` 拷回；`bin/regress --quick`。
+    （`.backup/` 里整份的 pyproject.toml／uv.lock 早于之后的 h3-image-mlx 4ada520，不要整文件拷回。）
 
 ## 遗漏检查的完成情况（2026-11-18）
 
