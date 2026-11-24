@@ -439,10 +439,10 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "jiwer", specifier = ">=4.0.0" },
     { name = "mflux", git = "https://github.com/ain-soph/mflux?rev=e52598bd8f6f31a1b23742ec9a3e0d69ac337e53" },
-    { name = "mlx", url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx-0.32.4%2Bserving.005fe7a2-cp315-cp315-macosx_26_0_arm64.whl" },
+    { name = "mlx", url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-484b1275/mlx-0.32.4%2Bserving.484b1275-cp315-cp315-macosx_26_0_arm64.whl" },
     { name = "mlx-audio", git = "https://github.com/ain-soph/mlx-audio?rev=fc3820aa4d3405249a2de92695eca1e8d2cc407a" },
     { name = "mlx-lm", specifier = ">=0.32.2" },
-    { name = "mlx-metal", url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx_metal-0.32.4%2Bserving.005fe7a2-py3-none-macosx_26_0_arm64.whl" },
+    { name = "mlx-metal", url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-484b1275/mlx_metal-0.32.4%2Bserving.484b1275-py3-none-macosx_26_0_arm64.whl" },
     { name = "mlx-qwen3-asr", extras = ["aligner"], git = "https://github.com/ain-soph/mlx-qwen3-asr?rev=38568173399a013b2856fc480a2dc06604d7a2e5" },
     { name = "mlx-vlm", specifier = ">=0.8.0" },
     { name = "mlx-whisper", git = "https://github.com/ain-soph/mlx-examples?subdirectory=whisper&rev=46502543022c044396b44c83dd8848fcf4a1c168" },
@@ -572,23 +572,23 @@ wheels = [
 
 [[package]]
 name = "mlx"
-version = "0.32.4+serving.005fe7a2"
-source = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx-0.32.4%2Bserving.005fe7a2-cp315-cp315-macosx_26_0_arm64.whl" }
+version = "0.32.4+serving.484b1275"
+source = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-484b1275/mlx-0.32.4%2Bserving.484b1275-cp315-cp315-macosx_26_0_arm64.whl" }
 dependencies = [
     { name = "mlx-metal" },
 ]
 wheels = [
-    { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx-0.32.4%2Bserving.005fe7a2-cp315-cp315-macosx_26_0_arm64.whl", hash = "sha256:637aeaa2f560a7954f3496ec3a251c95cd95f45b796402024fc56871fef58747" },
+    { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-484b1275/mlx-0.32.4%2Bserving.484b1275-cp315-cp315-macosx_26_0_arm64.whl", hash = "sha256:e6cc34f6deb8a31db692887a72eafbdd1750911de6e8454543305bbda8a9ecdf" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "ml-dtypes", marker = "extra == 'dev'" },
-    { name = "mlx-cpu", marker = "sys_platform == 'linux' and extra == 'cpu'", specifier = "==0.32.4+serving.005fe7a2" },
-    { name = "mlx-cuda-12", marker = "sys_platform == 'linux' and extra == 'cuda'", specifier = "==0.32.4+serving.005fe7a2" },
-    { name = "mlx-cuda-12", marker = "sys_platform == 'linux' and extra == 'cuda12'", specifier = "==0.32.4+serving.005fe7a2" },
-    { name = "mlx-cuda-13", marker = "sys_platform == 'linux' and extra == 'cuda13'", specifier = "==0.32.4+serving.005fe7a2" },
-    { name = "mlx-metal", marker = "sys_platform == 'darwin'", specifier = "==0.32.4+serving.005fe7a2" },
+    { name = "mlx-cpu", marker = "sys_platform == 'linux' and extra == 'cpu'", specifier = "==0.32.4+serving.484b1275" },
+    { name = "mlx-cuda-12", marker = "sys_platform == 'linux' and extra == 'cuda'", specifier = "==0.32.4+serving.484b1275" },
+    { name = "mlx-cuda-12", marker = "sys_platform == 'linux' and extra == 'cuda12'", specifier = "==0.32.4+serving.484b1275" },
+    { name = "mlx-cuda-13", marker = "sys_platform == 'linux' and extra == 'cuda13'", specifier = "==0.32.4+serving.484b1275" },
+    { name = "mlx-metal", marker = "sys_platform == 'darwin'", specifier = "==0.32.4+serving.484b1275" },
     { name = "numpy", marker = "extra == 'dev'", specifier = ">=2" },
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "torch", marker = "extra == 'dev'", specifier = ">=2.9" },
@@ -639,10 +639,10 @@ wheels = [
 
 [[package]]
 name = "mlx-metal"
-version = "0.32.4+serving.005fe7a2"
-source = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx_metal-0.32.4%2Bserving.005fe7a2-py3-none-macosx_26_0_arm64.whl" }
+version = "0.32.4+serving.484b1275"
+source = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-484b1275/mlx_metal-0.32.4%2Bserving.484b1275-py3-none-macosx_26_0_arm64.whl" }
 wheels = [
-    { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx_metal-0.32.4%2Bserving.005fe7a2-py3-none-macosx_26_0_arm64.whl", hash = "sha256:88ee1465ca29667d0d597ff7b1cdab4a607439552ca5ed9a408346266b55e003" },
+    { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-484b1275/mlx_metal-0.32.4%2Bserving.484b1275-py3-none-macosx_26_0_arm64.whl", hash = "sha256:919b9e41bf357dc5ea67c806fdae6c576022bce75a5f741bf0504274cf044a18" },
 ]
 
 [[package]]

@@ -65,6 +65,23 @@ def mapped_tensor(checkpoint, key):
 DTYPES = {"bfloat16": mx.bfloat16, "float16": mx.float16, "float32": mx.float32}
 ATTN_BLOCK = 1024      # prefix queries per attention block at <= 8K tokens (fewer above: constant score memory)
 TOKEN_BLOCK = 2048     # prefix tokens per gated-delta / MLP block
+_FUSED = None
+
+
+def fused_attention():
+    """True when MLX has a fused (flash) SDPA kernel for head dim 256 on this device: one call over the whole sequence
+    then holds no P x P scores, and blocking the queries only leaves the GPU with fewer threadgroups (M5 with the
+    ain-soph/mlx serving wheel, 2026-11-23, reports/mlx-fork.md stage 3). float16 / bfloat16 only: float32 keeps the
+    exact unfused blocking."""
+    global _FUSED
+    if _FUSED is None:
+        try:
+            x = mx.zeros((1, 1, 16, 256), dtype=mx.float16)
+            mx.eval(mx.fast.scaled_dot_product_attention(x, x, x, scale=1.0, force_fused=True))
+            _FUSED = True
+        except Exception:     # no fused kernel (CPU, older GPUs): keep the exact query blocking
+            _FUSED = False
+    return _FUSED
 
 
 class MLXJev(DecisionEngine):
@@ -265,12 +282,17 @@ class MLXJev(DecisionEngine):
                 q, k, v, gate, _ = attn._prepare_projected_qkv(attn.q_proj(x), attn.k_proj(x), attn.v_proj(x), None,
                                                                positions, None, None)
                 mx.eval(q, k, v, gate)
-                blocks = []
-                block = max(256, ATTN_BLOCK * 8192 // max(P, 8192))   # constant score-block size
-                for i in range(0, P, block):
-                    blocks.append(mx.fast.scaled_dot_product_attention(q[:, :, i:i + block], k, v, scale=attn.scale))
-                    mx.eval(blocks[-1])
-                o = mx.concatenate(blocks, axis=2).transpose(0, 2, 1, 3).reshape(1, P, -1)
+                if P > ATTN_BLOCK and q.dtype != mx.float32 and fused_attention():   # one fused call
+                    o = mx.fast.scaled_dot_product_attention(q, k, v, scale=attn.scale, force_fused=True)
+                else:
+                    blocks = []
+                    block = max(256, ATTN_BLOCK * 8192 // max(P, 8192))   # constant score-block size
+                    for i in range(0, P, block):
+                        blocks.append(mx.fast.scaled_dot_product_attention(q[:, :, i:i + block], k, v,
+                                                                           scale=attn.scale))
+                        mx.eval(blocks[-1])
+                    o = mx.concatenate(blocks, axis=2)
+                o = o.transpose(0, 2, 1, 3).reshape(1, P, -1)
                 h = h + attn.o_proj(o * mx.sigmoid(gate))
                 mx.eval(h)
                 for i in range(0, P, TOKEN_BLOCK):

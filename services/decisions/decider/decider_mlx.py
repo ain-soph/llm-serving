@@ -30,6 +30,27 @@ import mlx_w8a8  # noqa: E402
 DTYPES = {"bfloat16": mx.bfloat16, "float16": mx.float16, "float32": mx.float32}
 ATTN_BLOCK = 2048      # queries per attention block on long sequences (fewer above 8K tokens, see attention())
 TOKEN_BLOCK = 4096     # tokens per linear-attention / MLP block on one long sequence
+
+
+_FUSED = None
+
+
+def fused_attention():
+    """True when MLX has a fused (flash) SDPA kernel for head dim 256 on this device: one call over the whole sequence
+    then holds no L x L scores, and blocking the queries only leaves the GPU with fewer threadgroups (M5 with the
+    ain-soph/mlx serving wheel, 2026-11-23, reports/mlx-fork.md stage 3). float16 / bfloat16 only: float32 keeps the
+    exact unfused blocking."""
+    global _FUSED
+    if _FUSED is None:
+        try:
+            x = mx.zeros((1, 1, 16, 256), dtype=mx.float16)
+            mx.eval(mx.fast.scaled_dot_product_attention(x, x, x, scale=1.0, force_fused=True))
+            _FUSED = True
+        except Exception:     # no fused kernel (CPU, older GPUs): keep the exact query blocking
+            _FUSED = False
+    return _FUSED
+
+
 # Language-model projections that can run W8A8 (MLXDecider(w8a8=True) takes all; a tuple of names takes those).
 W8A8_NAMES = ("q_proj", "k_proj", "v_proj", "o_proj", "in_proj_qkv", "in_proj_z", "out_proj",
               "gate_proj", "up_proj", "down_proj")
@@ -211,15 +232,18 @@ class MLXDecider:
         return set(paths)
 
     def attention(self, attn, x, mask, positions):
-        """Qwen3_5Attention without cache, the scores computed for ATTN_BLOCK queries at a time when the sequence is
-        long (exact: softmax is per query). Head dim 256 has no fused SDPA kernel, so one 12.8K-token sequence
-        otherwise holds 16 x L x L fp16 scores (4.9 GiB). Each block is evaluated before the next is built: lazily
-        built blocks are independent and MLX runs them together, holding every block's scores at once."""
+        """Qwen3_5Attention without cache. With a fused head-dim-256 SDPA kernel (fused_attention()) one unmasked long
+        sequence is one call. Otherwise the scores are computed for ATTN_BLOCK queries at a time when the sequence is
+        long (exact: softmax is per query): the unfused path holds 16 x L x L fp16 scores (4.9 GiB at 12.8K tokens).
+        Each block is evaluated before the next is built: lazily built blocks are independent and MLX runs them
+        together, holding every block's scores at once."""
         q, k, v, gate, mask = attn._prepare_projected_qkv(attn.q_proj(x), attn.k_proj(x), attn.v_proj(x), None,
                                                           positions, None, mask)
         L = q.shape[2]
         block = max(256, ATTN_BLOCK * 8192 // max(L, 8192))       # constant score-block size: 16 x 2048 x 8192
-        if L <= ATTN_BLOCK:
+        if mask is None and L > ATTN_BLOCK and q.dtype != mx.float32 and fused_attention():   # one call
+            out = mx.fast.scaled_dot_product_attention(q, k, v, scale=attn.scale, force_fused=True)
+        elif L <= ATTN_BLOCK:
             out = mx.fast.scaled_dot_product_attention(q, k, v, scale=attn.scale, mask=mask)
         else:
             mx.eval(q, k, v)

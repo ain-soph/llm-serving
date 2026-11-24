@@ -1132,7 +1132,7 @@ M5 Ultra，独占 GPU，9 步，seed 0；部署 = DiT 注意力＋前馈 W8A8（
 
 ## 运行时：MLX fork（ain-soph/mlx `serving`）
 
-统一环境从 2026-11-18 起使用 MLX fork 的 wheel（现为 `0.32.4+serving.005fe7a2`，GitHub Release，由 fork 的 CI 在 macOS 26 上构建）。
+统一环境从 2026-11-18 起使用 MLX fork 的 wheel（现为 `0.32.4+serving.484b1275`，GitHub Release `serving-0.32.4-484b1275`，本机用标准 MetalToolchain 构建；CI 排不上时的做法，见 reports/mlx-fork.md）。
 fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下游不再各自维护副本（MF）。
 
 | 改动 | 开关 | 结果 |
@@ -1153,7 +1153,31 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 - 稳态每次请求 0.40 s，几种方式一样；`MLX_CACHE_LIMIT_MB=256` 时请求后缓存 309 MB（默认 873 MB），打分不变。
 - 切换前后完整 `bin/regress` 都是 52 PASS／1 SKIP；`shared/common/mlx_w8a8.py` 的 `save`／`load` 改调本体接口（241 → 190 行），新旧文件互读逐字节相同。
 - **ConvRot W8A8 进本体**（`mx.fast.convrot_quantize`／`convrot_quantize_weight`／`convrot_matmul`／`convrot_matmul_quantized`，M5 TensorOps INT8，非 M5 浮点回退）：mflux、h3-image-mlx 和本仓库 `shared/common/` 的三份内核副本删除，改调本体。与旧副本对比，量化值、scale、输出逐字节相同，速度相同（例 4096×3072×12288：2.095 → 2.080 ms；16384×12288×3072：9.479 → 9.489 ms）；完整 regress 切换前后都是 55 PASS／1 SKIP。
-- 计划中（未实现）：head_dim 256 的融合注意力。
+- **head_dim 256 融合注意力（阶段 3，2026-11-23 17:35 上线，fork 484b1275）**（S3）：
+  - 路由：原来 D = 256 只有因果或带数组掩码的调用走融合内核。三个决策模型（Decider、elephant-1、mammoth-1）的全注意力是**非因果、无掩码**，
+    走的是未融合回退：回退要存 L×L 分数，所以模型按查询分块（32.6K 时每块 514／257 行），再一块一块算。
+    现在 NAX 上 D = 256、qL ≥ 1024 一律走融合内核；模型侧（`services/decisions/{decider/decider_mlx.py,jev/jev_mlx.py}`）在无掩码、
+    L > 2048、非 float32 且探测到融合内核时，整段一次调用 `force_fused=True`，否则保持原分块。
+  - 分块：D = 256 由 bq64 wm4 wn2 改为 **bq32 wm2 wn2**（线程组翻倍）；内核 `OPTS = 7`：分数交换区按 lane 连续 + WN = 2 只加对方（逐位相同）、
+    Q 每个 K 块重读（`unroll_count(4)`）、P@V 前把 P 舍入到 T（float32 跳过）。不用双缓冲（32K 慢 20–25%），不按 kL 分界。
+  - 一整层注意力（M5 Ultra，独占）：Decider fp16 非因果 32585 token：线上回退 391.8 ms → 241.5 ms；16K 83.6 → 58.2 ms；
+    mammoth-1 bf16 32585：600.0 → 361.8 ms；因果 32K：Decider 137.7 → 121.2 ms，mammoth-1 199.2 → 179.4 ms。
+  - 端到端（每请求 s，预热后）：
+
+    | 模型 / token | 原（回退 + 分块） | 新调用 + 旧 wheel | 上线（新调用 + 484b1275） |
+    | --- | ---: | ---: | ---: |
+    | Decider 8,085 | 0.837 | 0.771 | 0.753 |
+    | Decider 25,587 | 2.958 | 2.728 | 2.611 |
+    | Decider 32,585 | 5.901 | 4.687 | **4.472** |
+    | elephant-1 12,874 / 16,076 / 31,052 | 2.149 / 2.849 / 6.838 | 1.983 / 2.582 / 6.014 | 1.997 / 2.520 / **5.671** |
+    | mammoth-1 12,874 / 16,076 / 31,052 | 6.752 / 8.805 / 21.23 | 6.229 / 8.140 / 18.16 | 6.152 / 7.805 / **17.50** |
+
+  - 误差：Decider 对官方 FP32 文本最大 |Δp| 0.00090（短例，各配置相同），25.6K 长例 0.00005 → 0.00002，图片 0.00028 不变；
+    elephant-1／mammoth-1 0 翻转、正确数不变，长例对 FP32 注意力参照 elephant 0.00088 → 0.00053、mammoth 0.01208 → 0.00083（融合比回退更准）。
+  - regress：`--quick` 30 PASS／1 SKIP／2 SKIP(archived)，与上线前相同；decide 全集 11 PASS、2 WARN（decide-long-pplx-decider-flash
+    |Δp| 0.00003、warm 5.62 → 4.43 s；decide-long-elephant-1 |Δp| 0.00026、2.85 → 2.52 s；答案相同），这两个的 golden 已重录，复查 2 PASS。
+  - 回滚：`.backup/{pyproject.toml,uv.lock,services/decisions/decider/decider_mlx.py,services/decisions/jev/jev_mlx.py}.20261123-s3`
+    拷回原路径，`uv sync --frozen`（旧 Release `serving-0.32.4-005fe7a2` 仍在），`bin/regress --quick`。
 
 ## 遗漏检查的完成情况（2026-11-18）
 
@@ -1272,6 +1296,7 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 | UE | 11-18，统一 Python 环境切换（`bin/regress` 完整一套） | 46 个用例 |
 | GA | 11-17，遗漏检查（只读调研） | 官方配套资产、功能、接入、运维、报告 |
 | MF | 11-18，MLX fork 验证 `mlx/verify/v1-1118-0036`、`install-1118-0038`、`common-1118-0050` | 重排 4B 加载方式对比、完整 regress |
+| S3 | 11-23，MLX fork 阶段 3 `upstream/mlx/mlx-fork-s3-20261123/s1`～`s7`（独占锁），regress `logs/regress/20261123-173423-91968`、`20261123-173501-97221` | 一整层注意力 1K–32.6K；Decider 7 个文本 + 图片用例与 8K／25.6K／32.6K；elephant-1／mammoth-1 `cases.py` + 12.9K／16.1K／31.1K |
 | WX | 11-17，W8A16 `services/image/qwen-image/bench/results/sq8-1117-1655`、`eval/runs/turbo-q8-off`、`evals/int8-principle/x3-1117-1734`，上线 `qwen-image-teq8-deploy-1117-1747` | Qwen-Image 文本编码器、Decider／重排／嵌入 down_proj |
 | HI | 11-17，H3 图片 `services/image/h3-image-mlx/opt/k1-1117-0617`、`k2-1117-0621`，上线 `k-deploy-1117-0627` | 6 步、seed 42、预算 8000 |
 | HC | 11-23，H3 图片缓存与切片 `services/image/h3-image-mlx/opt/cache-20261123/s1`、`s2`、`s3-block.txt`、`s4`，上线 `deploy/` | 6 步、seed 42、预算 8000；文生图 1024²／2048²／4096²，编辑 1／4／16 张参考图 |

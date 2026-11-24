@@ -39,8 +39,8 @@ environments = ["sys_platform == 'darwin' and platform_machine == 'arm64'"]
 [tool.uv.sources]
 h3-image-mlx = { git = "https://github.com/ain-soph/h3-image-mlx", rev = "4ada520192980f85663b2da128206e142e592eeb" }
 mflux = { git = "https://github.com/ain-soph/mflux", rev = "e52598bd8f6f31a1b23742ec9a3e0d69ac337e53" }
-mlx = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx-0.32.4%2Bserving.005fe7a2-cp315-cp315-macosx_26_0_arm64.whl" }
-mlx-metal = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-005fe7a2/mlx_metal-0.32.4%2Bserving.005fe7a2-py3-none-macosx_26_0_arm64.whl" }
+mlx = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-484b1275/mlx-0.32.4%2Bserving.484b1275-cp315-cp315-macosx_26_0_arm64.whl" }
+mlx-metal = { url = "https://github.com/ain-soph/mlx/releases/download/serving-0.32.4-484b1275/mlx_metal-0.32.4%2Bserving.484b1275-py3-none-macosx_26_0_arm64.whl" }
 mlx-audio = { git = "https://github.com/ain-soph/mlx-audio", rev = "fc3820aa4d3405249a2de92695eca1e8d2cc407a" }
 mlx-qwen3-asr = { git = "https://github.com/ain-soph/mlx-qwen3-asr", rev = "38568173399a013b2856fc480a2dc06604d7a2e5" }
 mlx-whisper = { git = "https://github.com/ain-soph/mlx-examples", rev = "46502543022c044396b44c83dd8848fcf4a1c168", subdirectory = "whisper" }
