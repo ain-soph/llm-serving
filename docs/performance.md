@@ -7,7 +7,7 @@
 
 | 类别 | 模型 ID | 后端 | 权重精度 | 速度（关键数） | 内存（关键数） | 权重磁盘 |
 | --- | --- | --- | --- | --- | --- | ---: |
-| 文本／视觉 | `qwen3.8-flash-next` | Strata Metal fork | AD-4.27 混合（3.57 bpw 主体） | prefill 2,748 tok/s（26K）／2,681（116K）；decode 154.1（单路）／174.8（双路合计）tok/s（`4a6415f4e`） | wired +66,601 MiB（262K × 2 槽） | 96.94 GB |
+| 文本／视觉 | `qwen3.8-flash-next` | Strata Metal fork | AD-4.27 混合（3.57 bpw 主体） | prefill 2,748 tok/s（26K）／2,681（116K）；decode 154.0–154.4（单路）／172.6–180.5（双路合计）tok/s（`a21ef5378`） | wired +66,601 MiB（262K × 2 槽） | 96.94 GB |
 | 文本／视觉 | `qwen3.8-flash-next-uncensored` | Strata Metal fork | 同上 | prefill 2,762 tok/s（26K）／2,701（116K）；decode 148.9（单路）／154.3（双路合计）tok/s；260K 续问 TTFT 0.25–0.49 s | wired +65,684 MiB（262K × 2 槽） | 96.95 GB |
 | 文本／视觉 | `hy4-flash`（备用，按需） | Strata Hy4 Metal（fork `4a6415f4e`） | SQ-64：路由专家约 3.0 bpw，主干 5.92 GB，Engram Q8（页缓存，不 wired）；KV fp16 MLA 潜向量 | prefill 2,010 tok/s（32K）／1,952（128K）；decode DFly2 102–133（短提示）／81（32K）／68（128K）tok/s，单路 | wired +67,409 MiB（128K）；服务峰值 +68,037 | 130.5 GB |
 | 文本嵌入 | `embeddinggemma-2` | MLX，M5 TensorOps | BF16 权重，FP32 激活 | 16-token 查询 5.6 ms，64 × 400 token 达 57,814–58,226 tok/s（独占 GPU 内核验收） | 服务 wired 峰值增量 2680 MiB，常驻预留 3160 MiB | 0.558 GB + 32 MB 分词器 |
@@ -46,7 +46,16 @@
 
 - 固定输出 43/43 相同，wired 不变。代价：缓存装满时停放的会话占约 6.7–7.4 GiB 主机内存；此时同时生成 Z-Image，第二张图最多慢 21%，没有失败。
 
-**现行：Strata `4a6415f4e` + prompt chunk 2048，2026-11-23 23:07**。引擎 env `STRATA_METAL_PROMPT_CHUNK=2048`。Metal 的 prompt 每块从 1024 行改成 2048 行，每次 prompt 调用 8192 token。这是有意偏离上游默认（`--prefill auto` 用 1024 行）。同场对比在独占锁下进行，配置同下，每臂测两次：
+**现行：Strata `a21ef5378`（QSA indexer tail undo），2026-11-24 04:56**。修正长上下文 decode 里被拒草稿行盖掉 indexer key 的问题（并发 MTP 后续 B 项），配置和 env 不变。同场对比在独占锁下进行，配置同下，交替各测两次：
+
+| 版本 | c=1 decode tok/s | c=2 合计 tok/s | c=4 合计 | prefill 26–28K／104–116K 中位 tok/s | wired 峰值增量 MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `4a6415f4e` | 153.8–154.1 | 172.0–181.9 | 175.7–179.1 | 3,095–3,101／3,047–3,053 | 68,492–68,505 |
+| `a21ef5378`（现行） | 154.0–154.4 | 172.6–180.5 | 175.6–180.3 | 3,105–3,111／3,055–3,058 | 68,468–68,489 |
+
+- 速度、内存在噪声内。短上下文与并发输出逐字节相同（固定 34 条、26K／116K 及续问、两路约 258K needle）；n_kv > 2051 的较长生成会与旧版不同：修后 spec3 = spec2 = spec6，逐 token top-20 logprob 全等，旧版在第 146–920 个 token 起分叉（分叉前 KL 均值 ≤ 6.1e-5）。
+
+**上一版：Strata `4a6415f4e` + prompt chunk 2048，2026-11-23 23:07**。引擎 env `STRATA_METAL_PROMPT_CHUNK=2048`。Metal 的 prompt 每块从 1024 行改成 2048 行，每次 prompt 调用 8192 token。这是有意偏离上游默认（`--prefill auto` 用 1024 行）。同场对比在独占锁下进行，配置同下，每臂测两次：
 
 | chunk | c=1 decode tok/s | c=2 合计 tok/s | 短提示 TTFT s | prefill 2K／8K／32K／128K tok/s | 两路约 258K | wired 峰值增量 MiB |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |

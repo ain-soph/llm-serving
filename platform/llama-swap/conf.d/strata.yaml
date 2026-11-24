@@ -1,10 +1,12 @@
 # Prompt chunk 2048 (2026-11-23, user-approved, deliberately NOT the upstream default of --prefill auto = 1024-row Metal chunks):
 # env STRATA_METAL_PROMPT_CHUNK=2048 in configs/*-c262k-p2-compact.json.in; prefill +13% at 32K/128K, outputs bit-identical, peak wired +1.9 GiB (<= 68,486 MiB); rollback: drop the env. See services/text/strata/chunk2048-20261123/.
-# Flash-Next via ain-soph/Strata serving at 4a6415f4e (upstream main 73d4f4196 = v0.2.20+13, + our 9 + README + the Metal
-# down+combine dispatch and --dump-routing (64091c8e2) + Metal concurrent MTP: each batch slot drafts, STRATA_METAL_BATCH_MTP=1
-# in configs/*-c262k-p2-compact.json.in); release worktree serving-20261123c, 2026-11-23; c=2 aggregate decode 156.6 -> 174.9
-# tok/s, c=1 / prefill unchanged, outputs byte-identical; rollback: drop STRATA_METAL_BATCH_MTP (or "0") from the two templates,
-# or the release serving-20261123b at 64091c8e2 via .local/serving-values.json, see services/text/strata/concurrent-mtp-20261123/deploy/.
+# Flash-Next via ain-soph/Strata serving at a21ef5378 (upstream main 73d4f4196 = v0.2.20+13, + our 9 + README + the Metal
+# down+combine dispatch and --dump-routing (64091c8e2) + Metal concurrent MTP, STRATA_METAL_BATCH_MTP=1 in configs/*-c262k-p2-compact.json.in
+# (4a6415f4e) + the QSA indexer tail undo: rejected draft rows no longer leave their indexer keys in the tail ring, so long-context
+# decode is the same for every window size and run); release worktree serving-20261124, 2026-11-24.  Long-context (> 2051 cells)
+# outputs change from serving-20261123c (spec 3 now = spec 2 token for token); short contexts, c=2/c=4 and speed unchanged; rollback:
+# STRATA_METAL_QSA_UNDO=0 in the two templates, or the release serving-20261123c at 4a6415f4e via .local/serving-values.json, see
+# services/text/strata/concurrent-mtp-followup-20261124/deploy/.
 # Upstream defaults kept (user 2026-11-23): a request with no sampling field is decoded
 # greedily with MTP drafts (d35353903; before: the model card's sampling); a 'model' naming another Strata catalogue id gets
 # 404 model_not_found (#6621; our IDs are aliases in the configs); the conversation cache has no --conversation-cache-mib

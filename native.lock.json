@@ -3,7 +3,7 @@
   "sources": {
     "strata": {
       "url": "https://github.com/ain-soph/Strata.git",
-      "revision": "4a6415f4e0dad46d096a22b2de5e0223348922a7",
+      "revision": "a21ef5378eaa621980435e2473c5286f67e17cce",
       "license": "MIT"
     },
     "h3": {
