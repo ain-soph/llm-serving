@@ -1,0 +1,33 @@
+# Tencent Hy4-Flash: on-demand backup chat entry (user 2026-11-23: "Hy4重新下载吧", deploy as a switchable backup;
+# the default stays qwen3.8-flash-next). Strata's Hy4 Metal runner (strata-hy4-metal from ain-soph/Strata serving,
+# built by engine/src/hy4flash/metal/build_mac.sh into ${env.HY4_RELEASE}/build-hy4/bin) behind that release's server.py;
+# engine config services/text/hy4-flash/configs/hy4-flash-sq64-c128k.json(.in): weights strata-engine/Hy4-Flash-Strata
+# SQ-64 (routed experts ~3.0 bpw, wired) + Engram-Q8 (read through the page cache, not wired) + Vision; 131072 ctx,
+# DFly2 drafter, fp16 MLA latent KV, ONE request at a time (the server queues the rest).
+# One conversation slot and no SSD spill: server.py turns on --session-reuse, which by default parks up to 4 KV sets
+# (16 GiB) plus one spill set - more wired memory than the pool has beside the weights - and writes the spill to
+# ~/conversation-spill. With one slot a follow-up turn of the same chat still resumes from the common prefix.
+# Memory (M5 Ultra, 2026-11-23, this engine config through server.py, vm_stat wired delta): loaded and idle +59,400 MiB;
+# 130,815-token prompt + a picture +67,215; 31-task eval (thinking, up to 12K tokens) +68,037 (peak). 69500 = peak + ~1.4 GB,
+# as Flash-Next. Engine metal allocation 69.63 GB incl. 62.03 GB mapped weights and the 3.16 GB KV of 131072 tokens.
+# Does not fit beside Flash-Next (69500 each, pool ~83 GB): llama-swap swaps them; a request for Flash-Next unloads
+# Hy4 first (evict_cost 10 < 100). ttl 600 as the other entries that displace Flash-Next (mammoth-1, fish-drama-3,
+# minimax-h3-image-pe): idle Hy4 leaves after 10 min so flashnext-prefetch can warm Flash-Next's pages again.
+# Requests: reasoning_effort high (default) / no_think through chat_template_kwargs; logprobs and logit_bias -> 400.
+# See reports/hy4-flash.md, services/text/hy4-flash/redeploy-20261123/.
+models:
+  "hy4-flash":
+    name: "Tencent Hy4-Flash"
+    description: "Hy4-Flash SQ-64 on Strata Metal, 131072 ctx, DFly2, text + images; on demand, swaps with Flash-Next"
+    cmd: >
+      ${env.LLM_SERVING}/.venv/bin/python ${env.HY4_RELEASE}/terminal/serve/server.py
+      --engine strata --config ${env.LLM_SERVING}/services/text/hy4-flash/configs/hy4-flash-sq64-c128k.json
+      --host 127.0.0.1 --port ${PORT}
+    env:
+      - "XDG_CONFIG_HOME=${env.LLM_SERVING}/services/text/hy4-flash/config"
+    checkEndpoint: /health
+    concurrencyLimit: 8
+    ttl: 600
+    capacities:
+      gpu: 69500
+    evict_cost: 10

@@ -4,9 +4,11 @@ This checkout is the deployment: clone it to ~/llm-serving and the scripts, llam
 conf.d/*.yaml with ${env.NAME} macros) and the Caddyfile ({$NAME}) are already where they run
 (docs/serving-restore.md). What differs per machine is rendered here from a machine-local values JSON that is
 never committed (default .local/serving-values.json):
-  env       <checkout>/.local/serving.env (mode 0600): LLM_SERVING, LLM_MODELS, STRATA_RELEASE, LLM_TRUSTED_PROXY,
-            H3_VIDEO_SHARE_BASE, H3_VIDEO_FETCH_HOSTS; sourced by platform/llama-swap/env.sh, read by Caddy --envfile
-  template  the two Strata engine configs (services/text/strata/configs/*.json.in -> *.json) and the LaunchAgents
+  env       <checkout>/.local/serving.env (mode 0600): LLM_SERVING, LLM_MODELS, STRATA_RELEASE, HY4_RELEASE,
+            LLM_TRUSTED_PROXY, H3_VIDEO_SHARE_BASE, H3_VIDEO_FETCH_HOSTS; sourced by platform/llama-swap/env.sh, read by
+            Caddy --envfile
+  template  the two Strata engine configs (services/text/strata/configs/*.json.in -> *.json), the Hy4-Flash engine
+            config (services/text/hy4-flash/configs/*.json.in) and the LaunchAgents
             (platform/launchd/*.plist.in -> ~/Library/LaunchAgents); the gpu-lock watchdog plist only with --render
   generated ~/llm-serving/platform/llama-swap/.api_key: random, mode 0600, only when absent; never overwritten or printed
   verbatim  bin/ scripts and the llama-swap / gateway files: "in place" when this checkout is <home>/llm-serving,
@@ -41,6 +43,7 @@ SERVING_ENV = """\
 LLM_SERVING=@SERVING_ROOT@
 LLM_MODELS=@MODELS@
 STRATA_RELEASE=@STRATA_RELEASE@
+HY4_RELEASE=@HY4_RELEASE@
 LLM_TRUSTED_PROXY=@TRUSTED_PROXY@
 H3_VIDEO_SHARE_BASE=@SHARE_BASE@
 H3_VIDEO_FETCH_HOSTS=@FETCH_HOSTS@
@@ -52,12 +55,14 @@ VERBATIM = [f"bin/{n}" for n in ("archive-restore", "gpu-lock", "gpu-lock-run", 
 VERBATIM_DATA = ["platform/llama-swap/env.sh", "platform/llama-swap/config.yaml", "platform/gateway/Caddyfile"] \
     + sorted(f"platform/llama-swap/conf.d/{p.name}" for p in (ROOT / "platform/llama-swap/conf.d").glob("*.yaml"))
 STRATA = "services/text/strata/configs/"
+HY4 = "services/text/hy4-flash/configs/"
 AGENTS = ("llama-server", "llm-gateway", "decisions", "h3-video-files", "health", "flashnext-prefetch")
 # destination relative to the target home -> (source relative to this checkout, kind, mode)
 FILES = {S + p: (p, "verbatim", 0o755) for p in VERBATIM}
 FILES.update({S + p: (p, "verbatim", 0o644) for p in VERBATIM_DATA})
 FILES.update({S + STRATA + n: (STRATA + n + ".in", "template", 0o644)
               for n in ("strata-ad427-c262k-p2-compact.json", "strata-uncensored-c262k-p2-compact.json")})
+FILES.update({S + HY4 + n: (HY4 + n + ".in", "template", 0o644) for n in ("hy4-flash-sq64-c128k.json",)})
 FILES.update({LA + f"com.local.{n}.plist": (f"platform/launchd/com.local.{n}.plist.in", "template", 0o644)
               for n in AGENTS})
 FILES[ENV_FILE] = (None, "env", 0o600)
@@ -65,9 +70,9 @@ FILES[ENV_FILE] = (None, "env", 0o600)
 # written where launchd would load it.
 RENDER_ONLY = {LA + "com.local.gpu-lock-watchdog.plist": ("platform/launchd/com.local.gpu-lock-watchdog.plist.in",
                                                            "template", 0o644)}
-PATH_VALUES = ("MODELS", "STRATA_RELEASE", "STRATA_EXE", "STRATA_VISION_EXE")
+PATH_VALUES = ("MODELS", "STRATA_RELEASE", "STRATA_EXE", "STRATA_VISION_EXE", "HY4_RELEASE")
 VALUE_NAMES = PATH_VALUES + ("TRUSTED_PROXY", "SHARE_BASE", "FETCH_HOSTS")
-PLACEHOLDER = re.compile(r"@([A-Z_]+)@")
+PLACEHOLDER = re.compile(r"@([A-Z][A-Z0-9_]*)@")
 # Values go unquoted into llama-swap `cmd` lines, JSON strings, plists and the env file: plain characters only.
 SAFE_PATH = re.compile(r"/[A-Za-z0-9_./+-]*")
 SAFE_URL = re.compile(r"https?://[A-Za-z0-9.-]+(?::\d+)?(?:/[A-Za-z0-9_./-]*)?")
@@ -80,7 +85,8 @@ def serving_root(home):
 
 def default_values(home):
     """Values for a machine restored from this repo alone: Strata built by tools/native.py, weights in ~/models,
-    no trusted proxy in front of the gateway."""
+    no trusted proxy in front of the gateway. HY4_RELEASE (the release whose build-hy4/bin/strata-hy4-metal and
+    server.py run Hy4-Flash) is not here: when the values file does not name it, it is STRATA_RELEASE."""
     lock = json.loads((ROOT / "native.lock.json").read_text())
     release = ROOT / ".local/src" / f"strata-{lock['sources']['strata']['revision'][:12]}"
     return {"MODELS": str(Path(home) / "models"), "STRATA_RELEASE": str(release),
@@ -101,6 +107,7 @@ def load_values(home, path=None):
         values.update(given)
     elif path != DEFAULT_VALUES:
         raise FileNotFoundError(f"values file not found: {path}")
+    values.setdefault("HY4_RELEASE", values["STRATA_RELEASE"])
     out = {}
     for name, value in values.items():
         if not isinstance(value, str) or (not value and name != "FETCH_HOSTS"):

@@ -25,8 +25,9 @@ LaunchAgent 模板都已在运行位置。每台机器不同的只有几样，�
 | `llm-serving/platform/llama-swap/{config.yaml,conf.d/*.yaml}` | 仓库 | 原位 | 本机路径写成 `${env.LLM_SERVING}`、`${env.LLM_MODELS}`、`${env.STRATA_RELEASE}`；key 只以 `${env.LLAMA_API_KEY}` 出现 |
 | `llm-serving/platform/llama-swap/{env.sh,serve.sh,start.sh,stop.sh}` | 仓库 | 原位 | `env.sh` 读 `.local/serving.env` 和 `bin/gpu-pool`；serve.sh 和 lsw-apply 都 source 它 |
 | `llm-serving/platform/gateway/Caddyfile` | 仓库 | 原位 | `{$LLM_SERVING}`、`{$LLM_TRUSTED_PROXY}`，Caddy 用 `--envfile .local/serving.env` 读取 |
-| `llm-serving/.local/serving.env` | 取值文件 | 生成（0600） | `LLM_SERVING`、`LLM_MODELS`、`STRATA_RELEASE`、`LLM_TRUSTED_PROXY`、`H3_VIDEO_SHARE_BASE`、`H3_VIDEO_FETCH_HOSTS` |
+| `llm-serving/.local/serving.env` | 取值文件 | 生成（0600） | `LLM_SERVING`、`LLM_MODELS`、`STRATA_RELEASE`、`HY4_RELEASE`、`LLM_TRUSTED_PROXY`、`H3_VIDEO_SHARE_BASE`、`H3_VIDEO_FETCH_HOSTS` |
 | `llm-serving/services/text/strata/configs/strata-{ad427,uncensored}-c262k-p2-compact.json` | `*.json.in` | 模板 | Strata 读 JSON 不展开环境变量，所以仍渲染 |
+| `llm-serving/services/text/hy4-flash/configs/hy4-flash-sq64-c128k.json` | `*.json.in` | 模板 | 备用入口 `hy4-flash` 的引擎配置（同上原因） |
 | `Library/LaunchAgents/com.local.{llama-server,llm-gateway,decisions,h3-video-files,health}.plist` | `platform/launchd/*.plist.in` | 模板 | 登录时启动 llama-swap、网关、`/v1/decisions` 翻译服务（:8095）、只读媒体服务（:8090）、每 10 分钟健康检查 |
 | `com.local.gpu-lock-watchdog.plist` | `platform/launchd/` | 只 `--render` | 按用户决定（2026-11-15）停用，不写进 `~/Library/LaunchAgents` |
 | `llm-serving/platform/llama-swap/.api_key` | 无 | 安装时生成 | 不存在时生成随机 key（mode 0600）；已存在绝不覆盖（只把权限收紧到 0600）；被忽略，`privacy_check` 拒收 |
@@ -46,6 +47,7 @@ LaunchAgent 模板都已在运行位置。每台机器不同的只有几样，�
 | `STRATA_RELEASE` | `<仓库>/.local/src/strata-<native.lock.json 中的 12 位 commit>`（`tools/native.py strata` 的产物） |
 | `STRATA_EXE` | `<STRATA_RELEASE>/build-metal-serving/strata` |
 | `STRATA_VISION_EXE` | `<STRATA_RELEASE>/build-vision/bin/strata-vision` |
+| `HY4_RELEASE` | 同 `STRATA_RELEASE`（`hy4-flash` 用这个 release 的 `build-hy4/bin/strata-hy4-metal` 和 `terminal/serve/server.py`；`tools/native.py strata` 一起构建） |
 | `TRUSTED_PROXY` | `127.0.0.1`（网关前没有反向代理时；填一个 IPv4 地址，Caddyfile 中写成 `/32`） |
 | `SHARE_BASE` | `http://127.0.0.1:8080`（`/media/<id>` 链接的公开地址） |
 | `FETCH_HOSTS` | 空（视频渲染可以下载输入文件的主机，逗号分隔） |
@@ -58,6 +60,7 @@ LaunchAgent 模板都已在运行位置。每台机器不同的只有几样，�
   "STRATA_RELEASE": "~/llm-serving/services/text/strata/releases/<release>",
   "STRATA_EXE": "~/llm-serving/services/text/strata/releases/<release>/build-metal-serving/strata",
   "STRATA_VISION_EXE": "~/llm-serving/services/text/strata/releases/<release>/build-vision/bin/strata-vision",
+  "HY4_RELEASE": "~/llm-serving/services/text/strata/releases/<release>",
   "TRUSTED_PROXY": "<反向代理的局域网地址>",
   "SHARE_BASE": "https://<公开域名>",
   "FETCH_HOSTS": "<上传文件所在主机>"
@@ -76,3 +79,11 @@ LLAMA_API_KEY=x llama-swap -config ~/llm-serving/platform/llama-swap/config.yaml
 
 模型权重、Strata 构建产物、Homebrew 的 `llama-swap` 与 `caddy` 不由这个脚本处理：权重见 `models.required.json`，构建见
 [strata.md](strata.md)，依赖见 `Brewfile`。
+
+`hy4-flash` 的 tokenizer 目录（`<MODELS>/hy4-flash/strata/tokenizer`，`models.required.json` 里列出）不单独下载，
+由 SQ-64 文件第 0 段导出：
+
+```sh
+cd <HY4_RELEASE> && ~/llm-serving/.venv/bin/python -I terminal/tools/hy4_tokenizer.py \
+  --strata ~/models/hy4-flash/strata/Hy4-Flash-SQ-64.strata --out ~/models/hy4-flash/strata/tokenizer
+```

@@ -212,6 +212,17 @@ def cases():
                                                              {"type": "image_url", "image_url": {"url": strata_image()}}]}],
                    "temperature": 0, "seed": 1, "max_tokens": n, "chat_template_kwargs": {"enable_thinking": False}}
             out.append(case(f"{vid}-{m}", "chat", m, vis, quick=quick, order=order))
+    # Hy4-Flash (2026-11-23, on-demand backup entry; unloads Flash-Next, so order 3): thinking off through the template's
+    # reasoning_effort (Hy4 knows no_think / high), temperature 0; the full mode adds the thinking path and the picture
+    hy4 = {**chat, "chat_template_kwargs": {"reasoning_effort": "no_think"}}
+    out.append(case("chat-hy4-flash", "chat", "hy4-flash", hy4, order=3))
+    out.append(case("chatlong-hy4-flash", "chat", "hy4-flash", {**chat, "max_tokens": 1024}, quick=False, order=3))
+    out.append(case("vision-hy4-flash", "chat", "hy4-flash",
+                    {"messages": [{"role": "user", "content": [
+                        {"type": "text", "text": "What number is written in the image, and what color is the circle?"},
+                        {"type": "image_url", "image_url": {"url": strata_image()}}]}],
+                     "temperature": 0, "seed": 1, "max_tokens": 40,
+                     "chat_template_kwargs": {"reasoning_effort": "no_think"}}, quick=False, order=3))
     for m in ("embeddinggemma-2", "embeddinggemma-2-multimodal", "qwen3-embedding-0.6b", "qwen3-embedding-4b",
               "qwen3-embedding-8b", "voyage-4-nano"):
         out.append(case(f"embed-{m}", "embed", m, {"input": EMBED_IN}, order=0 if m == "embeddinggemma-2" else 1))

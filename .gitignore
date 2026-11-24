@@ -120,6 +120,11 @@
 !/services/rerank/server.py
 !/services/text/
 /services/text/*
+!/services/text/hy4-flash/
+/services/text/hy4-flash/*
+!/services/text/hy4-flash/configs/
+/services/text/hy4-flash/configs/*
+!/services/text/hy4-flash/configs/hy4-flash-sq64-c128k.json.in
 !/services/text/strata/
 /services/text/strata/*
 !/services/text/strata/configs/

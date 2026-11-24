@@ -33,7 +33,8 @@
     "qwen3-tts/1.7B-VoiceDesign-q8",
     "elephant-1-mix8",
     "mammoth-1-mix8",
-    "z-image-turbo/serve"
+    "z-image-turbo/serve",
+    "hy4-flash/strata/tokenizer"
   ],
   "files": [
     "strata-mtp/mtp-q2_0.gguf",
@@ -83,6 +84,9 @@
     "qwen-image-2.1/te-q8/config.json",
     "minimax-h3/FL2VA/text_encoder-int8/model.safetensors",
     "minimax-h3/FL2VA/text_encoder-int8/config.json",
-    "minimax-h3/FL2VA/text_encoder-int8/h3-te-int8.json"
+    "minimax-h3/FL2VA/text_encoder-int8/h3-te-int8.json",
+    "hy4-flash/strata/Hy4-Flash-SQ-64.strata",
+    "hy4-flash/strata/Hy4-Flash-Engram-Q8.strata",
+    "hy4-flash/strata/Hy4-Flash-Vision.strata"
   ]
 }

@@ -9,6 +9,7 @@
 | --- | --- | --- | --- | --- | --- | ---: |
 | 文本／视觉 | `qwen3.8-flash-next` | Strata Metal fork | AD-4.27 混合（3.57 bpw 主体） | prefill 2,748 tok/s（26K）／2,681（116K）；decode 154.1（单路）／174.8（双路合计）tok/s（`4a6415f4e`） | wired +66,601 MiB（262K × 2 槽） | 96.94 GB |
 | 文本／视觉 | `qwen3.8-flash-next-uncensored` | Strata Metal fork | 同上 | prefill 2,762 tok/s（26K）／2,701（116K）；decode 148.9（单路）／154.3（双路合计）tok/s；260K 续问 TTFT 0.25–0.49 s | wired +65,684 MiB（262K × 2 槽） | 96.95 GB |
+| 文本／视觉 | `hy4-flash`（备用，按需） | Strata Hy4 Metal（fork `4a6415f4e`） | SQ-64：路由专家约 3.0 bpw，主干 5.92 GB，Engram Q8（页缓存，不 wired）；KV fp16 MLA 潜向量 | prefill 2,010 tok/s（32K）／1,952（128K）；decode DFly2 102–133（短提示）／81（32K）／68（128K）tok/s，单路 | wired +67,409 MiB（128K）；服务峰值 +68,037 | 130.5 GB |
 | 文本嵌入 | `embeddinggemma-2` | MLX，M5 TensorOps | BF16 权重，FP32 激活 | 16-token 查询 5.6 ms，64 × 400 token 达 57,814–58,226 tok/s（独占 GPU 内核验收） | 服务 wired 峰值增量 2680 MiB，常驻预留 3160 MiB | 0.558 GB + 32 MB 分词器 |
 | 多模态嵌入 | `embeddinggemma-2-multimodal` | llama.cpp + 适配层 | BF16 | 图片 0.04–0.12 s；5 s 音频 0.035 s；4 s 视频 0.34 s | wired +2996 MiB | 1.540 GB |
 | 文本嵌入 | `qwen3-embedding-0.6b`／`-4b` | MLX，自写服务 | FP16 | 64 × 450 token 0.39／2.50 s | wired 峰值 +2705／+10323 MiB（32K 输入） | 1.21／8.06 GB |
@@ -129,6 +130,25 @@
 - 正确性：38k 提示词、temperature=0，与上游手动调优版回答逐字节一致；API 对话、流式、工具、视觉通过。
 - 第一遍 26k 输入测得 1230.5 tok/s，含约 7.3 s Metal 内核编译，表中用热 shader 的 2013.8。28123 token 的 2269.5 tok/s 输入不同，不替换同输入对照。
 - 换后端的历史对比（S4，不计入 fork 收益，两边槽位、上下文、KV 精度不同）：llama.cpp → Strata 单流 59.9 → 123.2 tok/s（2.06×），长提示词 1197 → 2058 tok/s（1.72×）。
+
+## 文本：Tencent Hy4-Flash（Strata Hy4 Metal，备用入口）
+
+2026-11-23，独占 GPU，单路，131072 ctx，DFly2 投机解码（服务默认），KV 为 fp16 MLA 潜向量；引擎 ain-soph/Strata `serving`
+`4a6415f4e`；权重 Hy4-Flash-SQ-64（路由专家约 3.0 bpw）+ Engram-Q8 + Vision。与 Flash-Next 不能同驻，llama-swap 自动换出。
+
+| 测试 | prefill tok/s | decode 普通 tok/s | decode DFly2 tok/s | wired 增量 MiB |
+| --- | ---: | ---: | ---: | ---: |
+| 代码，生成 256（2 轮） | — | 54.3 / 57.1 | 102.0 / 105.2 | 59,743–60,660 |
+| JSON，生成 28（2 轮） | — | 55.4 / 58.9 | 124.9 / 132.6 | 同上 |
+| 中文对话，生成 128 | — | 46.3 | 50.2 | 同上 |
+| 4K needle | 1,474 | 58.0 | 101.3 | 63,982 |
+| 32K 摘要，生成 256 | 2,010 | 51.2 | 80.8 | 67,021 |
+| 128K 摘要，生成 256 | 1,951 | 48.8 | 67.8 | 67,448 |
+
+- 经 :8080 切换（首请求减去热请求，两轮）：Flash-Next → `hy4-flash` 14.2 / 13.2 s；`hy4-flash` → Flash-Next 10.1 / 10.0 s。
+- 服务（server.py，会话复用 1 槽、不落盘）：空载 +59,400 MiB，130,815 token 提示 + 图片 +67,215，31 题评测峰值 +68,037；
+  llama-swap 容量 69,500。磁盘 130.5 GB（SQ-64 62.03 + Engram 67.58 + Vision 0.93 GB）。
+- 31 题（T0.9）复核 31/31。详见 `reports/hy4-flash.md`（不公开）。
 
 ## 嵌入：EmbeddingGemma 2
 

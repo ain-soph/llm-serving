@@ -15,9 +15,9 @@ LOCAL = ROOT / ".local"
 LOCK = json.loads((ROOT / "native.lock.json").read_text())
 
 
-def run(args, cwd=None):
+def run(args, cwd=None, env=None):
     print("Running:", " ".join(map(str, args)), flush=True)
-    subprocess.run(list(map(str, args)), cwd=cwd, check=True)
+    subprocess.run(list(map(str, args)), cwd=cwd, check=True, env=env)
 
 
 def checkout(name):
@@ -77,8 +77,16 @@ def build(name, jobs):
         cmake(src / "engine/metal", src / "build-metal-serving", flags, ["strata"], jobs)
         vision_flags = ["-DSTRATA_VISION_CUDA=OFF", "-DSTRATA_VISION_METAL=ON", "-DSTRATA_PORTABLE=OFF"]
         cmake(src / "terminal/tools/vision", src / "build-vision", vision_flags, ["strata-vision"], jobs)
-        products = [src / "build-metal-serving/strata", src / "build-vision/bin/strata-vision"]
-        commands = [flags, vision_flags]
+        # Hy4-Flash Metal runner (hy4-flash entry): upstream's clang-only script, kernels embedded, into build-hy4/bin;
+        # the script reads the sources from $HY4_DIR/wt, here a link to the checkout itself
+        hy4 = src / "build-hy4"
+        hy4.mkdir(exist_ok=True)
+        if not (hy4 / "wt").exists():
+            (hy4 / "wt").symlink_to(src)
+        run(["bash", src / "engine/src/hy4flash/metal/build_mac.sh", "run"], src, env={**os.environ, "HY4_DIR": str(hy4)})
+        products = [src / "build-metal-serving/strata", src / "build-vision/bin/strata-vision",
+                    hy4 / "bin/strata-hy4-metal"]
+        commands = [flags, vision_flags, ["HY4_DIR=build-hy4", "engine/src/hy4flash/metal/build_mac.sh", "run"]]
     elif name == "h3":
         run(["make", "-j", jobs, "h3", "h3_pack_int8"], src)
         products = [src / "h3", src / "h3_pack_int8"]

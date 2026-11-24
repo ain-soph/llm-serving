@@ -1,0 +1,28 @@
+{
+ "exe": "@HY4_RELEASE@/build-hy4/bin/strata-hy4-metal",
+ "arch": "hy4flash",
+ "args": [
+  "--native",
+  "@MODELS@/hy4-flash/strata/Hy4-Flash-SQ-64.strata",
+  "--engram",
+  "@MODELS@/hy4-flash/strata/Hy4-Flash-Engram-Q8.strata",
+  "--vision",
+  "@MODELS@/hy4-flash/strata/Hy4-Flash-Vision.strata",
+  "--max-context",
+  "131072",
+  "--conversation-slots",
+  "1",
+  "--conversation-spill-mib",
+  "0"
+ ],
+ "cwd": "@HY4_RELEASE@",
+ "tokenizer": "@MODELS@/hy4-flash/strata/tokenizer",
+ "model_name": "hy4-flash",
+ "log": "@SERVING_ROOT@/services/text/hy4-flash/logs/hy4-flash-sq64-c128k.log",
+ "backend": "metal",
+ "port": 18157,
+ "open_browser": false,
+ "allowed_hosts": [
+  "*"
+ ]
+}

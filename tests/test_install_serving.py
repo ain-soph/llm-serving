@@ -72,7 +72,7 @@ class InstallServingTests(unittest.TestCase):
             if kind == "verbatim":
                 self.assertEqual(data, (inst.SOURCE / src).read_bytes())
             else:
-                self.assertNotRegex(data.decode(), r"@[A-Z_]+@")
+                self.assertNotRegex(data.decode(), r"@[A-Z][A-Z0-9_]*@")
         # the llama-swap config is not rendered: machine values come from ${env.NAME} (platform/llama-swap/env.sh)
         conf = yaml.safe_load((self.root / "platform/llama-swap/conf.d/strata.yaml").read_text())
         cmd = conf["models"]["qwen3.8-flash-next-uncensored"]["cmd"].split()
@@ -91,6 +91,17 @@ class InstallServingTests(unittest.TestCase):
         self.assertEqual(engine["exe"], str(self.home / "strata/build/strata"))
         self.assertEqual(engine["vision"]["exe"], "/opt/vision/strata-vision")
         self.assertTrue(engine["tokenizer"].startswith(str(self.home / "weights") + "/"))
+        # Hy4-Flash: HY4_RELEASE defaults to STRATA_RELEASE (build-hy4/ inside the same release)
+        self.assertEqual(env["HY4_RELEASE"], str(self.home / "strata"))
+        hy4 = json.loads((self.root / "services/text/hy4-flash/configs/hy4-flash-sq64-c128k.json").read_text())
+        self.assertEqual(hy4["exe"], str(self.home / "strata/build-hy4/bin/strata-hy4-metal"))
+        self.assertEqual(hy4["cwd"], str(self.home / "strata"))
+        self.assertTrue(hy4["tokenizer"].startswith(str(self.home / "weights") + "/hy4-flash/"))
+        conf = yaml.safe_load((self.root / "platform/llama-swap/conf.d/hy4-flash.yaml").read_text())
+        cmd = conf["models"]["hy4-flash"]["cmd"].split()
+        self.assertIn("${env.HY4_RELEASE}/terminal/serve/server.py", cmd)
+        self.assertEqual(cmd[cmd.index("--config") + 1],
+                         "${env.LLM_SERVING}/services/text/hy4-flash/configs/hy4-flash-sq64-c128k.json")
 
     def test_drift_is_kept_unless_update_then_backed_up(self):
         run("--home", self.home, "--values", self.values)
@@ -134,6 +145,10 @@ class InstallServingTests(unittest.TestCase):
         self.assertEqual(v["STRATA_RELEASE"], str(ROOT / ".local/src" / f"strata-{rev}"))
         self.assertEqual(v["MODELS"], str(self.home / "models"))
         self.assertEqual(v["SERVING_ROOT"], str(self.root))
+        self.assertEqual(v["HY4_RELEASE"], v["STRATA_RELEASE"])
+        own = self.home / "own.json"
+        own.write_text(json.dumps({"HY4_RELEASE": "~/hy4-release"}))
+        self.assertEqual(inst.load_values(self.home, own)["HY4_RELEASE"], str(self.home / "hy4-release"))
         bad = self.home / "bad.json"
         bad.write_text(json.dumps({"MODEL": "~/x"}))
         with self.assertRaises(ValueError):
