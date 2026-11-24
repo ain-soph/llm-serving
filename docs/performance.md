@@ -1167,32 +1167,43 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 | 统一 Python 环境 | **完成**（UE），CosyVoice3 随之下线 |
 | H3 图片尺寸规则（官方 4–20 MP、生成面积下限 2048²）与官方 PE | 进行中，未上线 |
 | Qwen-Image 官方 PE、Qwen-Image-Bench 评判 | 进行中，未上线 |
-| H3 视频社区 Turbo LoRA、Qwen-Image ControlNet／LoRA、Nemotron 说话人分离核实 | 未做 |
-| 报告补 TTS／Whisper／Nemotron 的 decode tok/s | 未做 |
+| H3 视频社区 Turbo LoRA、Qwen-Image ControlNet、Nemotron 说话人分离核实 | 未做（ControlNet 只调研） |
+| Qwen-Image LoRA | **完成**（2026-11-23）：按请求 `lora`／`lora_scale`，只接受登记的名字，不带 lora 的输出逐字节不变（[qwen-image.md](qwen-image.md)） |
+| 报告补 TTS／Whisper／Nemotron 的 decode tok/s | **完成**（2026-11-23）：TTS、Whisper 已补；Nemotron 已下线，不补 |
 
 
-2026-11-16 统计（2026-11-17 起新增的模型为当天统计），排除 `.cache`，按 `(device, inode)` 去重硬链接；字节数见 [model-storage.json](model-storage.json)。
+2026-11-23 统计（只读：`stat().st_size` 求和，排除 `.cache`，按 `(device, inode)` 去重硬链接；`du`／`df` 核对），字节数见 [model-storage.json](model-storage.json)。
+“已归档”指整份权重已校验后拷到另一台机器的 SSD、本机已清除：运行需要按归档清单计，相关目录总量记 0，首次请求时 `bin/archive-restore` 拷回。
 
 | 文件组 | 运行需要 | 相关目录总量 | 说明 |
 | --- | ---: | ---: | --- |
 | 默认 Flash-Next | 96.944 GB | 96.944 GB | 见文本一节 |
-| Uncensored Flash-Next | 96.947 GB | 96.947 GB | 独立权重，不假设与默认版共享 extent |
-| 共用 MTP | 0.889 GB | 10.556 GB | 只需 Q2_0 GGUF 与草稿词表；目录里的 Q4／Q8 和转换张量不是部署所需 |
-| EmbeddingGemma 全部模态 | 1.540 GB | 1.540 GB | 文本 0.558 + 投影 0.982 |
-| 重排（3 个零拷贝 + 2 个 W8A8） | 30.424 GB | — | 零拷贝 1.203 + 8.055 + 8.529，W8A8 4.426 + 8.210；`mlx-*` 源目录服务不再读取，多数已删，需要时重新下载转换 |
-| Qwen3 嵌入 + voyage（4 个零拷贝 + 2 个 W8A8） | 31.146 GB | — | 1.208 + 8.059 + 8.529 + 0.709 + 4.431 + 8.210 |
+| Uncensored Flash-Next | 96.947 GB | 0 | 已归档；独立权重，不假设与默认版共享 extent |
+| 共用 MTP | 0.889 GB | 0.889 GB | 只需 Q2_0 GGUF 与草稿词表；目录里的 Q4／Q8 和转换张量已清理 |
+| EmbeddingGemma 全部模态 | 1.540 GB | 1.572 GB | 文本 0.558 + 投影 0.982 |
+| 重排（3 个预量化混合） | 13.841 GB | 13.841 GB | 0.852 + 5.322 + 7.667；2026-11-18 起每个尺寸一个入口⁶ |
+| Qwen3 嵌入 + voyage（4 个） | 17.869 GB | 17.869 GB | 1.208 + 8.059 + 7.893 + 0.709 |
 | Perplexity Decider | 6.294 GB | 6.294 GB | 按层类预量化（`pplx-decider-flash-mix8`，含 `source/`）；官方检查点已删，重建见 decisions.md |
-| elephant-1 | 11.07 GB | 11.07 GB | 按层类预量化（`elephant-1-mix8`）；官方 BF16 已删，重建见 decisions.md |
-| mammoth-1 | 29.69 GB | 29.69 GB | 按层类预量化（`mammoth-1-mix8`）；官方 BF16 已删，重建见 decisions.md |
-| Qwen3-TTS（3 个变体） | 12.220 GB | — | 编解码器硬链接成一份 |
+| elephant-1 | 11.073 GB | 11.073 GB | 按层类预量化（`elephant-1-mix8`）；官方 BF16 已删，重建见 decisions.md |
+| mammoth-1 | 29.689 GB | 29.689 GB | 按层类预量化（`mammoth-1-mix8`）；官方 BF16 已删，重建见 decisions.md |
+| joey-1 | 2.435 GB | 7.900 GB | 按层类预量化（`joey-1-mix8`，2026-11-23 上线）；BF16 源（5.465 GB）暂留本机 |
+| drex-v1.5 | 9.532 GB | 9.532 GB | 官方 Q8_0 GGUF |
+| Qwen3-TTS（3 个变体） | 7.189 GB | 7.189 GB | 8 位副本，编解码器硬链接成一份；官方 BF16（12.22 GB）已归档 |
+| Fish Audio Drama 3 | 42.178 GB | 42.178 GB | 8 位社区转换（路由专家 8-bit，其余 BF16），2026-11-23 上线 |
 | CosyVoice3（已下线） | 0 | — | 权重已删（原 2.711 GB），恢复时重新下载 |
 | SOV-Transcribe-1（已下线） | 0 | — | 2026-11-18 下线，8-bit 权重（29.770 GB）已删；重新上线见 `docs/sov.md` |
 | Nemotron（已下线） | 0 | — | 2026-11-18 下线，GGUF（21.349 GB）已删；重新下载 AtomicChat GGUF，启动脚本 `tools/nemo.sh` |
-| Whisper MLX | 3.084 GB | 3.084 GB | FP16 |
-| Qwen ASR + 对齐器 | 6.543 GB | 6.543 GB | 4.703 + 1.840 |
+| Whisper MLX | 2.291 GB | 2.291 GB | 8 位存盘；FP16 原版（3.084 GB）已归档 |
+| Qwen ASR + 对齐器 | 3.693 GB | 3.693 GB | 2.652 + 1.041，8 位存盘；FP16 原版（4.703 + 1.840 GB）已归档 |
 | H3 Image | 49.320 GB | 49.320 GB | 只保留页对齐版本 |
-| Qwen-Image-2.1（3 个入口） | 26.804 GB | — | 文本编码器用 W8A16（10.91 GB）；BF16 文本编码器（17.53 GB）只作转换来源与回退；BF16 DiT 和撤下的 INT8 文本编码器已删 |
-| H3 Video（FL2VA + Ref2VA） | 58.897 GB | 58.897 GB | 共享 VAE；文本编码器链接到 H3 图片的 INT8 文件（原 BF16 62 GB 已删） |
+| H3 Image 官方提示词扩写 | 17.937 GB | 17.937 GB | 官方 NVFP4（`minimax-h3-image-pe`） |
+| Qwen-Image-2.1（3 个入口） | 26.804 GB | 26.849 GB | W8A8 DiT + W8A16 文本编码器；BF16 源（32.452 GB）已归档 |
+| Qwen-Image LoRA（2 个） | 0.118 GB | 0.118 GB | 0.084 + 0.034，按请求加载（2026-11-23） |
+| Z-Image-Turbo | 14.528 GB | 14.528 GB | W8A8 DiT（注意力＋前馈），文本编码器／VAE BF16 |
+| H3 Video（FL2VA + Ref2VA） | 105.137 GB | 105.137 GB | FL2VA 原 INT8 pack 与旋转 pack（rot256）、Ref2VA 原 pack 各 23.915 GB；共享 VAE（视频 5.584 + 音频 0.605）；文本编码器链接到 H3 图片的 INT8 文件 |
+| H3 Video Turbo | 24.695 GB | 24.695 GB | 合并 LoRA 后的旋转 pack 23.915 + LoRA 源 0.780；其余文件链接到 H3 Video |
+
+本机模型目录逻辑大小合计 602.4 GB，其中不是部署所需的：`strata-ud-q4kxl` 对照权重 112.859 GB、joey-1 BF16 源 5.465 GB。数据卷（`df`）995 GB，已用 698 GB，可用 269 GB。
 
 视频 DiT 原始约 66.280 GB／检查点（当时逐张量报告），现 INT8 每份 23.914 GB（22.27 GiB），约省 42.366 GB（−63.9%）；只针对 DiT，不是整个视频目录。旧报告的“62 → 22 GB”混用了 GiB，以这里为准。
 

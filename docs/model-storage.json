@@ -1,5 +1,5 @@
 {
-  "measured_on": "2026-11-16",
+  "measured_on": "2026-11-23",
   "units": {
     "GB": "1000000000 bytes",
     "allocated_bytes": "st_blocks * 512"
@@ -10,7 +10,7 @@
       "relative_paths": [
         "strata-ad427"
       ],
-      "files": 13,
+      "files": 14,
       "bytes": 96943638945,
       "GB": 96.943639,
       "allocated_bytes": 96943661056
@@ -22,7 +22,9 @@
       "files": 13,
       "bytes": 96947183499,
       "GB": 96.947183,
-      "allocated_bytes": 96951918592
+      "allocated_bytes": 0,
+      "archived": true,
+      "note": "archived and evicted locally; bytes from the archive manifest"
     },
     "strata-shared-mtp": {
       "relative_paths": [
@@ -57,57 +59,156 @@
       "relative_paths": [
         "qwen3-reranker/mix-0.6b"
       ],
-      "measured_on": "2026-11-21",
       "files": 8,
       "bytes": 851988219,
       "GB": 0.851988,
-      "allocated_bytes": 852013056,
-      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by shared/common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
+      "allocated_bytes": 852013056
     },
     "qwen3-reranker-4b": {
       "relative_paths": [
         "qwen3-reranker/mix-4b"
       ],
-      "measured_on": "2026-11-21",
       "files": 8,
       "bytes": 5322342136,
       "GB": 5.322342,
-      "allocated_bytes": 5322366976,
-      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by shared/common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
+      "allocated_bytes": 5322366976
     },
     "qwen3-reranker-8b": {
       "relative_paths": [
         "qwen3-reranker/mix-8b"
       ],
-      "measured_on": "2026-11-21",
       "files": 9,
       "bytes": 7666859431,
       "GB": 7.666859,
-      "allocated_bytes": 7666884608,
-      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by shared/common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
+      "allocated_bytes": 7666884608
+    },
+    "qwen3-embedding-0.6b": {
+      "relative_paths": [
+        "qwen3-embedding/zc-0.6b-fp16"
+      ],
+      "files": 12,
+      "bytes": 1207504625,
+      "GB": 1.207505,
+      "allocated_bytes": 1207537664
+    },
+    "qwen3-embedding-4b": {
+      "relative_paths": [
+        "qwen3-embedding/zc-4b-fp16"
+      ],
+      "files": 12,
+      "bytes": 8059497102,
+      "GB": 8.059497,
+      "allocated_bytes": 8059527168
+    },
+    "qwen3-embedding-8b": {
+      "relative_paths": [
+        "qwen3-embedding/mix-8b"
+      ],
+      "files": 13,
+      "bytes": 7892754942,
+      "GB": 7.892755,
+      "allocated_bytes": 7892787200
+    },
+    "voyage-4-nano": {
+      "relative_paths": [
+        "voyage-4-nano/zc-bf16"
+      ],
+      "files": 15,
+      "bytes": 708631908,
+      "GB": 0.708632,
+      "allocated_bytes": 708665344
+    },
+    "pplx-decider-flash": {
+      "relative_paths": [
+        "pplx-decider-flash-mix8"
+      ],
+      "files": 33,
+      "bytes": 6294239339,
+      "GB": 6.294239,
+      "allocated_bytes": 6294323200
+    },
+    "elephant-1": {
+      "relative_paths": [
+        "elephant-1-mix8"
+      ],
+      "files": 16,
+      "bytes": 11073275344,
+      "GB": 11.073275,
+      "allocated_bytes": 11076726784
+    },
+    "mammoth-1": {
+      "relative_paths": [
+        "mammoth-1-mix8"
+      ],
+      "files": 16,
+      "bytes": 29689004742,
+      "GB": 29.689005,
+      "allocated_bytes": 29694365696
+    },
+    "joey-1": {
+      "relative_paths": [
+        "joey-1-mix8"
+      ],
+      "files": 18,
+      "bytes": 2434582891,
+      "GB": 2.434583,
+      "allocated_bytes": 2434625536
+    },
+    "drex-v1.5": {
+      "relative_paths": [
+        "drex-v1.5-q8"
+      ],
+      "files": 4,
+      "bytes": 9531710995,
+      "GB": 9.531711,
+      "allocated_bytes": 9531715584
+    },
+    "qwen3-tts": {
+      "relative_paths": [
+        "qwen3-tts/1.7B-CustomVoice-q8",
+        "qwen3-tts/1.7B-Base-q8",
+        "qwen3-tts/1.7B-VoiceDesign-q8"
+      ],
+      "files": 37,
+      "bytes": 7189353189,
+      "GB": 7.189353,
+      "allocated_bytes": 7189463040
+    },
+    "fish-drama-3": {
+      "relative_paths": [
+        "fish-audio-drama-3-8bit"
+      ],
+      "files": 20,
+      "bytes": 42177609321,
+      "GB": 42.177609,
+      "allocated_bytes": 42177646592
     },
     "whisper-large-v3": {
       "relative_paths": [
         "whisper-large-v3-q8"
       ],
-      "measured_on": "2026-11-23",
       "files": 3,
       "bytes": 2291261640,
       "GB": 2.291262,
-      "allocated_bytes": 2291269632,
-      "note": "Stored pre-quantized (services/asr/whisper/save_q8.py, 8-bit decoder weights, group 32). The FP16 original whisper-large-v3-mlx (3.08 GB) is only needed to rebuild it."
+      "allocated_bytes": 2291269632
     },
     "qwen3-asr-1.7b": {
       "relative_paths": [
-        "qwen3-asr-1.7b-q8",
+        "qwen3-asr-1.7b-q8"
+      ],
+      "files": 11,
+      "bytes": 2651587455,
+      "GB": 2.651587,
+      "allocated_bytes": 2651619328
+    },
+    "qwen3-forcedaligner-0.6b": {
+      "relative_paths": [
         "qwen3-forcedaligner-0.6b-q8"
       ],
-      "measured_on": "2026-11-23",
-      "files": 22,
-      "bytes": 3692698348,
-      "GB": 3.692698,
-      "allocated_bytes": 3692765184,
-      "note": "Recognizer and forced aligner stored pre-quantized (services/asr/qwen3-asr-mlx/save_q8.py, 8-bit weights, group 32). The BF16 originals (6.54 GB) are only needed to rebuild them."
+      "files": 11,
+      "bytes": 1041110893,
+      "GB": 1.041111,
+      "allocated_bytes": 1041145856
     },
     "minimax-h3-image": {
       "relative_paths": [
@@ -116,25 +217,16 @@
       "files": 5,
       "bytes": 49320267605,
       "GB": 49.320268,
-      "allocated_bytes": 49340702720
+      "allocated_bytes": 49320271872
     },
-    "video-dit-FL2VA": {
+    "minimax-h3-image-pe-expander": {
       "relative_paths": [
-        "minimax-h3/FL2VA/transformer-int8"
+        "minimax-h3-image-pe"
       ],
-      "files": 54,
-      "bytes": 23914052189,
-      "GB": 23.914052,
-      "allocated_bytes": 23914123264
-    },
-    "video-dit-Ref2VA": {
-      "relative_paths": [
-        "minimax-h3/Ref2VA/transformer-int8"
-      ],
-      "files": 54,
-      "bytes": 23914052190,
-      "GB": 23.914052,
-      "allocated_bytes": 23914123264
+      "files": 23,
+      "bytes": 17937108380,
+      "GB": 17.937108,
+      "allocated_bytes": 17937170432
     },
     "qwen-image-2.1": {
       "relative_paths": [
@@ -153,170 +245,246 @@
         "qwen-image-2.1/base/text_encoder/generation_config.json",
         "qwen-image-2.1/te-q8"
       ],
-      "measured_on": "2026-11-17",
       "files": 28,
       "bytes": 26804220983,
       "GB": 26.804221,
-      "allocated_bytes": 26804301824,
-      "note": "Three entries: W8A8 DiTs, W8A16 text encoder (te-q8), FP32 VAE. The BF16 text encoder file is the conversion source only (and the rollback); the BF16 DiT files are not needed."
+      "allocated_bytes": 26804301824
     },
-    "qwen3-embedding-0.6b": {
+    "qwen-image-2.1-loras": {
       "relative_paths": [
-        "qwen3-embedding/zc-0.6b-fp16"
+        "lora-qwen21-voxel/Qwen-Image-2.1-Voxel-Style-3000.safetensors",
+        "lora-qwen21-mndf-pixel/pytorch_lora_weights.safetensors"
       ],
-      "measured_on": "2026-11-17",
-      "files": 12,
-      "bytes": 1207504625,
-      "GB": 1.207505,
-      "allocated_bytes": 1207537664
+      "files": 2,
+      "bytes": 117533464,
+      "GB": 0.117533,
+      "allocated_bytes": 117538816
     },
-    "qwen3-embedding-4b": {
+    "z-image-turbo": {
       "relative_paths": [
-        "qwen3-embedding/zc-4b-fp16"
+        "z-image-turbo/serve"
       ],
-      "measured_on": "2026-11-17",
-      "files": 12,
-      "bytes": 8059497102,
-      "GB": 8.059497,
-      "allocated_bytes": 8059527168
-    },
-    "qwen3-embedding-8b": {
-      "relative_paths": [
-        "qwen3-embedding/mix-8b"
-      ],
-      "measured_on": "2026-11-21",
-      "files": 13,
-      "bytes": 7892754942,
-      "GB": 7.892755,
-      "allocated_bytes": 7892787200,
-      "note": "2026-11-18 (pa1b): one entry, stored per-class mix written by shared/common/qwen3_w8a8.py mix (mix.json); the old exact and -int8 copies were merged into it."
-    },
-    "voyage-4-nano": {
-      "relative_paths": [
-        "voyage-4-nano/zc-bf16"
-      ],
-      "measured_on": "2026-11-17",
-      "files": 15,
-      "bytes": 708631908,
-      "GB": 0.708632,
-      "allocated_bytes": 708665344
-    },
-    "pplx-decider-flash": {
-      "relative_paths": [
-        "pplx-decider-flash-mix8"
-      ],
-      "measured_on": "2026-11-18",
-      "files": 33,
-      "bytes": 6294239339,
-      "GB": 6.294239,
-      "note": "Pre-quantized per-class mix (services/decisions/decider/save_mix.py), one entry for text and images; the official checkpoint is only needed to rebuild it."
-    },
-    "qwen3-tts": {
-      "relative_paths": [
-        "qwen3-tts/1.7B-CustomVoice-q8",
-        "qwen3-tts/1.7B-Base-q8",
-        "qwen3-tts/1.7B-VoiceDesign-q8"
-      ],
-      "measured_on": "2026-11-23",
-      "files": 37,
-      "bytes": 7189353189,
-      "GB": 7.189353,
-      "allocated_bytes": 7189463040,
-      "note": "Three entries, stored pre-quantized (services/tts/save_q8.py, 8-bit weights, group 32); the speech tokenizer is one file hard-linked into each variant. The BF16 originals (12.22 GB) are only needed to rebuild them."
-    },
-    "elephant-1": {
-      "relative_paths": [
-        "elephant-1-mix8"
-      ],
-      "measured_on": "2026-11-18",
-      "files": 16,
-      "bytes": 11073275344,
-      "GB": 11.073275,
-      "note": "Pre-quantized per-class mix (services/decisions/jev/save_mix.py); the official BF16 file is only needed to rebuild it."
-    },
-    "mammoth-1": {
-      "relative_paths": [
-        "mammoth-1-mix8"
-      ],
-      "measured_on": "2026-11-18",
-      "files": 16,
-      "bytes": 29689004742,
-      "GB": 29.689005,
-      "note": "Pre-quantized per-class mix (services/decisions/jev/save_mix.py); the official BF16 shards are only needed to rebuild it."
+      "files": 14,
+      "bytes": 14527646189,
+      "GB": 14.527646,
+      "allocated_bytes": 14527684608
     },
     "minimax-h3-video": {
       "relative_paths": [
         "minimax-h3"
       ],
-      "measured_on": "2026-11-18",
-      "files": 171,
-      "bytes": 58896929573,
-      "GB": 58.89693,
-      "allocated_bytes": 58897289216,
-      "note": "FL2VA + Ref2VA (shared VAEs). The text encoder is a symlink to the H3 Image INT8 file (counted under minimax-h3-image); the BF16 text encoder (62 GB) and BF16 DiTs are not needed."
+      "files": 226,
+      "bytes": 105136546183,
+      "GB": 105.136546,
+      "allocated_bytes": 105137016832
+    },
+    "minimax-h3-video-turbo": {
+      "relative_paths": [
+        "minimax-h3-turbo"
+      ],
+      "files": 60,
+      "bytes": 24694760695,
+      "GB": 24.694761,
+      "allocated_bytes": 24694886400
     }
   },
   "current_directory_inventory_including_comparison_models": {
-    "strata-ad427": {
-      "files": 13,
-      "bytes": 96943638945,
-      "GB": 96.943639,
-      "allocated_bytes": 96943661056
+    "drex-v1.5-q8": {
+      "files": 4,
+      "bytes": 9531710995,
+      "GB": 9.531711,
+      "allocated_bytes": 9531715584
     },
-    "strata-uncensored": {
-      "files": 13,
-      "bytes": 96947183499,
-      "GB": 96.947183,
-      "allocated_bytes": 96951918592
-    },
-    "strata-mtp": {
-      "files": 43,
-      "bytes": 10555684574,
-      "GB": 10.555685,
-      "allocated_bytes": 10555723776
+    "elephant-1-mix8": {
+      "files": 16,
+      "bytes": 11073275344,
+      "GB": 11.073275,
+      "allocated_bytes": 11076726784
     },
     "embeddinggemma-2": {
-      "files": 4,
-      "bytes": 1540321361,
-      "GB": 1.540321,
-      "allocated_bytes": 1540333568
+      "files": 6,
+      "bytes": 1572492341,
+      "GB": 1.572492,
+      "allocated_bytes": 1572511744
     },
-    "qwen3-reranker": {
-      "files": 29,
-      "bytes": 18486562252,
-      "GB": 18.486562,
-      "allocated_bytes": 18492936192
+    "fish-audio-drama-3-8bit": {
+      "files": 20,
+      "bytes": 42177609321,
+      "GB": 42.177609,
+      "allocated_bytes": 42177646592
     },
-    "whisper-large-v3-mlx": {
-      "files": 4,
-      "bytes": 3083522487,
-      "GB": 3.083522,
-      "allocated_bytes": 3083534336
+    "joey-1": {
+      "files": 18,
+      "bytes": 5465203405,
+      "GB": 5.465203,
+      "allocated_bytes": 5465247744
     },
-    "qwen3-asr-1.7b": {
-      "files": 12,
-      "bytes": 4703114308,
-      "GB": 4.703114,
-      "allocated_bytes": 4703145984
+    "joey-1-mix8": {
+      "files": 18,
+      "bytes": 2434582891,
+      "GB": 2.434583,
+      "allocated_bytes": 2434625536
     },
-    "qwen3-forcedaligner-0.6b": {
-      "files": 10,
-      "bytes": 1840072459,
-      "GB": 1.840072,
-      "allocated_bytes": 1840099328
+    "lora-qwen21-mndf-pixel": {
+      "files": 2,
+      "bytes": 33592028,
+      "GB": 0.033592,
+      "allocated_bytes": 33595392
+    },
+    "lora-qwen21-voxel": {
+      "files": 2,
+      "bytes": 83946250,
+      "GB": 0.083946,
+      "allocated_bytes": 83951616
+    },
+    "mammoth-1-mix8": {
+      "files": 16,
+      "bytes": 29689004742,
+      "GB": 29.689005,
+      "allocated_bytes": 29694365696
+    },
+    "minimax-h3": {
+      "files": 226,
+      "bytes": 105136546183,
+      "GB": 105.136546,
+      "allocated_bytes": 105137016832
     },
     "minimax-h3-image": {
       "files": 5,
       "bytes": 49320267605,
       "GB": 49.320268,
-      "allocated_bytes": 49340702720
+      "allocated_bytes": 49320271872
     },
-    "minimax-h3": {
-      "files": 192,
-      "bytes": 125621855478,
-      "GB": 125.621855,
-      "allocated_bytes": 125622181888
+    "minimax-h3-image-pe": {
+      "files": 23,
+      "bytes": 17937108380,
+      "GB": 17.937108,
+      "allocated_bytes": 17937170432
+    },
+    "minimax-h3-turbo": {
+      "files": 60,
+      "bytes": 24694760695,
+      "GB": 24.694761,
+      "allocated_bytes": 24694886400
+    },
+    "minimax-h3-vae-pr80-ab-codex": {
+      "files": 2,
+      "bytes": 2971,
+      "GB": 3e-06,
+      "allocated_bytes": 8192
+    },
+    "pplx-decider-flash-mix8": {
+      "files": 33,
+      "bytes": 6294239339,
+      "GB": 6.294239,
+      "allocated_bytes": 6294323200
+    },
+    "qwen-image-2.1": {
+      "files": 49,
+      "bytes": 26849297032,
+      "GB": 26.849297,
+      "allocated_bytes": 26849411072
+    },
+    "qwen3-asr-1.7b-q8": {
+      "files": 11,
+      "bytes": 2651587455,
+      "GB": 2.651587,
+      "allocated_bytes": 2651619328
+    },
+    "qwen3-embedding": {
+      "files": 38,
+      "bytes": 17159757558,
+      "GB": 17.159758,
+      "allocated_bytes": 17159856128
+    },
+    "qwen3-forcedaligner-0.6b-q8": {
+      "files": 11,
+      "bytes": 1041110893,
+      "GB": 1.041111,
+      "allocated_bytes": 1041145856
+    },
+    "qwen3-reranker": {
+      "files": 27,
+      "bytes": 13841192509,
+      "GB": 13.841193,
+      "allocated_bytes": 13841272832
+    },
+    "qwen3-tts": {
+      "files": 37,
+      "bytes": 7189353189,
+      "GB": 7.189353,
+      "allocated_bytes": 7189463040
+    },
+    "strata-ad427": {
+      "files": 14,
+      "bytes": 96943638945,
+      "GB": 96.943639,
+      "allocated_bytes": 96943661056
+    },
+    "strata-mtp": {
+      "files": 9,
+      "bytes": 889474772,
+      "GB": 0.889475,
+      "allocated_bytes": 889483264
+    },
+    "strata-ud-q4kxl": {
+      "files": 15,
+      "bytes": 112859330406,
+      "GB": 112.85933,
+      "allocated_bytes": 112859357184
+    },
+    "voyage-4-nano": {
+      "files": 20,
+      "bytes": 708666999,
+      "GB": 0.708667,
+      "allocated_bytes": 708710400
+    },
+    "whisper-large-v3-q8": {
+      "files": 3,
+      "bytes": 2291261640,
+      "GB": 2.291262,
+      "allocated_bytes": 2291269632
+    },
+    "z-image-turbo": {
+      "files": 14,
+      "bytes": 14527646189,
+      "GB": 14.527646,
+      "allocated_bytes": 14527684608
     }
   },
-  "shared_files": "Do not add text-only embeddings to multimodal, or add the two video serving modes. The two Strata models share one Q2_0 MTP GGUF plus draft vocabulary."
+  "shared_files": "Do not add text-only embeddings to multimodal, or add the two video serving modes. The two Strata models share one Q2_0 MTP GGUF plus draft vocabulary.",
+  "archived_evicted_locally": {
+    "qwen3-tts-1.7B-Base-bf16": {
+      "GB": 4.544,
+      "files": 42
+    },
+    "whisper-large-v3-mlx": {
+      "GB": 3.084,
+      "files": 4
+    },
+    "qwen3-forcedaligner-0.6b": {
+      "GB": 1.84,
+      "files": 10
+    },
+    "strata-uncensored": {
+      "GB": 96.947,
+      "files": 13
+    },
+    "qwen3-tts-1.7B-VoiceDesign-bf16": {
+      "GB": 4.52,
+      "files": 42
+    },
+    "qwen-image-2.1-turbo-bf16": {
+      "GB": 32.452,
+      "files": 58
+    },
+    "qwen3-tts-1.7B-CustomVoice-bf16": {
+      "GB": 4.52,
+      "files": 42
+    },
+    "qwen3-asr-1.7b": {
+      "GB": 4.703,
+      "files": 12
+    }
+  }
 }
