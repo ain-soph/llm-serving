@@ -21,9 +21,9 @@
 | 决策 | `elephant-1` | MLX 移植 + 官方 OneJev | 按层类：W8A8，in_proj_z 用 8-bit 只量化权重；预量化存盘、零拷贝 | 短请求 0.078–0.084 s；16.3K token 3.16 s | wired 峰值 +8730 MiB | 11.07 GB⁵ |
 | 决策 | `mammoth-1` | 同上，27B | 按层类：W8A8，out_proj 用 8-bit 只量化权重；预量化存盘、零拷贝 | 短请求 0.20–0.21 s；16.3K token 8.9 s | wired 峰值 +27458 MiB（不能与聊天模型共存） | 29.69 GB⁵ |
 | 语音合成 | `qwen3-tts`／`-clone`／`-design` | mlx-audio fork | 8 位权重（W8A16，group 32，预量化、零拷贝），BF16 激活 | 首段音频 0.08–0.14 s；实时率 0.17／0.18／0.17（进程内，BF16 0.21–0.22） | wired +3554／+4876／+3853 MiB（16 句） | 7.19 GB⁴ |
-| 语音转写 | `qwen3-asr-1.7b`（默认） | mlx-qwen3-asr fork | BF16 文件／FP16 运行 | en100 c1 15.4 s；WER 1.48% | wired +6.6 GB | 6.543 GB |
-| 语音转写 | `qwen3-asr-1.7b-int8` | 同上 | 解码器 + lm_head W8A16（加载时量化） | en100 11.8 s（进程内，默认入口同条件 15.1 s）；WER 1.48% | MLX 峰值 3.78 GB（默认 4.59） | 同上 |
-| 语音转写 | `whisper-large-v3` | mlx-whisper fork | FP16 | en100 c1 22.8 s；WER 2.80% | wired +4.5 GB | 3.084 GB |
+| 决策 | `drex-v1.5` | nace-ai llama.cpp 分支（未改） | Q8_0 GGUF（官方发布），KV F16 | 短请求 120–270 ms；12.8K token 4.3 s | wired 峰值 +11.0 GiB（`-ub 512`；2048 时 +12.5） | 9.5 GB |
+| 语音转写 | `qwen3-asr-1.7b`（默认） | mlx-audio fork + 自写引擎（`--fast --batch 8`） | 8 位存盘（W8A16，组 32，零拷贝），FP16 激活，KV FP16 | en100 11.0 s（进程内）／12.3 s（HTTP）；long_en（15.8 min）4.26 s；WER 1.48% | wired +4011–4462 MiB；MLX 峰值 4.59 GB | 2.65 + 1.04 GB（含对齐器） |
+| 语音转写 | `whisper-large-v3` | mlx-whisper fork | 8 位存盘（解码器、交叉 k/v、词嵌入 W8A16），编码器 FP16 | en100 19.1 s（进程内）；decode 230 tok/s；WER 2.80% | wired +3198 MiB（FP16 时 +4545） | 2.29 GB |
 | 图片 | `minimax-h3-image` | h3-image-mlx fork | INT8 ConvRot（W8A8） | DiT 去噪 1024² 2.00 s；2048² 8.14 s；4096² 56.4 s（6 步） | DiT wired +1733／+2374 MiB | 49.32 GB |
 | 图片 | `qwen-image-2.1-turbo` | mflux fork | W8A8 DiT + W8A16 文本编码器 | 1024² 7.8 s（经 API，中位）；2048² 约 43 s（8 步，融合前） | 生成期 wired 6.7–9.0 GB | 26.80 GB¹ |
 | 图片 | `qwen-image-2.1` | mflux fork | 同上 | 1024² 约 28 s（40 步） | 同上 | 同上¹ |
@@ -34,6 +34,16 @@
 ¹ 三个 Qwen-Image 入口共用一套文件。² FL2VA 与 Ref2VA 两个检查点合计，共享 VAE；文本编码器链接到 H3 图片的 INT8 文件，不另计。³ 2026-11-18 起一个入口（原 FP16 文本、`-multimodal`、`-int8` 合并），预量化副本由 `services/decisions/decider/save_mix.py` 生成，官方检查点（9.63 GB）已删。⁴ 三个变体合计，语音编解码器硬链接成一份；2026-11-23 起为 `services/tts/save_q8.py` 写出的 8 位副本，官方 BF16（12.22 GB）只在重新生成时需要。⁵ 2026-11-18 起每个模型一个入口：按层类量化的结果由 `services/decisions/jev/save_mix.py` 存盘（与加载时量化逐位相同），官方 BF16 检查点（18.84／54.73 GB）已删。⁶ 2026-11-18（pa1b）起每个尺寸一个入口：原精确入口与 `-int8` 入口合并为 `shared/common/qwen3_w8a8.py mix` 写出的预量化混合副本（`mix.json`，零拷贝），见 [w8a8.md](w8a8.md)；下文 11-16／11-17 的 `-int8` 数据保留作记录。
 
 ## 文本：Qwen3.8 Flash-Next（Strata）
+
+**对话缓存用上游默认，2026-11-23**。去掉自设的 `--conversation-cache-mib 1024`，引擎按空闲内存自动定大小（现网 8192 MiB）。之前快照超过 1 GiB（约 35–40K token 以上）的会话既不停放也不溢出到 SSD；现在都能停放和溢出。同场对比（独占）：
+
+| 指标 | 1024 MiB（旧） | 上游默认（测试时自动取 6912 MiB） |
+| --- | ---: | ---: |
+| 108K token 会话被挤出后续问 TTFT | 40.4 s（重读） | 0.85 s（SSD 读回 414 ms；8192 MiB 时 0.72 s） |
+| 单路 decode tok/s | 151.87 | 152.74（+0.6%） |
+| prefill 32K／131K tok/s | 2,729／2,682 | 2,733／2,678 |
+
+- 固定输出 43/43 相同，wired 不变。代价：缓存装满时停放的会话占约 6.7–7.4 GiB 主机内存；此时同时生成 Z-Image，第二张图最多慢 21%，没有失败。
 
 **现行：Strata `53a6becb8`，2026-11-23**。fork `serving` 改为上游 main `73d4f4196`（v0.2.20+13）+ 我们的提交（rebase），配置不变。与 `82d63e19e` 同场对比（独占，AtomicChat AD-4.27，主体约 3.57 bpw、MTP Q2_0，INT8 KV，262144 ctx × 2）：温度 0 的 36 个固定输出逐字节相同；单路 decode 151.63 → 151.78 tok/s，2 并发合计 155.1 → 154.1，prefill 26–28K 2,758 → 2,747、104–116K 2,696 → 2,687 tok/s，短提示 TTFT 0.146 → 0.134 s，wired 峰值增量 66,330 → 66,338 MiB，都在噪声内。不带采样字段的请求按上游改为贪心解码（d35353903）。下面是 `82d63e19e` 的完整实测。
 
@@ -499,6 +509,18 @@
 
 ## 语音转写
 
+**现状（2026-11-18 起 8 位存盘，2026-11-22 起 Qwen3-ASR 运行时为 mlx-audio）**。两个入口都用预量化的 8 位权重（W8A16，组 32，零拷贝映射），`-int8` 入口已并入默认入口。
+
+| 改动 | 对照 | 前 → 后 | 正确性 |
+| --- | --- | --- | --- |
+| Qwen3-ASR 全部线性层、lm_head、词嵌入 W8A16 存盘 | FP16，进程内 | 快 1.27–1.31×；MLX 峰值 4.59 → 3.23 GB | WER／CER 不变 |
+| Qwen3-ASR 换 mlx-audio + 自写快速路径（单段 prefill、流水线贪心） | mlx-qwen3-asr，进程内，c1 | 短集快 4.5–7.6%（en100 11.92 → 11.01 s） | en／zh 100/100 逐字相同，mix 59/60 |
+| 同上 + 长音频分块批处理（`--batch 8`） | 同上，12–16 min 音频 | long_en 12.40 → 4.26 s（2.91×），long_zh 6.54 → 2.44 s（2.67×） | WER 0.76 → 0.63，CER 1.43 → 1.14（分块不同）；词时间戳 p95 ≤ 62 ms |
+| Whisper 解码器、交叉 k/v、词嵌入 W8A16 存盘 | FP16 | 快 2–3.5%；wired +4545 → +3198 MiB（容量 6000 → 4500） | 错误率不变 |
+
+- mlx-audio 的代价：冷启动到 `/health` 0.58 → 1.63 s，进程 RSS 多约 0.3 GB。Qwen3-ASR decode 311–322 tok/s（单行），prefill 6,300–15,100 tok/s（97／371 token 提示）。
+- 下表和后面的小节是 FP16 时期的记录。
+
 **2026-11-17 复查与 SOV 上线**（Nemotron、SOV 已于 2026-11-18 下线，下表保留作记录）（AS；独占 GPU、直连 HTTP、c1 墙钟，含音频解码；不含加载）
 
 | 入口 | 适用 | en100 WER | zh100 CER | mix60 MER | long_en WER | long_zh CER | en100 c1 | long_en 用时 | wired 峰值 | 磁盘 |
@@ -663,6 +685,17 @@ M5 Ultra 独占 GPU，六步、INT8 ConvRot、流式零拷贝，缓存预算 800
 - 缓存体积（磁盘，不占 GPU 或进程内存）：文生图 0.22 MB／条；编辑的文本输出约 10 MB／张 1024² 参考图；参考图潜变量 0.38 MB／张 1024²。
 - prefill（文本编码器单次前向，含子进程启动，并发 1）：1047 token 1.11 s ≈ 940 tok/s；4152 token 3.8 s ≈ 1090 tok/s；16595 token 16.6 s ≈ 1000 tok/s。
   decode 与 KV cache 不适用（扩散模型；文本编码器不跨步保留 KV，激活 BF16）。权重量化不变：DiT 与文本编码器 INT8 ConvRot W8A8（约 8.3–8.4 bpw），VAE FP16。
+
+**2026-11-23：可选入口 `minimax-h3-image-pe`（官方提示词扩写）**。`mlx_vlm.server` 直接跑官方 MiniMax-H3-Image-PE（NVFP4 约 4.5 bit／权重，BF16 激活与 KV，effort low），出图入口与 `minimax-h3-image` 相同。
+
+| 请求（经 :8080，独占） | 总耗时 | 扩写 | 出图 |
+| --- | ---: | ---: | ---: |
+| 文生图 1024²，热 | 25.6 s | 22.2 s（874 token，decode 41.8 tok/s） | 3.3 s |
+| 文生图 `size=auto`（扩写给出 1568×672） | 17.2 s | 14.0 s | 3.3 s |
+| 编辑 1 张图 1024² | 41.7 s | 34.1 s | 7.5 s |
+
+- 收益（官方 Qwen-Image-Bench 23 条提示词，同为 4 MP 画布）：每图总分 low +7.75、medium +7.50、xhigh +8.76（Holm 校正后 p ≤ 0.016）；用聊天模型扩写只有 +2.86，不显著。
+- 代价：扩写阶段 wired 峰值 26.5 GB，容量 30000，会卸下 Flash-Next，之后聊天模型重载约 13 s。普通入口不变，输出逐字节相同。
 
 ## 图片：Qwen-Image-2.1
 
