@@ -16,7 +16,7 @@
 | 类别 | 模型 ID | 后端 | 说明 |
 | --- | --- | --- | --- |
 | 文本／视觉 | `qwen3.8-flash-next`、`-uncensored`¹ | [Strata fork](https://github.com/ain-soph/Strata/tree/serving) | 262k 上下文 × 2 路，MTP 投机解码，图片输入 |
-| 文本／视觉 | `hy4-flash` | [Strata fork](https://github.com/ain-soph/Strata/tree/serving)（Hy4 Metal 引擎） | 腾讯 Hy4-Flash，备用入口：按需加载，与聊天模型分时切换（约 14 s）；128k 上下文，DFly2 投机解码，图片输入，一次一个请求 |
+| 文本／视觉 | `hy4-flash` | [Strata fork](https://github.com/ain-soph/Strata/tree/serving)（Hy4 Metal 引擎） | 腾讯 Hy4-Flash，按需入口：与聊天模型分时切换（约 10–14 s）；128k 上下文，DFly2 投机解码，图片输入，一次一个请求 |
 | 嵌入 | `embeddinggemma-2`、`-multimodal` | 文本 MLX，媒体 llama.cpp | 文本常驻；多模态支持图片、音频、视频 |
 | 嵌入 | `qwen3-embedding-0.6b`／`4b`／`8b`、`voyage-4-nano` | MLX，自写服务 | 32K 输入 |
 | 重排 | `qwen3-reranker-0.6b`／`4b`／`8b` | MLX，自写服务 | `/v1/rerank`；RAG 用 `4b` |

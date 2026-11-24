@@ -37,7 +37,7 @@
 | --- | --- | --- | --- | ---: | --- | --- | :---: |
 | `qwen3.8-flash-next` **（默认）** | 聊天、视觉、工具，262K × 2 路 | Strata Metal | AD-4.27 混合（专家 IQ4_NL／IQ3_S／IQ2_S，dense Q8_0，主体约 3.57 bpw），MTP Q2_0，KV INT8 | 69,500 | +68,468–68,489 MiB（11-24） | 常驻（预加载） | — |
 | `qwen3.8-flash-next-uncensored` | 同上，去审查权重 | 同上 | 同上 | 69,500 | +65,684 MiB（11-22，chunk 2048 之前） | 按需，**归档**（90.3 GiB） | 否（互斥） |
-| `hy4-flash` | 备用聊天、视觉，128K，一次一个请求 | Strata Hy4 Metal | SQ-64（路由专家约 3.0 bpw）+ Engram Q8（页缓存，不 wired），KV fp16 MLA | 71,000 | +68,037 MiB（服务峰值，11-23） | 按需 | **否**（分时切换） |
+| `hy4-flash` | 按需聊天、视觉，128K，一次一个请求 | Strata Hy4 Metal | SQ-64（路由专家约 3.0 bpw）+ Engram Q8（页缓存，不 wired），KV fp16 MLA | 71,000 | +68,037 MiB（服务峰值，11-23） | 按需 | **否**（分时切换） |
 | `embeddinggemma-2` | 文本嵌入（RAG） | MLX | BF16 权重，FP32 激活 | 不占池（预留 3,160） | +2,680 MiB | **常驻** | 是 |
 | `embeddinggemma-2-multimodal` | 图片／音频／视频嵌入 | llama.cpp | BF16 | 3,500 | +2,996 MiB | 按需 | 是 |
 | `qwen3-embedding-0.6b`／`4b`／`8b` | 文本嵌入，32K 输入 | MLX | FP16／FP16／按层类 W8A8 | 3,500／12,000／10,500 | +2,729／+11,218／9,983 MiB（32K 输入） | 按需 | 是 |

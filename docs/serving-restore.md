@@ -27,7 +27,7 @@ LaunchAgent 模板都已在运行位置。每台机器不同的只有几样，�
 | `llm-serving/platform/gateway/Caddyfile` | 仓库 | 原位 | `{$LLM_SERVING}`、`{$LLM_TRUSTED_PROXY}`，Caddy 用 `--envfile .local/serving.env` 读取 |
 | `llm-serving/.local/serving.env` | 取值文件 | 生成（0600） | `LLM_SERVING`、`LLM_MODELS`、`STRATA_RELEASE`、`HY4_RELEASE`、`LLM_TRUSTED_PROXY`、`H3_VIDEO_SHARE_BASE`、`H3_VIDEO_FETCH_HOSTS` |
 | `llm-serving/services/text/strata/configs/strata-{ad427,uncensored}-c262k-p2-compact.json` | `*.json.in` | 模板 | Strata 读 JSON 不展开环境变量，所以仍渲染 |
-| `llm-serving/services/text/hy4-flash/configs/hy4-flash-sq64-c128k.json` | `*.json.in` | 模板 | 备用入口 `hy4-flash` 的引擎配置（同上原因） |
+| `llm-serving/services/text/hy4-flash/configs/hy4-flash-sq64-c128k.json` | `*.json.in` | 模板 | 按需入口 `hy4-flash` 的引擎配置（同上原因） |
 | `Library/LaunchAgents/com.local.{llama-server,llm-gateway,decisions,h3-video-files,health}.plist` | `platform/launchd/*.plist.in` | 模板 | 登录时启动 llama-swap、网关、`/v1/decisions` 翻译服务（:8095）、只读媒体服务（:8090）、每 10 分钟健康检查 |
 | `com.local.gpu-lock-watchdog.plist` | `platform/launchd/` | 只 `--render` | 按用户决定（2026-11-15）停用，不写进 `~/Library/LaunchAgents` |
 | `llm-serving/platform/llama-swap/.api_key` | 无 | 安装时生成 | 不存在时生成随机 key（mode 0600）；已存在绝不覆盖（只把权限收紧到 0600）；被忽略，`privacy_check` 拒收 |

@@ -1,4 +1,4 @@
-# Tencent Hy4-Flash: on-demand backup chat entry (user 2026-11-23: "Hy4重新下载吧", deploy as a switchable backup;
+# Tencent Hy4-Flash: on-demand chat entry (user 2026-11-23: "Hy4重新下载吧", deploy as a switchable entry;
 # the default stays qwen3.8-flash-next). Strata's Hy4 Metal runner (strata-hy4-metal from ain-soph/Strata serving,
 # built by engine/src/hy4flash/metal/build_mac.sh into ${env.HY4_RELEASE}/build-hy4/bin) behind that release's server.py;
 # engine config services/text/hy4-flash/configs/hy4-flash-sq64-c128k.json(.in): weights strata-engine/Hy4-Flash-Strata
