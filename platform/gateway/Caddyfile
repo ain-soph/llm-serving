@@ -13,6 +13,10 @@
 # Image requests go straight to llama-swap (2026-11-16): the size router (com.local.image-router) and the exclusive
 # image target were retired at the user's request — alternating chat and 4096^2 images beside Flash-Next costs ~3 s on the
 # next chat (page-cache churn), less than reloading the chat model (~26 s). Retired files: gateway/retired/.
+# Logs (2026-11-24): logs/caddy.log is Caddy's own runtime log at WARN (start/stop, aborted streams, dial errors),
+# not an access log. One JSON line per request (status, duration, client_ip, headers with Authorization/Cookie redacted)
+# goes to logs/access.log; before 2026-11-24 the gateway had no access log at all (SWAG's nginx access.log on the Mac
+# mini only sees the requests that come through the public domain).
 {
 	admin off
 	auto_https off
@@ -58,6 +62,14 @@
 }
 
 :8080 {
+	log {
+		output file {$LLM_SERVING}/platform/gateway/logs/access.log {
+			roll_size 50MiB
+			roll_keep 5
+			roll_keep_for 720h
+		}
+		format json
+	}
 	@video_render {
 		method POST
 		path /v1/videos /v1/videos/*

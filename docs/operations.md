@@ -16,5 +16,6 @@
 - **健康检查只写日志**：每轮一行 JSON 追加到 `logs/health/health.jsonl`（按天轮转，保留 30 天），`logs/health/STATUS` 是最近一轮摘要
   （第一行 `OK|WARN|FAIL <时间>`）。不加载会卸下聊天模型的模型，只用标准库。门限：磁盘 < 60 GiB WARN、< 20 GiB FAIL；
   `kern.memorystatus_level` < 15 WARN、< 8 FAIL。
+- **网关日志**（`platform/gateway/logs/`）：`access.log` 每个经 :8080 的请求一行 JSON（`status`、`duration`、`request.client_ip`、`uri`、请求头，`Authorization`/`Cookie` 由 Caddy 脱敏；50 MiB 轮转，留 5 份、30 天）；`caddy.log` 只是 Caddy 自身的 WARN 级运行日志（启动/退出、中断的流、连不上 llama-swap），**不是**访问日志。2026-11-24 之前网关没有访问日志。
 - **多 agent GPU 锁**：`bin/regress` 先用 `bin/gpu-lock` 占满整个 GPU 池再跑（`--no-lock` 跳过，调用方已持锁时用）；健康检查报告占锁过久的份额（`.locks/holders`）。
   规则见 [gpu-lock.md](gpu-lock.md)。已归档到另一台机器、本机缺失的入口记为 `SKIP(archived)`，不发请求（不会触发 `bin/archive-restore` 拷回权重）。
