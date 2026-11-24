@@ -26,7 +26,7 @@
   必须有会唤醒你的东西。编排者也不主动查，靠完成通知。
 - **`~/llm-serving` 是 git 工作树，工作树 = 线上**：在里面永远不要执行 `git clean`（任何参数）、`git stash -u/-a`、`git checkout .`／`git restore .`、
   `git reset --hard`、`git switch`（被忽略的权重链接、venv、日志、密钥、fork 子仓库没有别的保护）。只提交自己的路径
-  （`git commit -o -- <paths>`，不用 `git add -A`／`-f`）；未上线的开发用 `git worktree add <临时目录> -b <topic>`；推送前问用户。
+  （`git commit -o -- <paths>`，不用 `git add -A`／`-f`）；未上线的开发用 `git worktree add <临时目录> -b <topic>`；推送：`main` 快进推到用户自己的 fork ain-soph/llm-serving 是例行操作，不用问用户（用户 2026-11-23）；推前隐私检查 0 失败，不 force-push，不推其他 remote。
 - **上下文卫生**（不靠自动压缩）：长任务在每个阶段边界把进度写进运行目录下的 checkpoint 文件（状态、数字、commit、下一步）。
   subagent 上下文到约 300k token 以上、又要进入长等待或新阶段时，先写 checkpoint 再汇报；编排者另起新 agent 读 checkpoint
   接着做，不让一个巨大的 agent 一直挂着。额度 3% 交接也从这些 checkpoint 出发。
