@@ -13,7 +13,8 @@ Extension fields: seed, steps, negative_prompt + guidance (base only, true CFG),
 side each reference is resized to; default 1024 for 1-3 references, smaller for more, see reference_side),
 prompt_enhance (off | mflux: the text encoder rewrites | llm: the chat model rewrites with the official Qwen system
 prompts; the result is returned as revised_prompt, and with size auto its aspect ratio picks the canvas),
-auto_mask (edits: a phrase; the text encoder locates it and only that box is repainted).
+auto_mask (edits: a phrase; the text encoder locates it and only that box is repainted), lora + lora_scale (an
+adapter registered in QWEN_IMAGE_LORAS by name, default scale 1.0, applied to this request only).
 background="transparent" uses the official RGBA prompt template and returns RGBA PNG/WebP.
 mask follows OpenAI: fully transparent pixels of the mask are repainted, the rest of image[0] is kept.
 
@@ -57,6 +58,135 @@ log = logging.getLogger("qwen-image-server")
 
 class BadRequest(Exception):
     pass
+
+
+# ---- LoRA adapters (request field `lora`, 2026-11-23) ------------------------------------------------------------
+# The server only applies adapters registered by name in QWEN_IMAGE_LORAS ("name=/path/file.safetensors,..."); a
+# request never names a file. An adapter is applied for one generation and removed afterwards, so requests without
+# `lora` run the unchanged W8A8 path (fused q/k/v and gate/up, byte-identical output). While active, each targeted
+# projection runs as LoRAProjection: the same int8 convrot product (W8A8Linear.__call__) plus the low-rank update
+# scale * (x A^T) B^T in the activation dtype, as mflux's unbaked LoRALinear computes it. The module keeps its
+# identity and parameter names (weight, scale), so zero-copy streaming (MFLUX_ZERO_COPY_STREAM) is unaffected.
+LORA_TARGETS = ("attn.to_q", "attn.to_k", "attn.to_v", "attn.to_out.0", "img_mlp.gate_layer", "img_mlp.proj",
+                "img_mlp.out")
+LORA_KEY = None  # compiled lazily (re)
+
+
+def lora_registry():
+    out = {}
+    for item in filter(None, (s.strip() for s in os.environ.get("QWEN_IMAGE_LORAS", "").split(","))):
+        name, _, path = item.partition("=")
+        if not name or not path:
+            raise SystemExit(f"QWEN_IMAGE_LORAS: expected name=path, got {item!r}")
+        out[name.strip()] = Path(path.strip())
+    return out
+
+
+def read_lora(path):
+    """{target module path: (A (r, in), B (out, r), alpha / r)} of a diffusers / PEFT / DiffSynth Qwen-Image LoRA.
+    Every tensor must map to one of LORA_TARGETS; anything else (DoRA, LoKr, other layers) is refused."""
+    import re
+    global LORA_KEY
+    if LORA_KEY is None:
+        names = "|".join(re.escape(t) for t in LORA_TARGETS)
+        LORA_KEY = re.compile(rf"^(?:transformer\.|diffusion_model\.)?transformer_blocks\.(\d+)\.({names})"
+                              r"\.(lora_A|lora_B|alpha)(?:\.default)?(?:\.weight)?$")
+    tensors = mx.load(str(path))
+    meta = {}
+    try:
+        from safetensors import safe_open
+        with safe_open(str(path), "np") as f:
+            meta = f.metadata() or {}
+    except Exception:
+        pass
+    peft_alpha = None
+    if meta.get("lora_adapter_metadata"):
+        cfg = json.loads(meta["lora_adapter_metadata"])
+        a, r = cfg.get("transformer.lora_alpha", cfg.get("lora_alpha")), cfg.get("transformer.r", cfg.get("r"))
+        if a is not None and r:
+            peft_alpha = float(a)
+    parts = {}
+    for key, value in tensors.items():
+        m = LORA_KEY.match(key)
+        if m is None:
+            raise ValueError(f"{path.name}: unsupported LoRA tensor {key}")
+        parts.setdefault(f"transformer_blocks.{m.group(1)}.{m.group(2)}", {})[m.group(3)] = value
+    out = {}
+    for target, p in parts.items():
+        if "lora_A" not in p or "lora_B" not in p:
+            raise ValueError(f"{path.name}: {target} lacks lora_A or lora_B")
+        rank = p["lora_A"].shape[0]
+        alpha = float(p["alpha"].item()) if "alpha" in p else peft_alpha if peft_alpha is not None else rank
+        out[target] = (p["lora_A"].astype(mx.bfloat16), p["lora_B"].astype(mx.bfloat16), alpha / rank)
+    return out
+
+
+def _lora_projection_class():
+    from mlx import nn
+    from mflux.models.common.quantization.w8a8 import W8A8Linear
+
+    class LoRAProjection(nn.Module):
+        """A W8A8Linear (same parameters) with a low-rank update; not a W8A8Linear subclass, so the fused q/k/v and
+        gate/up paths, which would skip the update, use the per-projection call instead."""
+
+        def __call__(self, x):
+            y = W8A8Linear.__call__(self, x)
+            update = (x @ self.lora_A.astype(x.dtype).T) @ self.lora_B.astype(x.dtype).T
+            return y + (self.lora_scale * update).astype(y.dtype)
+    return LoRAProjection, W8A8Linear
+
+
+class LoRAState:
+    """The adapter applied to the transformer right now (at most one), with the modules it changed."""
+
+    def __init__(self, transformer):
+        self.transformer = transformer
+        self.registry = lora_registry()
+        self.loaded = {}
+        self.active = None
+        self.modules = []
+        self.cls, self.base = _lora_projection_class()
+
+    def parse(self, req):
+        name, scale = req.get("lora"), req.get("lora_scale")
+        if name in (None, "", "none"):
+            if scale not in (None, ""):
+                raise BadRequest("lora_scale needs lora")
+            return None
+        if not isinstance(name, str) or name not in self.registry:
+            raise BadRequest(f"unknown lora {name!r}; available: {', '.join(sorted(self.registry)) or 'none'}")
+        return str(name), parse_float(scale, "lora_scale", 1.0, -2.0, 2.0)
+
+    def apply(self, choice):
+        self.remove()
+        if choice is None:
+            return
+        name, scale = choice
+        if name not in self.loaded:
+            t = time.time()
+            self.loaded[name] = read_lora(self.registry[name])
+            log.info("lora %s: %d projections read in %.2fs", name, len(self.loaded[name]), time.time() - t)
+        modules = dict(self.transformer.named_modules())
+        for target, (a, b, alpha_scale) in self.loaded[name].items():
+            m = modules.get(target)
+            if not isinstance(m, self.base):
+                self.remove()
+                raise BadRequest(f"lora {name}: {target} is not a W8A8 projection of this model")
+            if m.weight.ndim == 2 and a.shape[1] != m.weight.shape[1]:
+                self.remove()
+                raise BadRequest(f"lora {name}: {target} input width {a.shape[1]} != {m.weight.shape[1]}")
+            m.__class__ = self.cls
+            m.lora_A, m.lora_B, m.lora_scale = a, b, alpha_scale * scale
+            self.modules.append(m)
+        self.active = choice
+
+    def remove(self):
+        for m in self.modules:
+            for k in ("lora_A", "lora_B"):
+                m.pop(k, None)
+            m.__dict__.pop("lora_scale", None)
+            m.__class__ = self.base
+        self.modules, self.active = [], None
 
 
 def keep_media(image):
@@ -231,6 +361,7 @@ class Generator:
         config = ModelConfig.qwen_image_21_turbo() if turbo else ModelConfig.qwen_image_21()
         t = time.time()
         self.model = QwenImage21Edit(quantize=quantize, model_path=model_dir, model_config=config)
+        self.lora = LoRAState(self.model.transformer)
         log.info("model ready in %.1fs (%s, q=%s)", time.time() - t, "turbo" if turbo else "base", quantize)
 
     def run(self, req, references=(), mask=None):
@@ -249,6 +380,7 @@ class Generator:
                 raise BadRequest("background=transparent needs output_format png or webp")
             if (req.get("prompt_enhance") or DEFAULT_ENHANCE) == "off":
                 prompt = RGBA_TEMPLATE.format(prompt.strip().rstrip("."))
+        lora = self.lora.parse(req)
         enhance = req.get("prompt_enhance") or DEFAULT_ENHANCE
         if enhance not in PROMPT_ENHANCE:
             raise BadRequest(f"prompt_enhance must be one of {', '.join(PROMPT_ENHANCE)}")
@@ -285,8 +417,15 @@ class Generator:
                 width, height = ratio_size(ratio)
             prompt = RGBA_TEMPLATE.format(revised.rstrip(".")) if background == "transparent" else revised
         rw, rh = render_size(width, height)
-        return self.worker.submit(self._generate, prompt, fmt, fmt_name, background, width, height, rw, rh, n, seed,
-                                  steps, references, mask, kw, enhance, auto_size, revised).result()
+        return self.worker.submit(self._generate_with_lora, lora, prompt, fmt, fmt_name, background, width, height, rw,
+                                  rh, n, seed, steps, references, mask, kw, enhance, auto_size, revised).result()
+
+    def _generate_with_lora(self, lora, *args):
+        self.lora.apply(lora)
+        try:
+            return self._generate(*args)
+        finally:
+            self.lora.remove()
 
     def _generate(self, prompt, fmt, fmt_name, background, width, height, rw, rh, n, seed, steps, references, mask, kw,
                   enhance="off", auto_size=False, revised=None):
@@ -327,8 +466,8 @@ class Generator:
             if revised:
                 item["revised_prompt"] = revised
             data.append(item)
-            log.info("generated %dx%d refs=%d mask=%s seed=%d in %.1fs", width, height, len(references),
-                     mask is not None, seed + i, time.time() - t)
+            log.info("generated %dx%d refs=%d mask=%s seed=%d lora=%s in %.1fs", width, height, len(references),
+                     mask is not None, seed + i, self.lora.active, time.time() - t)
         return {"created": int(time.time()), "output_format": fmt_name, "background": background, "data": data}
 
 

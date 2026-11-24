@@ -33,6 +33,11 @@ Qwen-Image-2.1，提供 OpenAI 兼容的 `/v1/images/generations` 和 `/v1/image
   其他位置可用 `QWEN_IMAGE_SYSTEM_PROMPTS` 指定；聊天地址和模型用 `QWEN_IMAGE_LLM_URL`、`QWEN_IMAGE_LLM_MODEL`。
 - 返回 `revised_prompt`；文生图且 `size=auto` 时按改写给出的宽高比选画布。
 - `auto_mask: "<物体>"`：编辑时由文本编码器定位物体，只重绘它所在的矩形。
+- `lora: "<名字>"` + `lora_scale`（默认 1.0，−2 到 2）：只对这一次生成套用一个 LoRA。名字必须在服务端 `QWEN_IMAGE_LORAS`
+  （`名字=/路径/文件.safetensors,…`）里登记，请求里不能传路径；未登记的名字、非字符串、只给 `lora_scale` 都返回 400。
+  支持 diffusers / PEFT / DiffSynth 格式、只作用于 DiT block 的 `to_q/k/v`、`to_out.0`、`img_mlp` 投影的 LoRA（其他层、DoRA、LoKr 拒绝）。
+  做法：生成前把目标 W8A8 投影换成“W8A8 乘积 + BF16 低秩项”（与 mflux 不烤入的 `LoRALinear` 同样的计算，输出与它逐字节相同），
+  生成后换回；不带 `lora` 的请求走原路径，输出与没有这个功能时逐字节相同。LoRA 文件第一次用时读入（几十 MB），之后留在内存。
 
 ## 权重目录
 
@@ -100,6 +105,7 @@ $PY -m mflux.models.qwen21.weights.qwen21_q8 "$M/base/text_encoder" "$M/te-q8"  
 | `MFLUX_QWEN21_TE_Q8` | `te-q8` | 文本编码器 W8A16（去掉这个变量就改回 BF16 文本编码器） |
 | `MFLUX_QWEN21_VAE_CACHE_MB` | 2048 | VAE 的 MLX 缓存上限 |
 | `QWEN_IMAGE_CACHE_MB`、`QWEN_IMAGE_REF_CACHE_MB` | 6144、2048 | 去噪阶段 MLX 缓存上限（不带／带参考图） |
+| `QWEN_IMAGE_LORAS` | `名字=文件,…` | 可按请求套用的 LoRA（见上 `lora`）；不设 = 不接受 `lora` |
 | `QWEN21_FUSION` | 不设 | 逐元素融合（不设 = 全开，空 = 全关）；输出与不融合逐字节相同 |
 
 VAE 两段条带解码（行数按图宽选）是上游 mflux 自 #1000 起的默认行为，不需要变量；原来的 `MFLUX_QWEN21_VAE_STRIP_FROM=2`、

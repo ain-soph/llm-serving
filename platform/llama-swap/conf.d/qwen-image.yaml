@@ -13,6 +13,13 @@
 # MFLUX_QWEN21_VAE_STRIP_FROM=2 / _BUDGET=16384 settings were the same values and were removed 2026-11-21). Measured wired peak of a whole generation
 # (qwen-image/bench/results/s24-*, s25-*): 1024² ~7 GB, 2048² / 2752x1536 / 2400x1792 8.2-9.0 GB, reference edits: see
 # the report -> capacity 11000 fits beside Flash-Next (71000 + 11000 < pool 83192).
+# LoRA per request (2026-11-23, T4): request fields `lora` (a name registered in QWEN_IMAGE_LORAS, never a path) and
+# `lora_scale` (default 1.0, -2..2). The adapter is applied for that generation only (W8A8 product + bf16 low-rank term,
+# same math as mflux's unbaked LoRALinear) and removed afterwards; requests without `lora` run the unchanged path
+# (byte-identical). Registered: voxel = prithivMLmods/Qwen-Image-2.1-Voxel-Style @b4ccfe93 (Qwen Research License;
+# image-to-image, trigger "Transform the image into a voxel style"); mndf-pixel = handful/mndf-pixel-qwen-image-2.1
+# @876d03a9 (Apache-2.0; trained on Google 3D Tiles renders, whose terms restrict use; personal non-commercial use here).
+# Report: reports/qwen-image.md (LoRA section).
 macros:
   "qwen-image-cmd": >
     ${env.LLM_SERVING}/.venv/bin/python ${env.LLM_SERVING}/services/image/qwen-image/server.py
@@ -31,6 +38,7 @@ models:
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
       - "QWEN_IMAGE_CACHE_MB=6144"
       - "QWEN_IMAGE_REF_CACHE_MB=2048"
+      - "QWEN_IMAGE_LORAS=voxel=${env.LLM_MODELS}/lora-qwen21-voxel/Qwen-Image-2.1-Voxel-Style-3000.safetensors,mndf-pixel=${env.LLM_MODELS}/lora-qwen21-mndf-pixel/pytorch_lora_weights.safetensors"
     capabilities: &qwen-image-caps
       in: [text, image]
       out: [image]
@@ -52,6 +60,7 @@ models:
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
       - "QWEN_IMAGE_CACHE_MB=6144"
       - "QWEN_IMAGE_REF_CACHE_MB=2048"
+      - "QWEN_IMAGE_LORAS=voxel=${env.LLM_MODELS}/lora-qwen21-voxel/Qwen-Image-2.1-Voxel-Style-3000.safetensors,mndf-pixel=${env.LLM_MODELS}/lora-qwen21-mndf-pixel/pytorch_lora_weights.safetensors"
       - "QWEN_IMAGE_DEFAULT_ENHANCE=llm"   # judged better than no rewrite on 32 prompts (reports/qwen-image.md section 8)
     capabilities: *qwen-image-caps
     checkEndpoint: /health
@@ -71,6 +80,7 @@ models:
       - "MFLUX_QWEN21_VAE_CACHE_MB=2048"
       - "QWEN_IMAGE_CACHE_MB=6144"
       - "QWEN_IMAGE_REF_CACHE_MB=2048"
+      - "QWEN_IMAGE_LORAS=voxel=${env.LLM_MODELS}/lora-qwen21-voxel/Qwen-Image-2.1-Voxel-Style-3000.safetensors,mndf-pixel=${env.LLM_MODELS}/lora-qwen21-mndf-pixel/pytorch_lora_weights.safetensors"
     capabilities: *qwen-image-caps
     checkEndpoint: /health
     ttl: 600
