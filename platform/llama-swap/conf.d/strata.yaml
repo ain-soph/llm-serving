@@ -1,5 +1,8 @@
-# Flash-Next via ain-soph/Strata serving at 53a6becb8 (upstream main 73d4f4196 = v0.2.20+13, + our 9 + README; release
-# worktree serving-20261123, 2026-11-23). Upstream defaults kept (user 2026-11-23): a request with no sampling field is decoded
+# Flash-Next via ain-soph/Strata serving at 64091c8e2 (upstream main 73d4f4196 = v0.2.20+13, + our 9 + README + the Metal
+# down+combine dispatch, on by default, and --dump-routing; release worktree serving-20261123b, 2026-11-23; c=1 decode
+# 151.5 -> 153.4 tok/s, outputs byte-identical; rollback: STRATA_METAL_DOWN_COMB=0, or the release serving-20261123 at
+# 53a6becb8 via .local/serving-values.json, see services/text/strata/decode-opt-20261123/deploy/).
+# Upstream defaults kept (user 2026-11-23): a request with no sampling field is decoded
 # greedily with MTP drafts (d35353903; before: the model card's sampling); a 'model' naming another Strata catalogue id gets
 # 404 model_not_found (#6621; our IDs are aliases in the configs); the conversation cache has no --conversation-cache-mib
 # (user 2026-11-23: upstream default, #3493): the engine sizes it once the model is loaded, 40% of the RAM left above 2560 MiB,
