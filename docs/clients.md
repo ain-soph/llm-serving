@@ -6,17 +6,17 @@
 | 客户端 | 功能 | 设置 |
 | --- | --- | --- |
 | Open WebUI | 对话 | OpenAI 连接 → 网关；模型 `qwen3.8-flash-next`，也是管理员设置的默认模型 `DEFAULT_MODELS = qwen3.8-flash-next`（不设时新对话会选模型列表里第一个可见的模型，而视频管道函数 `minimax_h3_video.*` 排在 OpenAI 连接的模型前面）；两个 Flash-Next 模型的高级参数设 `top_k = 20`（Open WebUI 原样转发；服务端看到采样字段后按思考状态补齐其余项，不设则是贪心解码） |
-| Open WebUI | 按需对话模型 | OpenAI 连接的模型列表在两个 Flash-Next 之后加 `hy4-flash`，模型设置名称 “Tencent Hy4 Flash”、`temperature 0.9`、`top_p 1.0`（官方建议）、原生函数调用，能力和工具同 Flash-Next；默认模型和任务模型仍是 Flash-Next。说明写“按需加载，与 Flash-Next 互相切换，切换后第一次请求多等约 10–15 秒” |
-| Open WebUI | 已归档的对话模型 | 权重只在 Mac mini 归档里的入口（目前只有 `qwen3.8-flash-next-uncensored`）在模型设置里标出：名称加 “（已归档：需先从 Mac mini 拷回，本机空间暂不足）”，说明写清请求会先换下 Flash-Next、再自动拷回约 90 GB，拷完后本机须仍剩 100 GiB 以上，否则直接返回 503（错误信息写明缺多少空间和手动拷回命令，Open WebUI 原样转给前端）。空间够了或拷回后改标注 |
+| Open WebUI | 按需对话模型 | OpenAI 连接的模型列表在两个 Flash-Next 之后加 `hy4-flash`，模型设置名称 “Tencent Hy4 Flash”、`temperature 0.9`、`top_p 1.0`（官方建议）、原生函数调用，能力和工具同 Flash-Next；默认模型仍是 Flash-Next，任务模型跟随当前对话模型（见“任务模型”一行）。说明写“按需加载，与 Flash-Next 互相切换，切换后第一次请求多等约 10–15 秒” |
+| Open WebUI | 无审查对话模型 | `qwen3.8-flash-next-uncensored`：名称 “Qwen3.8 Flash Next Uncensored”，说明写“按需加载，与 Flash-Next 互相切换，切换后第一次请求多等约 20–30 秒”。11-24 至 11-26 权重只在 Mac mini 归档里，名称和说明曾标“已归档”；2026-11-26 首次请求时由 `bin/archive-restore` 拷回本机（按清单校验），标注已去掉。名称和说明的唯一来源是 `clients/open-webui/set_default_model.py` 的 `LABELS`（`labels` 模式重写）；以后再归档、本机缺副本时，在那里改标注再跑 |
 | Open WebUI | 朗读（TTS） | 引擎 OpenAI，地址网关，模型 `qwen3-tts`，音色 `vivian` |
 | Open WebUI | 语音转文字 | 引擎 OpenAI，模型 `qwen3-asr-1.7b`（默认；中文、中英混合、长音频）；另有 `whisper-large-v3`（多语种，词级时间戳） |
 | Open WebUI | 出图／编辑 | 图片连接 → 网关；默认 `qwen-image-2.1-turbo`，可选 `-turbo-pe`、`qwen-image-2.1`、`minimax-h3-image`、`minimax-h3-image-pe`（官方提示词扩写，多 15–30 s；只是加进图片连接的模型列表，默认不变；`-pe-expander` 是内部模型，不列出） |
 | Open WebUI | 检索 | 嵌入 `embeddinggemma-2`；混合检索 + 重排 `qwen3-reranker-4b`（TOP_K 20 → 6） |
 | Open WebUI | 图片型 PDF | `PDF_EXTRACT_IMAGES=true`：上传扫描件／图片型 PDF 时对页内图片做 OCR（Open WebUI 自带 RapidOCR，不经网关）。2026-11-23 端到端：4 行中英文发票 2.0 s 识别正确 |
-| Open WebUI | 任务模型（标题、标签、追问） | `TASK_MODEL_EXTERNAL = qwen3.8-flash-next`，`TASK_MODEL_PARAMS = {"chat_template_kwargs": {"enable_thinking": false}, "max_tokens": 1000}`（关思考，避免标题生成等待长推理）。2026-11-23 端到端：标题生成 200，0.4 s；返回的是 JSON 串 `{"title": …}`，Open WebUI 自己解析 |
+| Open WebUI | 任务模型（标题、标签、追问） | `TASK_MODEL_EXTERNAL` 为空 = 用当前对话模型（2026-11-26 起；11-23 至 11-26 固定为 `qwen3.8-flash-next`，两个 Flash-Next 不能同驻，uncensored / hy4-flash 对话每轮回复后都被换成 censored 版做追问/标题/标签，下一轮再换回；`clients/open-webui/set_task_model.py`，视频管道 v1.2.1 对任务请求直接返回空，不渲染）；`TASK_MODEL_PARAMS = {"chat_template_kwargs": {"enable_thinking": false}, "max_tokens": 1000}`（关思考，避免标题生成等待长推理）。2026-11-23 端到端：标题生成 200，0.4 s；返回的是 JSON 串 `{"title": …}`，Open WebUI 自己解析 |
 | LobeChat | 对话、出图、TTS、ASR | 自定义 OpenAI 兼容提供方指向网关，按类型添加模型 ID（图片、`qwen3-tts`、`qwen3-tts-design`）；`minimax-h3-image-pe` 是一行 image 类型，参数同 `minimax-h3-image`，显示名注明“官方提示词扩写，较慢” |
 | LobeChat | 按需对话模型 | 同一提供方加 chat 类型 `hy4-flash`（显示名 “Tencent Hy4 Flash”），能力：视觉、函数调用、推理，上下文 131072；说明同 Open WebUI；默认模型仍是 `qwen3.8-flash-next` |
-| LobeChat | 已归档的对话模型 | `qwen3.8-flash-next-uncensored` 的 `ai_models` 行设显示名 “Qwen3.8 Flash Next Uncensored（已归档：需先从 Mac mini 拷回，本机空间暂不足）” 和同样的说明（行里的显示名优先于 `VLLM_MODEL_LIST` 里的名字）。拷回后去掉标注 |
+| LobeChat | 已归档的对话模型 | `qwen3.8-flash-next-uncensored` 的 `ai_models` 行设显示名 “Qwen3.8 Flash Next Uncensored（已归档：需先从 Mac mini 拷回，本机空间暂不足）” 和同样的说明（行里的显示名优先于 `VLLM_MODEL_LIST` 里的名字）。权重 2026-11-26 已拷回，这一行的标注待去掉（改成与 Open WebUI 相同的名称和说明；需用户批准改 LobeChat 数据库） |
 | LobeChat | 浏览器工具 | 在跑 `lh connect` 的设备上装 [agent-browser](https://www.npmjs.com/package/agent-browser)（`npm i -g agent-browser`，再 `agent-browser install` 装测试用 Chrome），`lh connect restart` 后设备日志显示 “Browser tool enabled”。2026-11-23 端到端：`lh agent run --tool lobe-browser` 用 `qwen3.8-flash-next` 调用 navigate／readPage／snapshot／screenshot，答案正确 |
 | LobeChat | 决策 | 不支持：LobeChat 只对内置模型目录里的决策模型 ID 走 `/decisions`，自定义 ID 退化为 `/chat/completions` 模拟，而网关上的决策模型只提供 `/v1/decisions` 和 SystemOne，没有对话接口；用 MCP `decide` |
 | OpenClaw | 对话采样 | `agents.defaults.models["<provider>/qwen3.8-flash-next"].params.extra_body.top_k = 20`（同 Open WebUI） |

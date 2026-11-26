@@ -49,14 +49,15 @@ models:
           top_k?: 20
 
   # Weights archived 2026-11-22 to mac:/Volumes/SSD/model-archive/strata-uncensored (90.3 GiB, manifest
-  # ~/models/strata-uncensored.archive). bin/archive-restore starts the server at once when ~/models/strata-uncensored
-  # is complete; otherwise it copies it back (only if >100 GiB stays free afterwards), verifies SHA-256, then starts.
+  # ~/models/strata-uncensored.archive); restored to this Mac by archive-restore on 2026-11-26 (first request, copy
+  # verified against the manifest), so it is a normal local on-demand entry again. bin/archive-restore starts the server
+  # at once when ~/models/strata-uncensored is complete; otherwise it copies it back (only if >100 GiB stays free afterwards), verifies SHA-256, then starts.
   # While copying it reports {"progress"} on /health, which restarts healthCheckTimeout (600 s) on every change; when it
   # cannot restore it answers the request with a 503 error naming the space and the manual restore command.
   # Manual restore: ~/llm-serving/bin/archive-restore strata-uncensored
   "qwen3.8-flash-next-uncensored":
     name: "Qwen3.8 Flash-Next Uncensored"
-    description: "Navin AD-4.27 on Strata, 262144 ctx x 2 slots, compact Metal, MTP, Strata vision tower (weights archived, restored on demand)"
+    description: "Navin AD-4.27 on Strata, 262144 ctx x 2 slots, compact Metal, MTP, Strata vision tower"
     cmd: >
       ${env.LLM_SERVING}/bin/archive-restore --port ${PORT} --model strata-uncensored --model strata-mtp --
       ${env.LLM_SERVING}/.venv/bin/python ${env.STRATA_RELEASE}/terminal/serve/server.py
