@@ -151,6 +151,24 @@ docker exec openai-plan python /app/siwc.py status               # 不打印任�
 
 登录后验收（open-webui 容器里，模拟界面对话）：`for p in models chat image tool title; do docker exec -i open-webui python - $p < test_openai_plan.py; done`。
 如果 `tool` 报 `subscription_sharing_unsupported_capability`（tools），把 compose 里的 `SIWC_TOOL_MODE` 改成 `plain` 再 `docker compose up -d` 重测。
+多轮回放：`docker exec -i -e EFFORT1=medium open-webui python - multi < test_openai_plan_multi.py`（两轮界面对话，第二轮由 Open WebUI
+从数据库历史回放第一轮的 reasoning／函数调用）；`test_openai_plan_replay.py` 直接对代理发两次请求，检查同样的回放。
+
+2026-11-26 验收结果（gpt-6.2-sol，effort low，namespace 模式，代理未改动）：
+
+| 项 | 结果 |
+| --- | --- |
+| models | 10 个 `chatgpt.*`，显示名 `chatgpt.GPT-6.2-Sol` 等（前缀 + 套餐的 display_name） |
+| chat | 流式 44 个事件，长度各不相同，约 4 s |
+| image | 回答“红色”，约 3 s |
+| tool | 容器终端 `run_command` 真实执行，namespace 模式可用，约 5 s |
+| title | 非流式后台任务由代理聚合，约 2 s |
+| 多轮回放 | 第一轮（medium）产生带 `encrypted_content` 的 reasoning 和函数调用；第二轮回放后上游接受并再次调用工具 |
+| 可见性 | 没有模型记录，`BYPASS_MODEL_ACCESS_CONTROL` 未开，所以只有管理员能看到 |
+
+流式说明：Responses 类型的连接在 socket.io 上逐条转发原生 `response:completion` 事件（`response.output_text.delta`），
+`chat:completion` 只带开始和结束两次快照，所以检查流式要数前者（`test_openai_plan.py` 已改）。
+effort low 时简单问题的 reasoning tokens 是 0，不产生 reasoning 条目。
 
 登出：`docker exec openai-plan python /app/siwc.py logout`（吊销 refresh token，保留 client_id 和 host id）；也可以在 ChatGPT 设置里断开这个应用。
 
