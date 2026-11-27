@@ -1,0 +1,52 @@
+# OpenMOSS audio understanding via the existing mlx-audio MOSS model, with original BF16 weights.
+# Capacity covers the measured 600 s / ~16K token peak with headroom for serving (docs/performance.md).
+macros:
+  "moss-cmd": >
+    ${env.LLM_SERVING}/.venv/bin/python ${env.LLM_SERVING}/services/audio/moss/server.py --port ${PORT}
+
+models:
+  "moss-audio-8b-instruct":
+    name: "MOSS Audio 8B Instruct"
+    description: "Speech, environmental sound and music understanding"
+    cmd: ${moss-cmd} --model ${env.LLM_MODELS}/moss-audio-8b-instruct --model-id moss-audio-8b-instruct
+    env: &moss-env ["MLX_ZERO_COPY_LOAD=1", "HF_HUB_OFFLINE=1"]
+    capabilities: &moss-caps {in: [text, audio], out: [text], context: 16384, disableAuto: true}
+    checkEndpoint: /health
+    capacities: &moss-capacity {gpu: 22000}
+    evict_cost: 10
+    ttl: 1800
+
+  "moss-audio-8b-thinking":
+    name: "MOSS Audio 8B Thinking"
+    description: "Speech and environmental sound understanding with reasoning"
+    cmd: ${moss-cmd} --model ${env.LLM_MODELS}/moss-audio-8b-thinking --model-id moss-audio-8b-thinking
+    env: *moss-env
+    capabilities: *moss-caps
+    metadata: {reasoning: true}
+    checkEndpoint: /health
+    capacities: *moss-capacity
+    evict_cost: 10
+    ttl: 1800
+
+  "moss-music-8b-instruct":
+    name: "MOSS Music 8B Instruct"
+    description: "Music description, lyrics, musical structure and other audio queries"
+    cmd: ${moss-cmd} --model ${env.LLM_MODELS}/moss-music-8b-instruct --model-id moss-music-8b-instruct
+    env: *moss-env
+    capabilities: *moss-caps
+    checkEndpoint: /health
+    capacities: *moss-capacity
+    evict_cost: 10
+    ttl: 1800
+
+  "moss-music-8b-thinking":
+    name: "MOSS Music 8B Thinking"
+    description: "Music description, lyrics and musical analysis with reasoning"
+    cmd: ${moss-cmd} --model ${env.LLM_MODELS}/moss-music-8b-thinking --model-id moss-music-8b-thinking
+    env: *moss-env
+    capabilities: *moss-caps
+    metadata: {reasoning: true}
+    checkEndpoint: /health
+    capacities: *moss-capacity
+    evict_cost: 10
+    ttl: 1800

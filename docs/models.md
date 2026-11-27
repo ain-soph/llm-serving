@@ -50,6 +50,7 @@
 | `drex-v1.5` | 决策，9B | llama.cpp（nace-ai 分支） | Q8_0，KV F16 | 12,000 | +11,028 MiB | 按需 | 是 |
 | `qwen3-asr-1.7b` **（默认 ASR）** | 语音转写，词级时间戳 | mlx-audio fork | W8A16（8 位权重） | 6,500 | +4,599 MiB（含对齐器） | 按需 | 是 |
 | `whisper-large-v3` | 多语种转写 | mlx-whisper fork | 解码器 W8A16，编码器 FP16 | 4,500 | +3,198 MiB | 按需 | 是 |
+| `moss-audio-8b-instruct`／`-thinking`、`moss-music-8b-instruct`／`-thinking` | 音频与音乐理解，单路 16K | mlx-audio | BF16，KV BF16 | 各 22,000 | +18,700–18,744 MiB（600 秒音频） | 按需 | **否** |
 | `qwen3-tts`／`-clone`／`-design` | 语音合成 | mlx-audio fork | W8A16（group 32），BF16 激活 | 6,500／7,000／6,500 | +3,554／+4,876／+3,853 MiB（8 位，16 句） | 按需 | 是 |
 | `fish-drama-3` | 语音合成（多说话人、语气） | mlx-audio | 路由专家 8 位，其余 BF16 | 整个池 | +41,340 MiB | **独占** | **否** |
 | `minimax-h3-image` | 图片生成／编辑，单边 ≤ 4096 | h3-image-mlx fork | DiT 与文本编码器 INT8 ConvRot（W8A8），VAE FP16 | 10,000 | 约 2–6 GB（1024²–4096²），超长序列切片后 ≤ 8.3 GB | 按需 | 是 |

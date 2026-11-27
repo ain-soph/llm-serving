@@ -74,6 +74,11 @@
 !/services/asr/whisper/save_q8.py
 !/services/asr/whisper/serve-mlx.sh
 !/services/asr/whisper/server.py
+!/services/audio/
+/services/audio/*
+!/services/audio/moss/
+/services/audio/moss/*
+!/services/audio/moss/server.py
 !/services/decisions/
 /services/decisions/*
 !/services/decisions/decider/

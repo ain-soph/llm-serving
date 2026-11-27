@@ -1,6 +1,6 @@
 # llm-serving
 
-面向 Apple Silicon 的本地模型接口与部署工具：文本、嵌入、重排、决策、语音识别与合成、图片和视频，全部在一台 Mac 上运行（参数来自 **M5 Ultra、96 GiB 统一内存**）。主要文本后端是 **Strata Metal**。
+面向 Apple Silicon 的本地模型接口与部署工具：文本、嵌入、重排、决策、语音识别与合成、音频理解、图片和视频，全部在一台 Mac 上运行（参数来自 **M5 Ultra、96 GiB 统一内存**）。主要文本后端是 **Strata Metal**。
 
 每个模型都按同一流程部署：先对照官方实现确认正确，再测各阶段的速度、内存和磁盘，找瓶颈，然后优化。下面的[通用优化](#通用优化)和[各模型的优化](#各模型的优化)列出做了什么、带来多少收益；完整数字、测试条件和方法见 **[性能与资源报告](docs/performance.md)**。
 
@@ -26,6 +26,7 @@
 | 决策 | `drex-v1.5` | nace-ai llama.cpp 分支（未改） | 9B，文本，最长 16K token |
 | 语音转写 | `qwen3-asr-1.7b` | [mlx-audio fork](https://github.com/ain-soph/mlx-audio/tree/serving) + 自写引擎 | 默认；中文、中英混合、长音频；词级时间戳 |
 | 语音转写 | `whisper-large-v3` | [mlx-whisper fork](https://github.com/ain-soph/mlx-examples/tree/serving/whisper) | 多语种 |
+| 音频理解 | `moss-audio-8b-instruct`／`-thinking`、`moss-music-8b-instruct`／`-thinking` | mlx-audio | 语音、环境音与音乐理解，支持流式聊天接口，见[调用与安装](docs/moss-8b.md) |
 | 语音合成 | `qwen3-tts`、`-clone`、`-design` | [mlx-audio fork](https://github.com/ain-soph/mlx-audio/tree/serving) | 预设音色（含四川话、北京话）、声音克隆、声音设计；边生成边输出 |
 | 语音合成 | `fish-drama-3` | [mlx-audio fork](https://github.com/ain-soph/mlx-audio/tree/serving) | Fish Audio Drama 3（35B MoE，8 位）：文本内语气提示、多说话人、克隆；约 2.6 倍实时；独占入口；非商用许可 |
 | 图片生成／编辑 | `minimax-h3-image` | [h3-image-mlx fork](https://github.com/ain-soph/h3-image-mlx/tree/serving) | 单边最大 4096，超出返回 400；与聊天模型共存 |

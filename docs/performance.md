@@ -21,6 +21,7 @@
 | 决策 | `pplx-decider-flash` | MLX 移植 | 按层类：W8A8，down_proj／视觉塔 FP16；预量化存盘、零拷贝 | 短请求 23–47 ms；图片 0.17–0.51 s；2K／8K／32.6K token 0.20／0.82／5.64 s | wired 峰值 +8783 MiB（4096 MB 缓存）；只发文本时视觉塔不驻留 | 6.29 GB³ |
 | 决策 | `elephant-1` | MLX 移植 + 官方 OneJev | 按层类：W8A8，in_proj_z 用 8-bit 只量化权重；预量化存盘、零拷贝 | 短请求 0.078–0.084 s；16.3K token 3.16 s | wired 峰值 +8730 MiB | 11.07 GB⁵ |
 | 决策 | `mammoth-1` | 同上，27B | 按层类：W8A8，out_proj 用 8-bit 只量化权重；预量化存盘、零拷贝 | 短请求 0.20–0.21 s；16.3K token 8.9 s | wired 峰值 +27458 MiB（不能与聊天模型共存） | 29.69 GB⁵ |
+| 音频理解 | `moss-audio-8b-instruct`／`-thinking`、`moss-music-8b-instruct`／`-thinking` | mlx-audio | BF16，KV BF16 | prefill 1,597–1,757 tok/s（63–138 token）／3,811–4,417（约 16K），decode 42–50 tok/s | wired +18,700–18,744 MiB（600 秒、约 16K） | 18.105 GB／变体 |
 | 语音合成 | `qwen3-tts`／`-clone`／`-design` | mlx-audio fork | 8 位权重（W8A16，group 32，预量化、零拷贝），BF16 激活 | 首段音频 0.08–0.14 s；实时率 0.17／0.18／0.17（进程内，BF16 0.21–0.22） | wired +3554／+4876／+3853 MiB（16 句） | 7.19 GB⁴ |
 | 决策 | `drex-v1.5` | nace-ai llama.cpp 分支（未改） | Q8_0 GGUF（官方发布），KV F16 | 短请求 120–270 ms；12.8K token 4.3 s | wired 峰值 +11.0 GiB（`-ub 512`；2048 时 +12.5） | 9.5 GB |
 | 语音转写 | `qwen3-asr-1.7b`（默认） | mlx-audio fork + 自写引擎（`--fast --batch 8`） | 8 位存盘（W8A16，组 32，零拷贝），FP16 激活，KV FP16 | en100 11.0 s（进程内）／12.3 s（HTTP）；long_en（15.8 min）4.26 s；WER 1.48% | wired +4011–4462 MiB；MLX 峰值 4.59 GB | 2.65 + 1.04 GB（含对齐器） |
@@ -1284,6 +1285,20 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 本机模型目录逻辑大小合计 602.4 GB，其中不是部署所需的：`strata-ud-q4kxl` 对照权重 112.859 GB、joey-1 BF16 源 5.465 GB。数据卷（`df`）995 GB，已用 698 GB，可用 269 GB。
 
 视频 DiT 原始约 66.280 GB／检查点（当时逐张量报告），现 INT8 每份 23.914 GB（22.27 GiB），约省 42.366 GB（−63.9%）；只针对 DiT，不是整个视频目录。旧报告的“62 → 22 GB”混用了 GiB，以这里为准。
+
+## MOSS-Audio 与 MOSS-Music 8B
+
+2026-11-27，M5 Ultra，独占 GPU、并发 1、贪心解码。短输入用 2.206 秒语音（63 token）或 8 秒合成音乐（138 token），取第二次请求。长输入用 600 秒音频和文本填充（16,331 token）。权重、激活及 KV 缓存为 BF16，KV 保留完整精度。prefill 从音频嵌入准备就绪到首 token，decode 从首 token 到生成结束。
+
+| 模型 | 短 prefill / decode tok/s | 长 prefill / decode tok/s | 长输入 RSS / wired MiB | MLX 分配峰值 MiB（长） |
+| --- | ---: | ---: | ---: | ---: |
+| `moss-audio-8b-instruct` | 1,630 / 49.8 | 3,811 / 45.4 | 17,695 / +18,700 | 20,568 |
+| `moss-audio-8b-thinking` | 1,597 / 49.7 | 4,217 / 43.9 | 17,695 / +18,726 | 20,568 |
+| `moss-music-8b-instruct` | 1,757 / 50.5 | 4,417 / 46.5 | 17,694 / +18,743 | 20,568 |
+| `moss-music-8b-thinking` | 1,726 / 42.1 | 4,408 / 42.1 | 17,783 / +18,744 | 20,568 |
+
+- 与 OpenMOSS PyTorch FP32／MPS 基线的输入 token 完全一致。Audio 两变体的完整短样本逐 token 一致（9／15 个，含 EOS），Music 两变体的首 16 个 token 一致。按表顺序，首 token logits 的中心化余弦相似度为 0.999328／0.998870／0.999576／0.997200，平均绝对误差为 0.0694／0.0931／0.1420／0.2290。
+- 在 Audio Instruct 上试验 Q8_0 语言主干（8 位权重加分组缩放与偏置，FP16 激活及 KV，音频塔 FP16）。短样本逐 token 一致，热态 decode 49.8 → 92.3 tok/s，长输入 MLX 峰值 20,568 → 13,769 MiB。长输入解码结果有措辞差异，且候选峰值高于 Flash-Next 同驻可用的 12,532 MiB。上线使用原版 BF16 检查点，每个变体一份权重，单独预约 22,000 MiB。
 
 ## 测量方法与口径
 
