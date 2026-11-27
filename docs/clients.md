@@ -26,6 +26,70 @@
 | OpenClaw | 视频 | 不能原生接：OpenClaw（2026.11.6）的 `video_generate` 只有内置的云厂商提供方，不能指向自定义的 OpenAI `/v1/videos` 端点；用 MCP `generate_video` |
 | 任何 MCP 客户端 | 工具 | `clients/mcp/server.py`（见下） |
 
+## Open WebUI 终端（Machines，2026-11-26）
+
+Open WebUI 0.13.5 的 Machines（原 Terminal Server）接了两个 [Open Terminal](https://github.com/open-webui/open-terminal)（0.18.7）。
+对话输入框的终端选择器里每个对话选一个；两个都只有管理员可用（连接的 `access_grants` 为空）。
+
+| 终端 | 用途 | 位置 | 确认 |
+| --- | --- | --- | --- |
+| **容器终端**（id `container`） | **默认、优先用**：写代码、跑脚本、pip / git、处理文件 | Mac mini 容器 `open-terminal`（官方镜像，按 digest 固定），工作目录 = 宿主 `~/docker/data/ai/workspace`（容器内 `~/workspace`） | 不用确认，模型可连续多步调用 |
+| **Mac mini 本机**（id `mac-mini`） | 只在需要改 Mac mini 本机（Homebrew、launchd、`~/docker` 配置等）时手动选 | 宿主原生进程，以登录用户身份运行（没有加 sudo 权限），只监听 `127.0.0.1:8722` | **每次调用都要点“批准”** |
+
+- 三个对话模型（`qwen3.8-flash-next`、`-uncensored`、`hy4-flash`）的默认终端 `meta.machineId = container`：新对话自动选容器终端；
+  选了终端的新对话里 Code Interpreter 默认关闭（Open WebUI 的设计，终端取代它），需要时在对话里再打开。
+- **确认方式**：Open WebUI 只有“每个对话一个”审批模式（full / ask / auto），没有按工具或按终端的设置。
+  `chat.tool_permissions.enable = true`，auto 关闭，所以界面默认仍是 full（生图等其他工具和以前一样不用确认）；
+  全局过滤函数 `machine_approval_guard`（active + global）在请求选的是 `mac-mini` 时把该轮改成 ask，用户在对话里选了 full 也一样。
+  批准、续跑、子代理、自动化都经同一个对话入口，都受它管。
+- **容器终端的隔离**：uid 1000、无任何 capability、`no-new-privileges`（镜像里 user 的免密 sudo 因此失效）、根文件系统只读、
+  不挂 docker.sock、不映射宿主端口；可写的只有 `~/workspace`（唯一的宿主目录）、`/home/user`（命名卷 `open-terminal-home`，
+  `pip install --user`、git 配置、缓存都在这里，重建容器不丢）和 `/tmp`（tmpfs 1 GB）；限 2 CPU、3 GB 内存、512 进程。
+  网络：容器加入 `netguard` 小容器的网络命名空间；`netguard` 只在 docker 网络 `owui-terminal` 上（另一个成员是 open-webui），
+  只有它有 NET_ADMIN，用 iptables 拒绝终端发起的、去往私有 / 宿主 / 局域网 / 保留网段的新连接，公网放行，IPv6 关闭。
+  这样做的原因：Open WebUI 信任自己 8080 端口上的 `X-authentik-email` 请求头（认证由 SWAG + Authentik 做），
+  能直连 open-webui:8080 的进程就能冒充管理员；终端和 open-webui 在同一网络，所以必须在网络层挡住。
+  2026-11-26 实测：open-webui、`ipv6` 网络上的 lobechat / authentik-postgresql / swag / llm-mcp、宿主（含本机终端端口）、
+  局域网全部连不上，iptables 改不了；pypi、github 可以访问。
+- **本机终端**：uv 建的独立 venv（不碰系统 Python）；desktop / browser 关闭（macOS 上 desktop 默认就是控制真实桌面）；
+  `claude`、`codex`、`hermes` 等编码 agent 的发现被关掉（`OPEN_TERMINAL_*_COMMAND=/usr/bin/false`），否则它们会作为模型出现，
+  在宿主上直接运行而不经过逐次确认。局域网其他机器连不上（只绑 loopback），容器终端也连不上（防火墙）；open-webui 经 OrbStack
+  的 `host.docker.internal` 访问。launchd 下的进程没有“完全磁盘访问”，碰不到桌面、文稿、下载等受保护目录。
+
+文件（Mac mini；本仓库外的部署副本在 `clients/open-terminal/`，不公开）：
+
+| 项 | 位置 |
+| --- | --- |
+| 容器终端 compose / 防火墙 | `~/docker/compose/ai/open-terminal/{compose.yaml,netguard.sh}` |
+| 容器终端 key | `~/docker/config/open-terminal/open-terminal.env`（600；Open WebUI 连接里存同一个） |
+| open-webui compose | `~/docker/compose/ai/open-webui/compose.yaml`：多加网络 `owui-terminal`（镜像仍是 `:main`，watchtower 照常更新） |
+| 本机终端 | `~/.local/share/open-terminal-host/{venv,run.sh}`，key `~/.config/open-terminal-host/api-key`（600） |
+| 本机终端 LaunchAgent | `~/Library/LaunchAgents/com.local.open-terminal-host.plist`，日志 `~/Library/Logs/open-terminal-host/` |
+| Open WebUI 设置 | `clients/open-webui/set_terminals.py`（show / backup / apply / rollback）、过滤函数 `machine_approval_guard.py`、验收 `test_terminals.py` |
+
+启停：
+
+```sh
+# 容器终端
+cd ~/docker/compose/ai/open-terminal && docker compose up -d      # 停：docker compose down（工作目录、home 卷保留）
+# 本机终端
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.local.open-terminal-host.plist   # 启动
+launchctl bootout  gui/$(id -u)/com.local.open-terminal-host                                  # 停止
+```
+
+只想暂时禁用某个终端：管理员设置 → Machines 里关掉该连接。改 netguard 规则后要 `docker compose up -d --force-recreate`
+（两个容器一起重建：终端共享 netguard 的网络命名空间）。
+
+回滚（全部可逆）：
+
+1. Open WebUI：`docker exec -i open-webui python - rollback < set_terminals.py`（删两个连接、`tool_permissions.enable` 恢复原值、
+   删过滤函数、模型去掉 `machineId`）；备份 `/app/backend/data/{config-backup,model-backup}-20261126-terminals.json`、
+   `webui.db.20261126-terminals`。
+2. 本机终端：`launchctl bootout …` 后删 plist 和 `~/.local/share/open-terminal-host`、`~/.config/open-terminal-host`。
+3. 容器终端：`docker compose down -v`（`-v` 连 home 卷一起删；工作目录 `~/docker/data/ai/workspace` 不会被删）。
+4. open-webui 网络：`docker network disconnect owui-terminal open-webui`，compose 换回同目录的 `compose.yaml.bak-20261126-terminals`，
+   最后 `docker network rm owui-terminal`。
+
 ## Qwen-Image ControlNet（2026-11-24）
 
 三个 qwen-image 入口（`qwen-image-2.1-turbo`、`-turbo-pe`、`qwen-image-2.1`）接受两个可选字段，不带时输出与以前逐字节相同，客户端的默认设置都不变：
