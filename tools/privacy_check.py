@@ -17,15 +17,15 @@ RULES = {
 FORBIDDEN = {".env", ".api_key", "api_key", "AGENTS.md", "WORKLOG.md", "serving-values.json", "serving.env",
              "private-literals", "llm-collab.local.env"}
 EXTENSIONS = {".py", ".md", ".json", ".toml", ".lock", ".sh", ".yaml", ".yml", ".txt", ".metal", ".jsonl",
-              ".sb", ".rules", ".plist"}  # .sb/.rules: the local worker's sandbox profile and Codex execpolicy
+              ".sb", ".rules", ".plist", ".swift"}  # .sb/.rules: the local worker's sandbox profile and Codex execpolicy
 
 
 # The MCP server code is published (neutral defaults, configured by environment); its deployment files are not.
 PUBLIC_IN_PRIVATE_DIRS = {"clients/mcp/server.py", "clients/mcp/requirements.txt", "clients/mcp/Dockerfile",
                           "clients/mcp-tests/mcp_call.py"}
 PRIVATE_DIRS = {".venv", ".local", "logs", "outputs", "media", "models", "reports", "clients", "mcp"}
-# Extension-less public files that are sourced rather than executed.
-PUBLIC_NAMES = {"platform/agent-bridge/llm-collab.env"}
+# Public files with fixed names outside the source and data extension list.
+PUBLIC_NAMES = {"platform/agent-bridge/llm-collab.env", "services/tts/indextts/Package.resolved"}
 # Directories whose executables (with a #! line) are published.
 SCRIPT_DIRS = {("tools",), ("bin",), ("platform", "agent-bridge")}
 

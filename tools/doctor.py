@@ -70,6 +70,8 @@ def main():
     values = install_serving.load_values(Path.home())
     binaries.update({"strata": values["STRATA_EXE"], "strata-vision": values["STRATA_VISION_EXE"],
                      "strata-hy4-metal": values["HY4_RELEASE"] + "/build-hy4/bin/strata-hy4-metal"})
+    if (LSW / "conf.d/indextts.yaml").is_file():
+        binaries["indextts-worker"] = str(ROOT / ".local/build/indextts-2.5/out/Products/Release/indextts-worker")
     for name, path in binaries.items():
         if not path or not Path(path).is_file() or not os.access(path, os.X_OK):
             errors.append(f"Missing executable: {name}")

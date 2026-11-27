@@ -1,4 +1,4 @@
-# 语音合成：Qwen3-TTS 与 Fish Audio Drama 3
+# 语音合成
 
 服务 `services/tts/server.py` 用 mlx-audio fork（commit 固定在 `uv.lock`）运行 Qwen3-TTS 12Hz 1.7B（Apache-2.0；2026-11-23 起用预量化的 8 位权重），
 接口 `POST /v1/audio/speech`（OpenAI 字段，音频边生成边发送）和 `GET /v1/audio/voices`。路由模板：`platform/llama-swap/conf.d/tts.yaml`。
@@ -50,6 +50,44 @@ done
 hf download mlx-community/fish-audio-drama-3-8bit --revision fedc7cc9 --local-dir "$HOME/models/fish-audio-drama-3-8bit"   # 39 GiB
 # 内置提示音（可选）：services/tts/voices/voices.json 写 {"zh": {"wav": "zh.wav", "text": "<转写>"}, ...}，wav 放同目录
 ```
+
+## IndexTTS 2.5
+
+`indextts-2.5` 使用 Swift MLX 运行 [IndexTeam IndexTTS 2.5 的 FP16 转换权重](https://huggingface.co/mlx-community/IndexTTS-2.5-fp16)，以 `POST /v1/audio/speech` 提供参考音频克隆。语言可设为 `zh`、`en`、`ja`、`es`、`ar` 或 `auto`。模型原生输出 22,050 Hz，支持 TTS 服务的 WAV、MP3、FLAC、Opus、AAC、PCM 与 SSE。
+
+上传 1–15 秒参考音频，`ref_audio` 接受 Base64 或音频 data URL。可选的 `emotion` 接受情绪名称或八个权重，顺序为 happy、angry、sad、afraid、disgusted、melancholic、surprised、calm。权重总和最多 1，`emo_alpha` 控制强度，默认 0.6。选择 `speed` 或 `duration_factor` 之一，取值范围 0.5–2.0。发音标注写在原文中，如 `银<行|HANG2>`。可用 `seed` 固定随机种子。
+
+```python
+import base64
+import os
+from pathlib import Path
+
+import requests
+
+reference = base64.b64encode(Path("reference.wav").read_bytes()).decode()
+response = requests.post(
+    "http://127.0.0.1:8080/v1/audio/speech",
+    headers={"Authorization": f"Bearer {os.environ['LLM_API_KEY']}"},
+    json={
+        "model": "indextts-2.5",
+        "input": "明天上午九点在图书馆见面。",
+        "ref_audio": reference,
+        "language": "zh",
+        "emotion": "calm",
+        "response_format": "wav",
+    },
+    timeout=120,
+)
+response.raise_for_status()
+Path("speech.wav").write_bytes(response.content)
+```
+
+```sh
+hf download mlx-community/IndexTTS-2.5-fp16 --revision 65644cd70da15309ffeb74aa03f3686bb04e3eb1 --local-dir "${LLM_MODELS:-$HOME/models}/indextts-2.5-mlx"
+.venv/bin/python tools/native.py indextts
+```
+
+模型许可为 bilibili Model Use License Agreement。Swift 构建产物与 Metal 资源包保存在 `.local/build/indextts-2.5/out/Products/Release/`。引擎使用 `native.lock.json` 与 `services/tts/indextts/Package.resolved` 的固定版本。llama-swap 在第一个请求时启动 worker，空闲 1800 秒后卸载。
 
 ## CosyVoice3（2026-11-18 下线）
 

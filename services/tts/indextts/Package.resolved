@@ -1,0 +1,59 @@
+{
+  "originHash" : "754139709e4009f2925cea96eeb305636ed3307ee4f93b039afd19745f497ecf",
+  "pins" : [
+    {
+      "identity" : "designscaffold",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/xocialize/DesignScaffold",
+      "state" : {
+        "revision" : "4e44017bbfb1c445aabbe85687f0a1a00ba193f2",
+        "version" : "0.26.0"
+      }
+    },
+    {
+      "identity" : "mlx-audio-dsp",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/xocialize/mlx-audio-dsp.git",
+      "state" : {
+        "revision" : "73823a16924363e2be7fa5f10ed767d1f7ffd9ae",
+        "version" : "0.1.0"
+      }
+    },
+    {
+      "identity" : "mlx-engine-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/xocialize/mlx-engine-swift",
+      "state" : {
+        "revision" : "20d109208155ede672340e22477c3fa7ff5e1972",
+        "version" : "0.81.0"
+      }
+    },
+    {
+      "identity" : "mlx-indextts2-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/xocialize/mlx-indextts2-swift",
+      "state" : {
+        "revision" : "1b8298b3d5eb8f2e6835cab08203c97f43e00e61"
+      }
+    },
+    {
+      "identity" : "mlx-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/xocialize/mlx-swift",
+      "state" : {
+        "revision" : "4650bd13ac20acdd80396efbca52c6f336e6ceb2",
+        "version" : "0.32.4"
+      }
+    },
+    {
+      "identity" : "swift-numerics",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-numerics",
+      "state" : {
+        "revision" : "0c0290ff6b24942dadb83a929ffaaa1481df04a2",
+        "version" : "1.1.1"
+      }
+    }
+  ],
+  "version" : 3
+}

@@ -22,6 +22,7 @@
 | 决策 | `elephant-1` | MLX 移植 + 官方 OneJev | 按层类：W8A8，in_proj_z 用 8-bit 只量化权重；预量化存盘、零拷贝 | 短请求 0.078–0.084 s；16.3K token 3.16 s | wired 峰值 +8730 MiB | 11.07 GB⁵ |
 | 决策 | `mammoth-1` | 同上，27B | 按层类：W8A8，out_proj 用 8-bit 只量化权重；预量化存盘、零拷贝 | 短请求 0.20–0.21 s；16.3K token 8.9 s | wired 峰值 +27458 MiB（不能与聊天模型共存） | 29.69 GB⁵ |
 | 音频理解 | `moss-audio-8b-instruct`／`-thinking`、`moss-music-8b-instruct`／`-thinking` | mlx-audio | BF16，KV BF16 | prefill 1,597–1,757 tok/s（63–138 token）／3,811–4,417（约 16K），decode 42–50 tok/s | wired +18,700–18,744 MiB（600 秒、约 16K） | 18.105 GB／变体 |
+| 语音合成 | `indextts-2.5` | Swift MLX | FP16；w2v-BERT FP32 | 短句热态约 1.99 s；34.66 s 输出耗时 17.98 s（RTF 0.52） | 压测 MLX 峰值 8,861 MiB，wired 增量 +4,629 MiB | 4.48 GB |
 | 语音合成 | `qwen3-tts`／`-clone`／`-design` | mlx-audio fork | 8 位权重（W8A16，group 32，预量化、零拷贝），BF16 激活 | 首段音频 0.08–0.14 s；实时率 0.17／0.18／0.17（进程内，BF16 0.21–0.22） | wired +3554／+4876／+3853 MiB（16 句） | 7.19 GB⁴ |
 | 决策 | `drex-v1.5` | nace-ai llama.cpp 分支（未改） | Q8_0 GGUF（官方发布），KV F16 | 短请求 120–270 ms；12.8K token 4.3 s | wired 峰值 +11.0 GiB（`-ub 512`；2048 时 +12.5） | 9.5 GB |
 | 语音转写 | `qwen3-asr-1.7b`（默认） | mlx-audio fork + 自写引擎（`--fast --batch 8`） | 8 位存盘（W8A16，组 32，零拷贝），FP16 激活，KV FP16 | en100 11.0 s（进程内）／12.3 s（HTTP）；long_en（15.8 min）4.26 s；WER 1.48% | wired +4011–4462 MiB；MLX 峰值 4.59 GB | 2.65 + 1.04 GB（含对齐器） |
@@ -1299,6 +1300,25 @@ fork 把零拷贝加载／页对齐保存和缓存上限收进 MLX 本体，下�
 
 - 与 OpenMOSS PyTorch FP32／MPS 基线的输入 token 完全一致。Audio 两变体的完整短样本逐 token 一致（9／15 个，含 EOS），Music 两变体的首 16 个 token 一致。按表顺序，首 token logits 的中心化余弦相似度为 0.999328／0.998870／0.999576／0.997200，平均绝对误差为 0.0694／0.0931／0.1420／0.2290。
 - 在 Audio Instruct 上试验 Q8_0 语言主干（8 位权重加分组缩放与偏置，FP16 激活及 KV，音频塔 FP16）。短样本逐 token 一致，热态 decode 49.8 → 92.3 tok/s，长输入 MLX 峰值 20,568 → 13,769 MiB。长输入解码结果有措辞差异，且候选峰值高于 Flash-Next 同驻可用的 12,532 MiB。上线使用原版 BF16 检查点，每个变体一份权重，单独预约 22,000 MiB。
+
+## 语音合成 IndexTTS 2.5
+
+2026-11-27，M5 Ultra，独占 GPU，并发 1。英语和中文短句使用同一参考音频，长句为五句英语。发布使用预转换 FP16 权重（w2v-BERT FP32）、Swift MLX 和编解码器的原生语速控制。
+
+| 后端 | 英语短句 s／音频 s | 中文短句 s／音频 s | 五句英语 s／音频 s |
+| --- | ---: | ---: | ---: |
+| 官方 PyTorch FP32／MPS | 15.07 / 2.55 | 2.67 / 2.51 | 18.47 / 10.38 |
+| Swift MLX FP16，线上采样参数 | 9.30 / 2.59 | 1.99 / 2.51 | 7.81 / 11.61 |
+| audio.cpp Metal GGUF Q8_0 | 2.20 / 2.39 | 1.06 / 2.71 | 3.02 / 9.86 |
+
+英语短句包含首请求 Metal 冷开销。Swift MLX 长句首段 2.97 s。以 Whisper Large V3 对参考与线上采样输出做回写，三个样本归一化转写一致。FP16 贪心对照的一条英语短句重复末尾数字，默认采样参数在本组未复现。
+
+| Swift MLX GPT 权重 | 输入长度 | prefill tok/s | decode 声学码/s | 说明 |
+| --- | ---: | ---: | ---: | --- |
+| FP16 | 15 token | 712 | 67.7 | 85 个声学码，热态，FP32 条件与 KV |
+| 8-bit affine（试验） | 15 token | 1,601 | 180.7 | 85 个声学码，热态，FP32 条件与 KV |
+
+慢速按语速折算分段长度。15 秒参考、0.5 倍速、3 段中文压力用例共输出 34.66 秒，耗时 17.98 秒，首段 7.23 秒，RSS 峰值 4,483 MiB，MLX 分配峰值 8,861 MiB。llama-swap 预约 10,500 MiB。
 
 ## 测量方法与口径
 

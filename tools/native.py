@@ -68,8 +68,9 @@ def cmake(source, build, flags, targets, jobs):
 
 
 def build(name, jobs):
-    src = checkout(name)
+    src = LOCAL / "build/indextts-2.5" if name == "indextts" else checkout(name)
     commands = []
+    env = dict(os.environ)
     if name == "strata":
         # upstream layout: engine/metal (ggml vendored, Strata's own CPU quant layer), terminal/tools/vision (own tower)
         headers = metal_headers()
@@ -91,6 +92,22 @@ def build(name, jobs):
         run(["make", "-j", jobs, "h3", "h3_pack_int8"], src)
         products = [src / "h3", src / "h3_pack_int8"]
         commands = [["make", "h3", "h3_pack_int8"]]
+    elif name == "indextts":
+        package = ROOT / "services/tts/indextts"
+        resolved = json.loads((package / "Package.resolved").read_text())
+        spec = LOCK["sources"][name]
+        pin, = (entry for entry in resolved["pins"] if entry["identity"] == "mlx-indextts2-swift")
+        if pin["location"] != spec["url"] or pin["state"]["revision"] != spec["revision"]:
+            raise RuntimeError("IndexTTS SwiftPM pin differs from native.lock.json")
+        xcode = Path("/Applications/Xcode.app/Contents/Developer")
+        if xcode.is_dir():
+            env.setdefault("DEVELOPER_DIR", str(xcode))
+        flags = ["swift", "build", "--package-path", str(package), "--scratch-path", str(src),
+                 "--build-system", "swiftbuild", "--configuration", "release", "--product", "indextts-worker",
+                 "--jobs", str(jobs), "--only-use-versions-from-resolved-file"]
+        run(flags, env=env)
+        products = [src / "out/Products/Release/indextts-worker"]
+        commands = [flags]
     else:
         run(["cmake", "--preset", "metal-server"], src)
         run(["cmake", "--build", "--preset", "metal-server", "--parallel", jobs], src)
@@ -104,7 +121,9 @@ def build(name, jobs):
     versions = {}
     for tool, args in {"clang": ["xcrun", "clang", "--version"], "sdk": ["xcrun", "--show-sdk-version"],
                        "cmake": ["cmake", "--version"], "ninja": ["ninja", "--version"]}.items():
-        versions[tool] = subprocess.check_output(args, text=True).splitlines()[0]
+        versions[tool] = subprocess.check_output(args, text=True, env=env).splitlines()[0]
+    if name == "indextts":
+        versions["swift"] = subprocess.check_output(["swift", "--version"], text=True, env=env).splitlines()[0]
     manifest = {"source": LOCK["sources"][name], "architecture": platform.machine(),
                 "macos": platform.mac_ver()[0], "tools": versions, "flags": commands, "products": records,
                 "runtime_assets": "Keep the full pinned checkout and build directories, including shaders and dylibs"}
@@ -114,7 +133,7 @@ def build(name, jobs):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("component", choices=["strata", "h3", "nemo", "all"])
+    parser.add_argument("component", choices=["strata", "h3", "indextts", "nemo", "all"])
     parser.add_argument("--jobs", type=int, default=min(os.cpu_count() or 4, 12))
     a = parser.parse_args()
     if platform.system() != "Darwin" or platform.machine() != "arm64":
@@ -126,7 +145,7 @@ def main():
             parser.error(f"Missing {tool}; run bootstrap.sh and install Apple Command Line Tools")
     run(["xcrun", "--find", "clang"])
     # "all" = the engines in service; nemo (Nemotron ASR, retired 2026-11-18) only when named
-    for name in (["strata", "h3"] if a.component == "all" else [a.component]):
+    for name in (["strata", "h3", "indextts"] if a.component == "all" else [a.component]):
         build(name, a.jobs)
 
 

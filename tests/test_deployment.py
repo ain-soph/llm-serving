@@ -81,6 +81,9 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("private/runtime file", ok(Path("platform/agent-bridge/llm-collab.local.env"), b"X=1\n"))
         self.assertIn("unexpected file type", ok(Path("bin/tool"), b"no shebang\n"))
         self.assertIn("unexpected file type", ok(Path("services/x/tool.bin.in"), b"\n"))
+        self.assertEqual(ok(Path("services/tts/indextts/Sources/main.swift"), b"import Foundation\n"), [])
+        self.assertEqual(ok(Path("services/tts/indextts/Package.resolved"), b"{}\n"), [])
+        self.assertIn("unexpected file type", ok(Path("services/x/Package.resolved"), b"{}\n"))
 
     def test_agent_files_pass_privacy_rules(self):
         self.assertEqual(privacy_check.inspect_file(Path("platform/agent-bridge/local-worker/run"), b"#!/bin/zsh\n"), [])

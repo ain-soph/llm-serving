@@ -138,6 +138,16 @@
 !/services/text/strata/configs/strata-uncensored-c262k-p2-compact.json.in
 !/services/tts/
 /services/tts/*
+!/services/tts/indextts/
+/services/tts/indextts/*
+!/services/tts/indextts/Package.swift
+!/services/tts/indextts/Package.resolved
+!/services/tts/indextts/Sources/
+/services/tts/indextts/Sources/*
+!/services/tts/indextts/Sources/IndexTTSServing/
+/services/tts/indextts/Sources/IndexTTSServing/*
+!/services/tts/indextts/Sources/IndexTTSServing/main.swift
+!/services/tts/indextts/server.py
 !/services/tts/save_q8.py
 !/services/tts/server.py
 !/services/video/

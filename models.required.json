@@ -38,7 +38,8 @@
     "moss-audio-8b-instruct",
     "moss-audio-8b-thinking",
     "moss-music-8b-instruct",
-    "moss-music-8b-thinking"
+    "moss-music-8b-thinking",
+    "indextts-2.5-mlx"
   ],
   "files": [
     "strata-mtp/mtp-q2_0.gguf",
@@ -131,6 +132,13 @@
     "moss-music-8b-thinking/model-00001-of-00004.safetensors",
     "moss-music-8b-thinking/model-00002-of-00004.safetensors",
     "moss-music-8b-thinking/model-00003-of-00004.safetensors",
-    "moss-music-8b-thinking/model-00004-of-00004.safetensors"
+    "moss-music-8b-thinking/model-00004-of-00004.safetensors",
+    "indextts-2.5-mlx/gpt.safetensors",
+    "indextts-2.5-mlx/codec.safetensors",
+    "indextts-2.5-mlx/s2mel.safetensors",
+    "indextts-2.5-mlx/bigvgan.safetensors",
+    "indextts-2.5-mlx/model.safetensors",
+    "indextts-2.5-mlx/multilingual_zh_ja_yue_char_del.tiktoken",
+    "indextts-2.5-mlx/LICENSE"
   ]
 }

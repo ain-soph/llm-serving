@@ -28,6 +28,7 @@
 | 语音转写 | `whisper-large-v3` | [mlx-whisper fork](https://github.com/ain-soph/mlx-examples/tree/serving/whisper) | 多语种 |
 | 音频理解 | `moss-audio-8b-instruct`／`-thinking`、`moss-music-8b-instruct`／`-thinking` | mlx-audio | 语音、环境音与音乐理解，支持流式聊天接口，见[调用与安装](docs/moss-8b.md) |
 | 语音合成 | `qwen3-tts`、`-clone`、`-design` | [mlx-audio fork](https://github.com/ain-soph/mlx-audio/tree/serving) | 预设音色（含四川话、北京话）、声音克隆、声音设计；边生成边输出 |
+| 语音合成 | `indextts-2.5` | Swift MLX | 参考音频克隆，中英日西阿五语，情绪、原生语速和发音控制。见[调用与安装](docs/tts.md#indextts-25) |
 | 语音合成 | `fish-drama-3` | [mlx-audio fork](https://github.com/ain-soph/mlx-audio/tree/serving) | Fish Audio Drama 3（35B MoE，8 位）：文本内语气提示、多说话人、克隆；约 2.6 倍实时；独占入口；非商用许可 |
 | 图片生成／编辑 | `minimax-h3-image` | [h3-image-mlx fork](https://github.com/ain-soph/h3-image-mlx/tree/serving) | 单边最大 4096，超出返回 400；与聊天模型共存 |
 | 图片生成／编辑 | `minimax-h3-image-pe` | 同上 + mlx-vlm 跑官方 [MiniMax-H3-Image-PE](https://huggingface.co/MiniMaxAI/MiniMax-H3-Image-PE) | 可选：先用官方提示词扩写，返回 `revised_prompt`；扩写时卸下聊天模型² |
@@ -206,7 +207,7 @@ cd ~/llm-serving
 `Brewfile` 统一安装 **Homebrew Python 3.15**、uv、Caddy、llama-swap、llama.cpp、FFmpeg、CMake、Ninja。uv 使用 Homebrew 的 Python 3.15 创建项目唯一的 `.venv`：**线上只有这一个环境**，所有 Python 服务使用同一个解释器；开发新模型时用它自己的 `.venv-dev`，上线时并进来。`pyproject.toml` 只写版本下限，`uv.lock` 精确锁定全部依赖，包括各 fork 的完整 commit。
 在 `~/llm-serving` 下没有自己 `pyproject.toml` 的子目录里运行 `uv run`／`uv sync` 会同步这个线上环境；实验目录用自己的项目或 `uv run --no-project`。
 
-原生引擎从 `native.lock.json` 的完整 commit 构建到 `.local/src/`。编译后的可执行文件、动态库、Metal shader 和构建信息留在同一个本地构建树，不能只搬一个可执行文件。
+原生引擎按 `native.lock.json` 固定版本构建，IndexTTS 另用 SwiftPM 锁文件固定依赖，编译需要 Xcode。编译后的可执行文件、动态库、Metal shader 和构建信息留在同一个本地构建树，不能只搬一个可执行文件。
 
 本机取值写在 `.local/serving-values.json`（不进库；缺省时：权重在 `~/models`，Strata 用 `native.py` 的构建，网关前没有受信代理）：
 

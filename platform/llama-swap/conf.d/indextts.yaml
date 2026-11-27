@@ -1,0 +1,15 @@
+# IndexTTS 2.5 in Swift MLX, with the shared TTS HTTP transport.
+models:
+  "indextts-2.5":
+    name: "IndexTTS 2.5"
+    description: "Reference-audio voice cloning in Chinese, English, Japanese, Spanish and Arabic"
+    cmd: >-
+      ${env.LLM_SERVING}/.venv/bin/python ${env.LLM_SERVING}/services/tts/indextts/server.py
+      --port ${PORT}
+      --worker ${env.LLM_SERVING}/.local/build/indextts-2.5/out/Products/Release/indextts-worker
+      --model ${env.LLM_MODELS}/indextts-2.5-mlx
+    capabilities: {in: [text], out: [audio], disableAuto: true}
+    checkEndpoint: /health
+    capacities: {gpu: 10500}  # 8,861 MiB MLX peak at 15 s reference and 0.5x rate; docs/performance.md
+    evict_cost: 10
+    ttl: 1800
