@@ -102,7 +102,15 @@ mcp = MCPServer(
         "in this chat are used automatically when a file argument is left empty (list_attachments shows them). "
         "Videos take minutes and use the GPU exclusively: agree on the content, length and quality with the user, "
         "tell them the expected time, then call the tool once. Model arguments may be left empty for the default; "
-        "list_models shows what is available right now."),
+        "list_models shows what is available right now. "
+        "Showing media in the chat (Open WebUI renders only these forms; anything else appears as raw HTML text): "
+        "images as markdown ![image](URL). Speech from speak is saved in the chat as /api/v1/files/<id>/content: call "
+        "display_file with that path when you have that tool (a playable card; then do not repeat the file in your "
+        "reply), otherwise write the line <div><audio>URL</audio></div>. Videos (this server's /media/... .mp4 links, "
+        "which display_file cannot open): write the line <div><video>URL</video></div>. Each such line stands alone, "
+        "with a blank line before and after it, not inside a list; the URL goes between the tags. Never write "
+        "<audio controls src=...> or a bare <video>URL</video> line: Open WebUI ignores the src attribute and splits a "
+        "tag that is not wrapped in <div>, so the user sees only source code."),
 )
 
 
@@ -329,7 +337,10 @@ def fallback_note(job):
 def video_done_text(job):
     page, file = links(job["id"])
     return (f"Video ready: {describe_video(job)}.\n{fallback_note(job)}"
-            f"To show it in the chat, put this line on its own line in your reply: <video>{file}</video>\n"
+            f"To show the player in the chat, put this exact line in your reply, alone, with a blank line before and "
+            f"after it (not inside a list): <div><video>{file}</video></div>\n"
+            f"Keep the <div>: a bare <video> line or a src= attribute shows as raw text in Open WebUI, and "
+            f"display_file cannot open /media/ links.\n"
             f"Watch/download page: {page} (download: {file}).\n"
             f"Tell the user what was made, give the page link, and offer to continue it: extend_video adds up to about "
             f"12 s per step from a description of what happens next (keep the id {job['id']}).")
@@ -841,8 +852,12 @@ async def speak(text: str, voice: str = "", instructions: str = "", model: str =
     out = [Audio(data=mp3, format="mpeg")]
     url = await owui_upload(ctx, mp3, f"speech-{int(time.time())}.mp3", "audio/mpeg")
     if url:
-        out.append(f"Speech ready (~{seconds:.0f} s, MP3), saved in this chat: {url}. To let the user play it, put "
-                   f"<audio controls src=\"{url}\"></audio> on its own line in your reply.")
+        out.append(f"Speech ready (~{seconds:.0f} s, MP3), saved in this chat: {url}. To let the user play it, call "
+                   f"display_file with path \"{url}\" (Open WebUI's built-in tool: a playable card; then do not repeat "
+                   f"the file in your reply). If you have no display_file tool, put this exact line in your reply, "
+                   f"alone, with a blank line before and after it: <div><audio>{url}</audio></div>\n"
+                   f"Never write <audio controls src=...>: Open WebUI ignores the src attribute and shows the tag as "
+                   f"raw text.")
     else:
         out.append(f"Speech ready (~{seconds:.0f} s, MP3), attached above as audio.")
     return out

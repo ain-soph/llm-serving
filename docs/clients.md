@@ -226,6 +226,18 @@ curl -s http://127.0.0.1:8080/v1/images/edits -H "Authorization: Bearer $KEY" -F
 | `decide` | `/v1/decisions`（或 SystemOne） | `elephant-1`（能与聊天模型共存）；`joey-1`（2B，最快，也能共存，16K token 约 0.95 s）；`mammoth-1` 会卸下聊天模型 |
 | `generate_image`／`edit_image` | `/v1/images/*` | `prompt_enhance`、`background=transparent` 只对 `qwen-image-*` 生效，返回 `revised_prompt` |
 
+**在 Open WebUI 里显示媒体**（0.13.5 实测/核对源码，2026-11-27；工具返回文案和 MCP `instructions` 都按此写）：
+`HTMLToken.svelte` 只把**标签之间的文字**当作地址（`src=` 属性被忽略），而且只有整段 HTML 作为一个块传给它时才出播放器；
+`audio`／`video` 不在 CommonMark 的块级 HTML 列表里，单独一行的 `<video>URL</video>` 会被拆成三段、原样显示（上游
+issue open-webui#34074）。所以：
+
+- 图片：markdown `![image](URL)`。
+- `speak` 的语音：MP3 存进对话文件库（`/api/v1/files/<id>/content`），模型调用 Open WebUI 内置工具 `display_file`
+  显示可播放的文件卡片（模型开着内置工具时才有这个工具）；没有时写一行 `<div><audio>URL</audio></div>`。
+  MCP 返回里的音频内容 Open WebUI 只接受 WAV，MP3 会被丢掉，不能靠它出播放器。
+- 视频（`/media/<id>.mp4`，不在对话文件库里，`display_file` 打不开）：写一行 `<div><video>URL</video></div>`。
+- 这类行要单独成段（前后空一行，不放在列表里）；两行紧挨着时只有第一行生效。不要写 `<audio controls src=…>`。
+
 环境变量：`LLAMA_SWAP_URL`（网关，默认 `http://127.0.0.1:8080`）、`LLAMA_SWAP_KEY`、`MCP_TOKENS`（逗号分隔，每个客户端一个）、
 `PUBLIC_BASE`（媒体链接前缀）、`ALLOWED_HOSTS`、`INPUT_HOSTS`（允许下载输入文件的内网主机）、`API_BASES`（`list_models`
 里给出的 HTTP API 地址）、`SEARXNG_URL`；与 Open WebUI 的附件联动另需 `OWUI_URL`、`OWUI_API_KEY`、`CONTEXT_TOKENS`。
