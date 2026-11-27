@@ -237,6 +237,9 @@ issue open-webui#34074）。所以：
   MCP 返回里的音频内容 Open WebUI 只接受 WAV，MP3 会被丢掉，不能靠它出播放器。
 - 视频（`/media/<id>.mp4`，不在对话文件库里，`display_file` 打不开）：写一行 `<div><video>URL</video></div>`。
 - 这类行要单独成段（前后空一行，不放在列表里）；两行紧挨着时只有第一行生效。不要写 `<audio controls src=…>`。
+- 视频管道 `minimax_h3_video`（直接选“MiniMax H3 视频”模型，不经聊天模型）v1.2.2 起也输出这种行（地址是对话文件库的
+  `/api/v1/files/<id>/content`）。聊天模型里的视频工具只有 MCP 的 `generate_video`／`extend_video`／`get_video`：早期的
+  Open WebUI 原生工具 `minimax_h3_video_tool` 是 MCP 上线前的过渡品，2026-11-27 已删除。
 
 环境变量：`LLAMA_SWAP_URL`（网关，默认 `http://127.0.0.1:8080`）、`LLAMA_SWAP_KEY`、`MCP_TOKENS`（逗号分隔，每个客户端一个）、
 `PUBLIC_BASE`（媒体链接前缀）、`ALLOWED_HOSTS`、`INPUT_HOSTS`（允许下载输入文件的内网主机）、`API_BASES`（`list_models`
