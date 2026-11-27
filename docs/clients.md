@@ -90,6 +90,78 @@ launchctl bootout  gui/$(id -u)/com.local.open-terminal-host                    
 4. open-webui 网络：`docker network disconnect owui-terminal open-webui`，compose 换回同目录的 `compose.yaml.bak-20261126-terminals`，
    最后 `docker network rm owui-terminal`。
 
+## Open WebUI：ChatGPT 套餐（Sign in with ChatGPT，2026-11-26）
+
+用 OpenAI 官方的 [Sign in with ChatGPT 套餐额度](https://developers.openai.com/siwc/token-sharing-open-source)
+（OAuth scope `chatgpt.tokens.use.direct`）在 Open WebUI 里用 ChatGPT 订阅里的模型。这是 OpenAI 给开源、个人自托管工具的公开流程：
+首次登录时动态注册 client（`client_id=dynamic_agent_client`），不需要 API key 和审批；推理走公开的 `POST /v1/responses`。
+
+```
+Open WebUI（第 2 个 OpenAI 连接，API 类型 Responses，前缀 chatgpt）
+  → http://openai-plan:8000/v1（Mac mini 容器 openai-plan，docker 网络 owui-openai）
+  → https://api.openai.com/v1/responses（Bearer = 用户的 SIWC access token）
+```
+
+- **为什么中间要有代理**：Open WebUI 有 Responses 连接类型，但直连过不去：access token 一小时过期，而连接里的 key 是静态的；
+  这条套餐通道要求每个请求都是 `store:false` + `stream:true`，Open WebUI 的标题／标签等后台请求却是非流式的，还会带上不支持的字段
+  （`max_output_tokens`、`temperature`、`metadata`、任务参数里的 `chat_template_kwargs` 等）；`/v1/models` 返回的是 `{"models":[{slug,…}]}`
+  而不是 `{"data":[{id}]}`；函数工具要放进 namespace。代理只做这几件事：换上新 token（刷新串行，轮换后的 refresh token 原子写入 600 文件），
+  强制 `store:false` / `stream:true`（非流式调用方拿到 `response.completed` 里的完整响应），只保留支持的顶层字段，
+  `reasoning_effort` → `reasoning.effort`，`reasoning.summary=auto`（界面显示思考摘要），请求加密的 reasoning 以便 `store:false` 下回放，
+  去掉回放条目的 id、`system` → `developer`，函数工具收进一个 namespace（`SIWC_TOOL_MODE=plain` 可关掉），改写模型列表，把套餐错误码转成中文提示。
+  只接受 `/v1/responses`（连接必须是 Responses 类型）。代码 `clients/openai-plan/siwc.py`（只用标准库，不公开）。
+- **可见性**：不建模型记录，所以 `chatgpt.*` 模型只有管理员看得到；不改默认模型（仍是 Flash-Next）、不改任务模型、不改其他连接。
+  条款要求套餐只用于本人的请求，所以不要把这些模型共享给其他用户或群组。
+- **能力**：流式输出；文字、图片（data URL）、文件输入；原生函数调用（终端、MCP 等 Open WebUI 工具）；推理强度用高级参数里的 `reasoning_effort`。
+  不支持：OpenAI 托管工具（生图、文件检索、Code Interpreter、托管 MCP、computer use）、音视频输入、`temperature` / `top_p` / `max_tokens`（代理会丢掉）。
+- **额度**：Plus 的 5 小时额度与其他用套餐的应用共用，Pro 只受每周额度限制；可在 [ChatGPT 设置 → Usage](https://chatgpt.com/settings/usage)
+  给这个应用设每周上限。超限时对话里显示“ChatGPT 套餐额度已到上限…”（`subscription_sharing_usage_limit_exceeded`，429），不会自动转成按量计费。
+- **后台任务**：任务模型为空，等于用当前对话模型（见上表“任务模型”一行），所以 ChatGPT 对话的标题、标签、追问也发给同一个 ChatGPT 模型，
+  会占少量套餐额度。如果不想这样，可以在管理员设置 → 界面里关掉追问；或者把外部任务模型设成某个本地模型，但这会影响所有对话
+  （11-26 撤掉的就是这种设置：会把 uncensored 换出去）。
+- **隔离**：容器官方 `python:slim`（不固定，watchtower 跟随最新 Python）、uid 1000、无 capability、`no-new-privileges`、只读根、不挂 docker.sock、
+  不映射端口；`owui-openai` 网络里只有 open-webui 和它。容器终端连不到它（2026-11-26 实测：域名解析不到，IP 也被拒）。
+  凭据在 Mac mini `~/docker/config/openai-plan/siwc/credentials.json`（600），用户账号下的进程可读，本机终端（`mac-mini`，每次调用都要确认）也包括在内。
+
+文件（Mac mini；部署副本在 `clients/openai-plan/`，不公开）：
+
+| 项 | 位置 |
+| --- | --- |
+| compose + 代码 | `~/docker/compose/ai/openai-plan/{compose.yaml,siwc.py}` |
+| 代理 key | `~/docker/config/openai-plan/openai-plan.env`（600；Open WebUI 连接里存同一个） |
+| SIWC 凭据 | `~/docker/config/openai-plan/siwc/`（700）：`host.json`（本机 `ext_agent_host_id`）、`credentials.json`（600）、`pending.json`（进行中的登录） |
+| open-webui compose | 多加网络 `owui-openai`（备份 `compose.yaml.bak-20261126-openai-plan`） |
+| Open WebUI 设置 / 验收 | `clients/open-webui/set_openai_plan.py`（show / backup / apply / rollback）、`test_openai_plan.py`（models / chat / image / tool / title） |
+
+登录（一次；refresh token 30 天，每次刷新都会续期，代理空闲时每周刷新一次保持会话）：
+
+```sh
+# 以下都在 Mac mini 上运行（OrbStack 的 docker 在 ~/.orbstack/bin）
+# 交互式（需要终端）：
+docker exec -it openai-plan python /app/siwc.py login
+# 两步式（不需要交互终端，可以由 agent 代跑；链接 24 小时有效）：
+docker exec openai-plan python /app/siwc.py login-start          # 打印链接
+#   浏览器打开链接 → 登录 ChatGPT → 同意“使用 ChatGPT 套餐” → 页面跳到 http://127.0.0.1:1455/auth/callback?…（打不开，正常）
+docker exec -i openai-plan python /app/siwc.py login-finish <<< '<复制的整串地址>'
+docker exec openai-plan python /app/siwc.py status               # 不打印任何 token
+```
+
+回调地址固定是 `127.0.0.1`（OpenAI 的要求），在哪台设备的浏览器上登录都一样：页面打不开，复制地址栏里的地址即可。
+地址里的授权码只能用一次、几分钟内过期，而且离开 Mac mini 上保存的 PKCE verifier 就用不了。
+
+登录后验收（open-webui 容器里，模拟界面对话）：`for p in models chat image tool title; do docker exec -i open-webui python - $p < test_openai_plan.py; done`。
+如果 `tool` 报 `subscription_sharing_unsupported_capability`（tools），把 compose 里的 `SIWC_TOOL_MODE` 改成 `plain` 再 `docker compose up -d` 重测。
+
+登出：`docker exec openai-plan python /app/siwc.py logout`（吊销 refresh token，保留 client_id 和 host id）；也可以在 ChatGPT 设置里断开这个应用。
+
+回滚：
+
+1. Open WebUI：`docker exec -i open-webui python - rollback < set_openai_plan.py`（删掉第 2 个连接；全量配置备份
+   `/app/backend/data/config-backup-20261126-openai-plan.json`）。
+2. 先登出，再 `cd ~/docker/compose/ai/openai-plan && docker compose down`，删除 `~/docker/config/openai-plan`。
+3. 网络：`docker network disconnect owui-openai open-webui`，open-webui compose 换回 `compose.yaml.bak-20261126-openai-plan`，
+   最后 `docker network rm owui-openai`。
+
 ## Qwen-Image ControlNet（2026-11-24）
 
 三个 qwen-image 入口（`qwen-image-2.1-turbo`、`-turbo-pe`、`qwen-image-2.1`）接受两个可选字段，不带时输出与以前逐字节相同，客户端的默认设置都不变：
